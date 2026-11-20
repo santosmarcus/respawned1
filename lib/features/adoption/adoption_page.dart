@@ -45,6 +45,10 @@ class Animal {
   /// Description per photo, keyed by URL.
   final Map<String, String> photoCaptions;
 
+  /// Set when an independent rescuer (not a shelter) cares for the animal:
+  /// their name, shown as "Independent rescuer · name".
+  final String? independentRescuerName;
+
   Animal({
     required this.id,
     this.animalRecordId = '',
@@ -69,6 +73,7 @@ class Animal {
     this.photoUrl,
     this.photoUrls = const [],
     this.photoCaptions = const {},
+    this.independentRescuerName,
   });
 }
 
@@ -150,6 +155,7 @@ Animal animalRecordToCard(AnimalRecord r, int index) {
     photoUrl: r.photoUrls.isNotEmpty ? r.photoUrls.first : null,
     photoUrls: r.photoUrls,
     photoCaptions: r.photoCaptions,
+    independentRescuerName: r.raw['ownerKind'] == 'independent' ? (r.raw['ownerName'] as String? ?? '') : null,
   );
 }
 

@@ -323,7 +323,10 @@ class _UserDocRouterState extends State<_UserDocRouter> with WidgetsBindingObser
           case 'ngo_staff':
           case 'admin':
             return const AdminHomeScreen();
+          // Rescue volunteers carry rescues like transporters and send the
+          // same documents (their old application form is gone).
           case 'pet_transporter':
+          case 'rescue_volunteer':
             final verificationStatus =
                 data?['transporterVerificationStatus'] as String? ?? '';
             if (verificationStatus.isEmpty) {
@@ -333,8 +336,6 @@ class _UserDocRouterState extends State<_UserDocRouter> with WidgetsBindingObser
                 phone: data?['phone'] as String? ?? '',
               );
             }
-            return const ServiceScreen();
-          case 'rescue_volunteer':
             return const ServiceScreen();
           case 'organization':
             final organizationId = data?['organizationId'] as String?;

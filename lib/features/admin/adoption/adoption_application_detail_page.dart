@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 
+import 'package:respawnd1/core/utils/current_org_kind.dart';
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/core/models/adoption/adoption_application.dart';
 import 'package:respawnd1/core/models/adoption/adoption_fit_assessment.dart';
@@ -186,6 +187,19 @@ class _AdoptionApplicationDetailPageState extends ConsumerState<AdoptionApplicat
     _noteController.clear();
   }
 
+  /// The viewer's organization is an independent rescuer (interview
+  /// optional). Loaded once.
+  bool _interviewOptional = false;
+  bool _kindLoaded = false;
+
+  void _loadKindOnce() {
+    if (_kindLoaded) return;
+    _kindLoaded = true;
+    currentOrgIsIndependent().then((v) {
+      if (mounted && v) setState(() => _interviewOptional = true);
+    });
+  }
+
   Future<void> _accept(AdoptionApplication app) async {
     final confirmed =
         await showConfirmActionDialog(context, title: 'Accept Application?', message: 'This moves the application to Approved.', confirmLabel: 'Accept');
@@ -307,6 +321,7 @@ class _AdoptionApplicationDetailPageState extends ConsumerState<AdoptionApplicat
   /// section widgets are each placed exactly once — inside the current-step
   /// card when they are this phase's work, otherwise further down.
   Widget _buildBody(AdoptionApplication app) {
+    _loadKindOnce();
     final status = app.status;
     // While the application is still being reviewed, the review material
     // starts open; once it has moved on it is reference, so it starts
@@ -332,6 +347,7 @@ class _AdoptionApplicationDetailPageState extends ConsumerState<AdoptionApplicat
       onReserve: () => _reserve(app),
       onUnreserve: () => _unreserve(app),
       onRelease: () => _release(app),
+      interviewOptional: _interviewOptional,
     );
 
     return Column(
@@ -1375,6 +1391,10 @@ class _ActionsSection extends ConsumerWidget {
   final VoidCallback onReserve;
   final VoidCallback onUnreserve;
   final VoidCallback onRelease;
+
+  /// An independent rescuer: the interview is optional, so a pending
+  /// application can be accepted straight away.
+  final bool interviewOptional;
   const _ActionsSection({
     required this.app,
     required this.busy,
@@ -1384,6 +1404,7 @@ class _ActionsSection extends ConsumerWidget {
     required this.onReserve,
     required this.onUnreserve,
     required this.onRelease,
+    this.interviewOptional = false,
   });
 
   @override
@@ -1440,10 +1461,27 @@ class _ActionsSection extends ConsumerWidget {
       case AdoptionStatus.pending:
         // Pending → Interview: staff confirm the slot the applicant booked.
         final booked = app.appointmentDate != null;
-        return _decisionRow(
-          hint: booked ? null : 'Waiting for the applicant to book an interview.',
+        final row = _decisionRow(
+          hint: booked
+              ? null
+              : interviewOptional
+                  ? 'The interview is optional for independent rescuers. Accept now, or wait for the applicant to book one.'
+                  : 'Waiting for the applicant to book an interview.',
           primaryLabel: 'Confirm Interview',
           onPrimary: (busy || !booked) ? null : onConfirmInterview,
+        );
+        if (!interviewOptional) return row;
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            row,
+            const SizedBox(height: 8),
+            OutlinedButton(
+              onPressed: busy ? null : onAccept,
+              style: AppButtons.outline,
+              child: const Text('Accept Without Interview'),
+            ),
+          ],
         );
       case AdoptionStatus.interview:
         final canAccept = app.interviewCompletedAt != null;

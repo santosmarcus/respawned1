@@ -10,6 +10,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:respawnd1/core/utils/current_org_kind.dart';
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/core/models/rescue/pet_transporter.dart';
 import 'package:respawnd1/core/models/rescue/rescue_status.dart';
@@ -210,6 +211,22 @@ class _AssignRiderPageState extends ConsumerState<AssignRiderPage> {
   /// Ticks the pending panel's elapsed/expiry labels once a second.
   Timer? _ticker;
 
+  /// The account belongs to an independent rescuer, who may bring the
+  /// animal to the clinic themselves at any point (shelters only once no
+  /// transporter can be found).
+  bool _isIndependent = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadOrgKind();
+  }
+
+  Future<void> _loadOrgKind() async {
+    final independent = await currentOrgIsIndependent();
+    if (mounted && independent) setState(() => _isIndependent = true);
+  }
+
   @override
   void dispose() {
     _ticker?.cancel();
@@ -284,10 +301,14 @@ class _AssignRiderPageState extends ConsumerState<AssignRiderPage> {
   Future<void> _organizationWillTransport() async {
     final confirmed = await showConfirmActionDialog(
       context,
-      title: 'Organization will transport?',
-      message: 'Your organization will bring the animal to the selected clinic itself, without a transporter. '
-          'The case moves to Ongoing; confirm arrival on Rescue Details to start treatment.',
-      confirmLabel: 'We Will Transport',
+      title: _isIndependent ? 'Bring it yourself?' : 'Organization will transport?',
+      message: _isIndependent
+          ? 'You or someone on your team brings the animal to the selected clinic, without a transporter. '
+              'The case moves to Ongoing; confirm arrival on Rescue Details to start treatment. '
+              "If the trip can't be finished, switch to a transporter from Rescue Details."
+          : 'Your organization will bring the animal to the selected clinic itself, without a transporter. '
+              'The case moves to Ongoing; confirm arrival on Rescue Details to start treatment.',
+      confirmLabel: _isIndependent ? "I'll Bring It" : 'We Will Transport',
       cancelLabel: 'Back',
     );
     if (confirmed != true || !mounted) return;
@@ -297,10 +318,13 @@ class _AssignRiderPageState extends ConsumerState<AssignRiderPage> {
         caseId: widget.caseId,
         actorUid: _actorUid,
         actorName: _actorName,
+        byChoice: _isIndependent,
       );
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        appSnackBar('Recorded: your organization is transporting this animal.'),
+        appSnackBar(_isIndependent
+            ? 'Recorded: your team is bringing this animal to the clinic.'
+            : 'Recorded: your organization is transporting this animal.'),
       );
       Navigator.pop(context);
     } catch (e) {
@@ -347,7 +371,8 @@ class _AssignRiderPageState extends ConsumerState<AssignRiderPage> {
             onPressed: _fallbackBusy ? null : _organizationWillTransport,
             style: AppButtons.outline,
             icon: const Icon(Icons.directions_car_outlined, size: 18),
-            label: Text('Organization Will Transport', style: GoogleFonts.zain(fontWeight: FontWeight.w700)),
+            label: Text(_isIndependent ? "I'll Bring It Myself" : 'Organization Will Transport',
+                style: GoogleFonts.zain(fontWeight: FontWeight.w700)),
           ),
           const SizedBox(height: 4),
           TextButton(
@@ -1056,6 +1081,14 @@ class _AssignRiderPageState extends ConsumerState<AssignRiderPage> {
         !fallbackDismissed &&
         shouldOfferNoTransporterFallback(searchExhausted: searchExhausted, failedOfferCount: failedOffers);
 
+    // Independent rescuers choose up front: bring it themselves, or pick a
+    // transporter below. Needs the clinic saved first (awaitingAssignment).
+    final showSelfTransport = _isIndependent &&
+        !showFallback &&
+        RescueStatus.fromFirestoreValue(d['status'] as String?) == RescueStatus.awaitingAssignment &&
+        blockingOffer == null &&
+        acceptedAssignment == null;
+
     final highRisk = highRiskAnimalsIn(
       animals: d['animals'] as List?,
       legacyBiteRisk: d['biteRisk'] as String?,
@@ -1344,6 +1377,18 @@ class _AssignRiderPageState extends ConsumerState<AssignRiderPage> {
             ],
 
             const SizedBox(height: 8),
+
+            if (showSelfTransport)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
+                child: OutlinedButton.icon(
+                  onPressed: _fallbackBusy ? null : _organizationWillTransport,
+                  style: AppButtons.outline,
+                  icon: const Icon(Icons.directions_car_outlined, size: 18),
+                  label: Text("I'll Bring It Myself — or pick a transporter below",
+                      style: GoogleFonts.zain(fontWeight: FontWeight.w700)),
+                ),
+              ),
 
             // Transporter list — fixed order (see _buildRiderVms): demo
             // transporters pinned above the real-Available group only while

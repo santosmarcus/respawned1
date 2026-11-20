@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 
+import 'package:respawnd1/core/models/organization/org_permission.dart';
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/core/repos/organization_repository.dart';
 import 'package:respawnd1/core/utils/app_date_format.dart';
@@ -202,7 +203,12 @@ class _OrganizationSection extends StatelessWidget {
             children: [
               _SectionTitle(
                 name == null || name.isEmpty ? 'Unnamed organization' : name,
-                subtitle: snap.hasData ? '${roster.length} ${roster.length == 1 ? 'person' : 'people'}' : null,
+                subtitle: snap.hasData
+                    ? [
+                        if (d['kind'] == 'independent') _independentSummary(d),
+                        '${roster.length} ${roster.length == 1 ? 'person' : 'people'}',
+                      ].join(' · ')
+                    : null,
                 trailing: _orgStatusChip(status),
               ),
               if (snap.hasError) const _Note('Could not load this organization\'s members.'),
@@ -224,6 +230,18 @@ class _OrganizationSection extends StatelessWidget {
       },
     );
   }
+}
+
+/// "Independent rescuer · 1/3 cases · 2/5 animals" (kept by
+/// functions/independent_rescuers.js), plus "Paused" when they are.
+String _independentSummary(Map<String, dynamic> d) {
+  int n(String k, int fallback) => (d[k] as num?)?.toInt() ?? fallback;
+  return [
+    'Independent rescuer',
+    '${n('activeCaseCount', 0)}/${n('maxActiveCases', IndependentRescuer.maxActiveCases)} cases',
+    '${n('animalsInCareCount', 0)}/${n('maxAnimalsInCare', IndependentRescuer.maxAnimalsInCare)} animals',
+    if (d['acceptingCases'] == false) 'Paused',
+  ].join(' · ');
 }
 
 Widget _orgStatusChip(OrgVerificationStatus s) => switch (s) {

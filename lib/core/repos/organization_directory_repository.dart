@@ -1,5 +1,8 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 
+import 'package:geolocator/geolocator.dart';
+import 'package:respawnd1/core/models/organization/org_permission.dart';
+import 'package:respawnd1/core/repos/organization_repository.dart' show ServiceArea;
 import 'package:respawnd1/core/models/rescue/org_referral_candidate.dart';
 
 /// Search support for the "Refer to Another Organization" modal. Reads the
@@ -23,13 +26,19 @@ class OrganizationDirectoryRepository {
   /// have more than one animal via its `animals[]` array). An organization
   /// matches if it accepts any one of them, or accepts everything — never
   /// filtered down to just the first animal's species.
+  ///
+  /// Shelters and rescue groups only: independent rescuers are offered
+  /// through [independentsNear] (Refer → Rescue Volunteer).
   Future<List<OrgReferralCandidate>> search({
     String? nameQuery,
     List<String>? species,
     int limit = 30,
   }) async {
     final snap = await _organizations.limit(200).get();
-    var results = snap.docs.map(OrgReferralCandidate.fromFirestore).toList();
+    var results = snap.docs
+        .where((d) => d.data()['kind'] != 'independent')
+        .map(OrgReferralCandidate.fromFirestore)
+        .toList();
 
     if (nameQuery != null && nameQuery.trim().isNotEmpty) {
       final q = nameQuery.trim().toLowerCase();
@@ -46,6 +55,36 @@ class OrganizationDirectoryRepository {
     }
 
     return results.take(limit).toList();
+  }
+
+  /// Approved independent rescuers whose coverage circle contains
+  /// ([lat], [lng]), nearest first, with how much room each has. Those at
+  /// capacity or paused are listed last and can't be picked
+  /// ([IndependentCandidate.refusal]).
+  Future<List<IndependentCandidate>> independentsNear({required double lat, required double lng}) async {
+    final snap = await _organizations
+        .where('kind', isEqualTo: 'independent')
+        .where('verificationStatus', isEqualTo: 'approved')
+        .get();
+    final out = <IndependentCandidate>[];
+    for (final doc in snap.docs) {
+      final d = doc.data();
+      double? best;
+      for (final raw in (d['serviceAreas'] as List? ?? const []).whereType<Map>()) {
+        final a = ServiceArea.fromMap(Map<String, dynamic>.from(raw));
+        if (!a.hasGeofence) continue;
+        final r = a.radiusKm!.clamp(IndependentRescuer.minRadiusKm, IndependentRescuer.maxRadiusKm);
+        final km = Geolocator.distanceBetween(lat, lng, a.lat!, a.lng!) / 1000;
+        if (km <= r && (best == null || km < best)) best = km;
+      }
+      if (best == null) continue;
+      out.add(IndependentCandidate.fromOrg(doc.id, d, distanceKm: best));
+    }
+    out.sort((a, b) {
+      if ((a.refusal == null) != (b.refusal == null)) return a.refusal == null ? -1 : 1;
+      return a.distanceKm.compareTo(b.distanceKm);
+    });
+    return out;
   }
 
   /// Resolves the Intake flow's destination, in priority order: an
@@ -159,4 +198,58 @@ class OrganizationDirectoryRepository {
       'temporaryShelterUpdatedAt': FieldValue.serverTimestamp(),
     }, SetOptions(merge: true));
   }
+}
+
+/// An independent rescuer offered for a referral.
+class IndependentCandidate {
+  const IndependentCandidate({
+    required this.id,
+    required this.name,
+    required this.area,
+    required this.distanceKm,
+    required this.activeCases,
+    required this.maxActiveCases,
+    required this.animalsInCare,
+    required this.maxAnimalsInCare,
+    required this.accepting,
+    this.avatarUrl,
+  });
+
+  factory IndependentCandidate.fromOrg(String id, Map<String, dynamic> d, {required double distanceKm}) {
+    int n(String k, int fallback) => (d[k] as num?)?.toInt() ?? fallback;
+    return IndependentCandidate(
+      id: id,
+      name: (d['name'] as String?)?.trim() ?? '',
+      area: (d['location'] as String?)?.trim() ?? '',
+      avatarUrl: d['avatarUrl'] as String?,
+      distanceKm: distanceKm,
+      activeCases: n('activeCaseCount', 0),
+      maxActiveCases: n('maxActiveCases', IndependentRescuer.maxActiveCases),
+      animalsInCare: n('animalsInCareCount', 0),
+      maxAnimalsInCare: n('maxAnimalsInCare', IndependentRescuer.maxAnimalsInCare),
+      accepting: d['acceptingCases'] != false,
+    );
+  }
+
+  final String id;
+  final String name;
+  final String area;
+  final String? avatarUrl;
+  final double distanceKm;
+  final int activeCases;
+  final int maxActiveCases;
+  final int animalsInCare;
+  final int maxAnimalsInCare;
+  final bool accepting;
+
+  /// Why they can't take a referral now, or null.
+  String? get refusal {
+    if (!accepting) return 'Paused';
+    if (activeCases >= maxActiveCases) return 'At case limit ($activeCases/$maxActiveCases)';
+    if (animalsInCare >= maxAnimalsInCare) return 'Full ($animalsInCare/$maxAnimalsInCare animals)';
+    return null;
+  }
+
+  String get room => '${maxActiveCases - activeCases} case slot(s) · '
+      '${maxAnimalsInCare - animalsInCare} animal space(s)';
 }

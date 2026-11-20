@@ -81,6 +81,7 @@ Future<bool> isStaffOfOrganization(String? orgId) async {
     uid: uid,
     ownerId: org.data()?['ownerId'] as String?,
     member: member.exists ? (member.data() ?? const {}) : null,
+    org: org.data(),
   );
   return caps.canManageRescues || caps.canManageRecords;
 }

@@ -45,7 +45,8 @@ class TransporterApplicationRepository {
     final trimmed = note?.trim();
     final userRef = _db.collection('users').doc(uid);
     final user = await userRef.get();
-    final isTransporter = user.exists && user.data()?['role'] == 'pet_transporter';
+    // Rescue volunteers verify through the same documents.
+    final isTransporter = user.exists && const ['pet_transporter', 'rescue_volunteer'].contains(user.data()?['role']);
     if (approve && !isTransporter) {
       throw TransporterReviewException(user.exists
           ? 'This account is no longer a pet transporter, so it can\'t be verified. '

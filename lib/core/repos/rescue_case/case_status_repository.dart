@@ -2,6 +2,8 @@
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 
+import 'package:respawnd1/core/models/organization/org_permission.dart';
+import 'package:respawnd1/core/models/rescue/case_claim_rules.dart';
 import 'package:respawnd1/core/models/rescue/closure_reason.dart';
 import 'package:respawnd1/core/models/rescue/rejection_reason.dart';
 import 'package:respawnd1/core/models/rescue/rescue_case.dart';
@@ -25,6 +27,12 @@ class CaseStatusRepository {
   /// [organizationId] is the accepting organization — it becomes the case's
   /// owner (`cases/{id}.organizationId`). A referred case re-stamps it when
   /// the receiving organization accepts.
+  ///
+  /// Runs in a transaction so the first organization to accept wins: it
+  /// re-reads the case (and the accepting organization) and throws
+  /// [CaseClaimException] if someone else already owns it, or an independent
+  /// rescuer may not take it yet (caseClaimRefusal). firestore.rules refuses
+  /// re-stamping an owned case too.
   Future<void> acceptCase({
     required String caseId,
     required String actorUid,
@@ -33,28 +41,48 @@ class CaseStatusRepository {
     bool openForTransfer = false,
     Map<String, dynamic>? readinessSnapshot,
   }) async {
-    await _store.recordAction(
-      caseId: caseId,
-      statusLine: openForTransfer
-          ? 'Rescue case has been accepted and marked open for transfer to another organization.'
-          : 'Rescue case has been accepted.',
-      fields: {
-        if (organizationId != null && organizationId.isNotEmpty)
-          'organizationId': organizationId,
-        // Readiness factors and the admin's note as seen at acceptance.
-        'readinessSnapshot': ?readinessSnapshot,
-        // Stops at RescueStatus.accepted (clinic not yet chosen) rather than
-        // jumping straight to awaitingAssignment — the case stays visible
-        // under Rescue Review until assignClinic actually saves a clinic and
-        // advances it. See rescue_status.dart's firestoreValue doc comment.
-        'status': RescueStatus.accepted.firestoreValue,
-        'openForTransfer': openForTransfer,
-      },
-      action: 'accepted',
-      actorUid: actorUid,
-      actorName: actorName,
-      details: {'openForTransfer': openForTransfer},
-    );
+    final myOrgId = organizationId ?? '';
+    await _store.db.runTransaction((tx) async {
+      final caseSnap = await tx.get(_store.caseDoc(caseId));
+      final orgSnap = myOrgId.isEmpty
+          ? null
+          : await tx.get(_store.db.collection('organizations').doc(myOrgId));
+      final refusal = myOrgId.isEmpty
+          ? null
+          : caseClaimRefusal(
+              caseData: caseSnap.data() ?? const {},
+              myOrgId: myOrgId,
+              org: orgSnap?.data(),
+              now: DateTime.now(),
+            );
+      if (refusal != null) throw refusal;
+      _store.recordActionIn(
+        tx,
+        caseId: caseId,
+        statusLine: openForTransfer
+            ? 'Rescue case has been accepted and marked open for transfer to another organization.'
+            : 'Rescue case has been accepted.',
+        fields: {
+          if (myOrgId.isNotEmpty) 'organizationId': myOrgId,
+          // Who owns it: an independent rescuer's case skips the shelter leg
+          // (statusAfterTreatmentAccepted) and is labelled for the reporter.
+          if (OrgKind.fromName(orgSnap?.data()?['kind'] as String?) == OrgKind.independent)
+            'ownerKind': OrgKind.independent.name,
+          // Readiness factors and the admin's note as seen at acceptance.
+          'readinessSnapshot': ?readinessSnapshot,
+          // Stops at RescueStatus.accepted (clinic not yet chosen) rather than
+          // jumping straight to awaitingAssignment — the case stays visible
+          // under Rescue Review until assignClinic actually saves a clinic and
+          // advances it. See rescue_status.dart's firestoreValue doc comment.
+          'status': RescueStatus.accepted.firestoreValue,
+          'openForTransfer': openForTransfer,
+        },
+        action: 'accepted',
+        actorUid: actorUid,
+        actorName: actorName,
+        details: {'openForTransfer': openForTransfer},
+      );
+    });
   }
 
   Future<void> rejectCase({

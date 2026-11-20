@@ -68,6 +68,7 @@ class _StaffMembersPageState extends State<StaffMembersPage> {
 
   /// The organization's owner: always an Admin, never edited or removed.
   String? _ownerId;
+  Map<String, dynamic>? _orgData;
 
   // Guards double-tap on the SAME invitation's Accept/Reject — a different
   // invitation's buttons stay usable while one is in flight.
@@ -103,6 +104,7 @@ class _StaffMembersPageState extends State<StaffMembersPage> {
         _isOrgAdmin = capabilities.canManageTeam;
         _canManageMembers = capabilities.canManageMembers;
         _ownerId = org.data()?['ownerId'] as String?;
+        _orgData = org.data();
       });
     }
   }
@@ -149,12 +151,33 @@ class _StaffMembersPageState extends State<StaffMembersPage> {
     return 'Organization';
   }
 
+  /// What the organization has at all: null (everything) for a shelter.
+  Set<OrgPermission>? get _available =>
+      OrgKind.fromName(_orgData?['kind'] as String?) == OrgKind.independent ? orgEnabledPermissions(_orgData) : null;
+
   Future<void> _openAddMemberSheet() async {
     if (!_isOrgAdmin) return;
+    // An independent rescuer's team is capped (firestore.rules refuses the
+    // invitation too).
+    if (OrgKind.fromName(_orgData?['kind'] as String?) == OrgKind.independent) {
+      final count = (_orgData?['memberCount'] as num?)?.toInt() ?? 1;
+      final cap = (_orgData?['memberCap'] as num?)?.toInt() ?? IndependentRescuer.memberCap;
+      if (count >= cap) {
+        ScaffoldMessenger.of(context).showSnackBar(appSnackBar(
+          'Your team is full ($cap people). Remove someone first, or ask a system admin for a bigger team.',
+          kind: AppMessageKind.error,
+        ));
+        return;
+      }
+    }
+    final available = _available;
     final result = await showMemberAccessSheet(
       context,
       title: 'Invite Staff Member',
-      initial: MemberAccess(OrgRole.staff, {...OrgPreset.staff.permissions}),
+      available: available,
+      initial: MemberAccess(OrgRole.staff, {
+        ...available == null ? OrgPreset.staff.permissions : OrgPreset.staff.permissions.intersection(available),
+      }),
       confirmLabel: 'Send Invitation',
       askEmail: true,
       allowPhone: true,
@@ -280,6 +303,7 @@ class _StaffMembersPageState extends State<StaffMembersPage> {
     final result = await showMemberAccessSheet(
       context,
       title: 'What can this member do?',
+      available: _available,
       initial: MemberAccess(current.role, current.permissions),
       confirmLabel: 'Save',
       roleLocked: uid == _ownerId,

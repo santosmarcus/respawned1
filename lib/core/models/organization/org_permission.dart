@@ -116,6 +116,57 @@ Set<OrgPermission> staffPermissionsFrom(Map<String, dynamic>? member) {
 String staffTitle(OrgPreset? preset) =>
     preset == null || preset == OrgPreset.staff ? 'Staff' : 'Staff · Custom access';
 
+/// What kind of organization: a shelter or rescue group, or an independent
+/// rescuer (one person or a small team) with fewer modules, a member cap and
+/// case capacity. `organizations/{id}.kind`; missing means [shelter].
+enum OrgKind {
+  shelter,
+  independent;
+
+  static OrgKind fromName(String? name) => name == 'independent' ? independent : shelter;
+}
+
+/// Limits for independent rescuers. Mirrors `independent` in
+/// functions/org_permissions.json.
+class IndependentRescuer {
+  const IndependentRescuer._();
+
+  /// The most a system admin may turn on for an independent rescuer.
+  static const allowed = {
+    OrgPermission.rescue,
+    OrgPermission.animals,
+    OrgPermission.care,
+    OrgPermission.adoptions,
+    OrgPermission.insights,
+  };
+
+  /// What an independent rescuer has until a system admin changes it.
+  static const defaults = {OrgPermission.rescue, OrgPermission.animals, OrgPermission.care};
+
+  static const memberCap = 5;
+  static const maxActiveCases = 3;
+  static const maxAnimalsInCare = 5;
+  static const minRadiusKm = 1.0;
+  static const maxRadiusKm = 5.0;
+  static const defaultRadiusKm = 3.0;
+
+  /// How long shelters alone see a new non-critical report.
+  static const headStartMinutes = 15;
+}
+
+/// The permissions an organization has at all, from its document: every
+/// permission for a shelter; for an independent rescuer its
+/// `enabledPermissions` (set by a system admin), else the defaults, never
+/// more than [IndependentRescuer.allowed].
+Set<OrgPermission> orgEnabledPermissions(Map<String, dynamic>? org) {
+  if (OrgKind.fromName(org?['kind'] as String?) != OrgKind.independent) return OrgPermission.values.toSet();
+  final raw = org?['enabledPermissions'];
+  final listed = raw is List
+      ? raw.map((k) => OrgPermission.fromKey(k as String?)).whereType<OrgPermission>().toSet()
+      : IndependentRescuer.defaults;
+  return listed.intersection(IndependentRescuer.allowed);
+}
+
 /// Permissions in the stored order (the enum order), for writes and display.
 List<String> permissionKeys(Iterable<OrgPermission> perms) =>
     OrgPermission.values.where(perms.contains).map((p) => p.key).toList();

@@ -1,5 +1,5 @@
 {
-  "_comment": "Organization Staff permissions and the one default Staff set (money permissions and Facebook posting are ticked by hand). Carers were merged into Staff, so legacy role 'carer' gets the default set too. The one source of truth: functions/org_access.js loads it, lib/core/models/organization/org_permission.dart mirrors it (test/core/models/org_permission_sync_test.dart), and firestore.rules/storage.rules copy the permission and default Staff lists (functions/org_permissions_sync.test.js). Admins and organization owners have every permission.",
+  "_comment": "Organization Staff permissions and the one default Staff set (money permissions and Facebook posting are ticked by hand). Carers were merged into Staff, so legacy role 'carer' gets the default set too. `independent` limits an independent rescuer (organizations/{id}.kind == 'independent'): `allowed` is the most a system admin may turn on, `defaults` what it has until then; even its owner has only its enabled permissions. The one source of truth: functions/org_access.js loads it, lib/core/models/organization/org_permission.dart mirrors it (test/core/models/org_permission_test.dart), and firestore.rules/storage.rules copy the permission, default Staff and independent lists (functions/org_permissions_sync.test.js). Admins and organization owners have every permission their organization has.",
   "permissions": [
     "rescue",
     "animals",
@@ -18,5 +18,14 @@
   "legacy": {
     "carer": "staff",
     "staff": "staff"
+  },
+  "independent": {
+    "allowed": ["rescue", "animals", "care", "adoptions", "insights"],
+    "defaults": ["rescue", "animals", "care"],
+    "memberCap": 5,
+    "maxActiveCases": 3,
+    "maxAnimalsInCare": 5,
+    "radiusKm": {"min": 1, "max": 5, "default": 3},
+    "headStartMinutes": 15
   }
 }

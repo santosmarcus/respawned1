@@ -640,11 +640,15 @@ class TransportAssignmentRepository {
   ///
   /// Refused while an offer is still pending or accepted, so a transporter
   /// who already said yes isn't left holding a case the organization took.
+  ///
+  /// [byChoice]: an independent rescuer chose to bring the animal
+  /// themselves (no transporter was tried), which changes only the wording.
   Future<void> startOrganizationTransport({
     required String caseId,
     required String actorUid,
     required String actorName,
     String? note,
+    bool byChoice = false,
   }) async {
     final caseRef = _store.caseDoc(caseId);
     await _store.db.runTransaction((tx) async {
@@ -669,7 +673,9 @@ class TransportAssignmentRepository {
         tx,
         caseId: caseId,
         action: 'organization_transport_started',
-        statusLine: 'No transporter was available. The organization is bringing the animal to the clinic itself.',
+        statusLine: byChoice
+            ? 'The rescuer is bringing the animal to the clinic themselves.'
+            : 'No transporter was available. The organization is bringing the animal to the clinic itself.',
         actorUid: actorUid,
         actorName: actorName,
         details: {if (trimmedNote.isNotEmpty) 'note': trimmedNote},
@@ -679,9 +685,47 @@ class TransportAssignmentRepository {
             'byUid': actorUid,
             'byName': actorName,
             'startedAt': Timestamp.now(),
+            if (byChoice) 'byChoice': true,
             if (trimmedNote.isNotEmpty) 'note': trimmedNote,
           },
           if (currentId != null) 'currentAssignmentId': FieldValue.delete(),
+        },
+      );
+    });
+  }
+
+  /// The organization (or independent rescuer) can't finish the trip itself
+  /// (vehicle broke down, can't handle the animal): the case goes back to
+  /// Awaiting Assignment so a transporter can be offered it. The trip that
+  /// stopped stays in the activity log.
+  Future<void> stopOrganizationTransport({
+    required String caseId,
+    required String actorUid,
+    required String actorName,
+    String? reason,
+  }) async {
+    final caseRef = _store.caseDoc(caseId);
+    await _store.db.runTransaction((tx) async {
+      final data = (await tx.get(caseRef)).data();
+      if (data == null) throw StateError('This case no longer exists.');
+      if (data['organizationTransport'] is! Map ||
+          RescueStatus.fromFirestoreValue(data['status'] as String?) != RescueStatus.ongoing) {
+        throw StateError('This case is not being transported by your team.');
+      }
+      final why = reason?.trim() ?? '';
+      _store.recordActionIn(
+        tx,
+        caseId: caseId,
+        action: 'organization_transport_stopped',
+        statusLine: why.isEmpty
+            ? 'The trip to the clinic stopped. The case is waiting for a transporter.'
+            : 'The trip to the clinic stopped ($why). The case is waiting for a transporter.',
+        actorUid: actorUid,
+        actorName: actorName,
+        details: {'previous': data['organizationTransport'], if (why.isNotEmpty) 'reason': why},
+        fields: {
+          'status': RescueStatus.awaitingAssignment.firestoreValue,
+          'organizationTransport': FieldValue.delete(),
         },
       );
     });

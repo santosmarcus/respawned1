@@ -14,7 +14,7 @@ const String kTransporterPendingMessage =
 const String kTransporterRejectedMessage =
     'Your transporter application was not approved, so you can\'t take transits.';
 const String kVolunteerNotApprovedMessage =
-    'Your volunteer application has not been approved yet. You can take transits once it is.';
+    'Send your ID and vehicle documents to be verified. You can take transits once you are.';
 const String kNotATransporterMessage = 'Only verified pet transporters can take transits.';
 
 /// Why a pet transporter with this users/{uid} data may not take transits,
@@ -36,8 +36,14 @@ Future<String?> transitBlockReason() async {
     case 'pet_transporter':
       return petTransporterBlockReason(user);
     case 'rescue_volunteer':
+      // Verified through the transporter documents (like a pet
+      // transporter), or an older approved volunteer application.
+      if (user?['isVerified'] == true) return null;
       final app = await db.collection('volunteerApplications').doc(uid).get();
-      return app.data()?['status'] == 'approved' ? null : kVolunteerNotApprovedMessage;
+      if (app.data()?['status'] == 'approved') return null;
+      return (user?['transporterVerificationStatus'] as String? ?? '').isEmpty
+          ? kVolunteerNotApprovedMessage
+          : petTransporterBlockReason(user);
     default:
       return kNotATransporterMessage;
   }

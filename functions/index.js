@@ -5,7 +5,8 @@ const {defineSecret} = require('firebase-functions/params');
 const admin = require('firebase-admin');
 
 admin.initializeApp();
-const {orgMemberUids, requireOrgPermission} = require('./org_access');
+const {orgMemberUids, requireOrgPermission, isIndependent} = require('./org_access');
+const independentRules = require('./independent_rescuer_rules');
 const db = admin.firestore();
 
 exports.getOrCreateRescueSession = onCall(async (request) => {
@@ -281,6 +282,7 @@ async function notifyNearbyUsers({
   excludeUids = [],
   roles = null, // only these roles (null = any role)
   excludeRoles = null, // never these roles
+  excludeOrgIds = [], // never people whose users.organizationId is one of these
   radiusKm = RADIUS_KM,
   category = null, // one of NOTIFY_CATEGORY; users can mute categories
   title,
@@ -308,6 +310,7 @@ async function notifyNearbyUsers({
     if (role === TRANSPORTER_ROLE) return;
     if (roles && !roles.includes(role)) return;
     if (excludeRoles && excludeRoles.includes(role)) return;
+    if (u.organizationId && excludeOrgIds.includes(u.organizationId)) return;
     if (!userWantsCategory(u, category)) return;
     if (Math.abs(u.lastLng - lng) > lngDeltaDeg) return;
     if (haversineKm(lat, lng, u.lastLat, u.lastLng) <= userAlertRadiusKm(u, radiusKm)) {
@@ -347,13 +350,26 @@ function orgCoversPoint(org, lat, lng) {
     haversineKm(lat, lng, a.lat, a.lng) <= a.radiusKm);
 }
 
+// Returns the ids of every approved independent rescuer, so the nearby
+// responder push can leave their people out (they hear about the case when
+// it opens to them, see independent_rescuers.js).
 async function assignCaseToServiceAreas({caseRef, caseId, c, isCritical}) {
   const orgsSnap = await db
     .collection('organizations')
     .where('verificationStatus', '==', 'approved')
     .get();
 
-  const covering = orgsSnap.docs.filter((d) => orgCoversPoint(d.data(), c.lat, c.lng));
+  // Independent rescuers aren't part of the shelters' coverage: a report
+  // opens to the ones covering it after the shelters' head start (none for
+  // Critical), and only while it's still unowned.
+  const independentIds = orgsSnap.docs.filter((d) => isIndependent(d.data())).map((d) => d.id);
+  const nearbyIndependentIds = independentRules
+      .nearbyIndependents(orgsSnap.docs.map((d) => ({id: d.id, data: d.data()})), c.lat, c.lng)
+      .map((x) => x.id);
+  const createdMs = c.createdAt && c.createdAt.toMillis ? c.createdAt.toMillis() : Date.now();
+
+  const shelters = orgsSnap.docs.filter((d) => !isIndependent(d.data()));
+  const covering = shelters.filter((d) => orgCoversPoint(d.data(), c.lat, c.lng));
   // An org admin can pause new reports (Organization Profile → "Accepting
   // new rescue reports"); a paused org isn't tagged or notified.
   const matched = covering
@@ -365,7 +381,17 @@ async function assignCaseToServiceAreas({caseRef, caseId, c, isCritical}) {
     areaOrgIds: matched,
     outsideServiceArea: covering.length === 0,
     ...(allPaused ? {noOrgAccepting: true} : {}),
+    nearbyIndependentIds,
+    ...(nearbyIndependentIds.length ? {
+      independentsOpenAt: admin.firestore.Timestamp.fromMillis(
+          independentRules.independentsOpenAtMs(createdMs, c.urgency)),
+      independentsNotified: false,
+    } : {}),
   });
+
+  // Covered by independents only: no admin alert, they'll be told when it
+  // opens to them.
+  if (matched.length === 0 && nearbyIndependentIds.length) return independentIds;
 
   if (matched.length === 0) {
     await db.collection('adminAlerts').add({
@@ -377,7 +403,7 @@ async function assignCaseToServiceAreas({caseRef, caseId, c, isCritical}) {
       createdAt: admin.firestore.FieldValue.serverTimestamp(),
       resolved: false,
     });
-    return;
+    return independentIds;
   }
 
   // Staff of the matched organizations who handle rescues.
@@ -396,7 +422,7 @@ async function assignCaseToServiceAreas({caseRef, caseId, c, isCritical}) {
       tokens.add(d.fcmToken);
     });
   }
-  if (tokens.size === 0) return;
+  if (tokens.size === 0) return independentIds;
 
   const list = [...tokens];
   for (let i = 0; i < list.length; i += FCM_MULTICAST_LIMIT) {
@@ -409,6 +435,7 @@ async function assignCaseToServiceAreas({caseRef, caseId, c, isCritical}) {
       data: toFcmData({type: 'new_case_service_area', caseId}),
     });
   }
+  return independentIds;
 }
 
 // 1. Immediate alert the moment a new case is reported.
@@ -428,13 +455,16 @@ exports.notifyNewCaseReported = onDocumentCreated(
     const isCritical = c.urgency === 'Critical';
 
     // Which organizations' coverage geofences contain this case?
-    await assignCaseToServiceAreas({caseRef: snap.ref, caseId, c, isCritical});
+    const independentIds = await assignCaseToServiceAreas({caseRef: snap.ref, caseId, c, isCritical});
 
-    // Responders: wider geofence + "view and accept" wording.
+    // Responders: wider geofence + "view and accept" wording. Independent
+    // rescuers' people are left out: the case opens to them after the
+    // shelters' head start (openCasesToIndependents).
     await notifyNearbyUsers({
       lat: c.lat,
       lng: c.lng,
       excludeUid: c.reporterId,
+      excludeOrgIds: independentIds,
       roles: RESPONDER_ROLES,
       radiusKm: RESPONDER_RADIUS_KM,
       category: NOTIFY_CATEGORY.newCase,
@@ -1921,6 +1951,8 @@ Object.assign(exports, require('./account_deletion'));
 Object.assign(exports, require('./phone_accounts'));
 // Shareable referral links (public/referral/index.html) — see functions/referral_shares.js.
 Object.assign(exports, require('./referral_shares')({notifyStaff, orgStaffUids}));
+
+Object.assign(exports, require('./independent_rescuers')({notifyStaff, orgStaffUids}));
 // Public copy of each animal for non-staff readers — see functions/public_animals.js.
 exports.syncPublicAnimal = require('./public_animals').syncPublicAnimal;
 // Public web page for one animal (/animal/<id>), linked from Facebook posts — see functions/public_animal_page.js.

@@ -183,6 +183,7 @@ class OrgMembershipService {
       uid: uid,
       ownerId: orgDoc.exists ? (orgDoc.data()?['ownerId'] as String?) : null,
       member: memberDoc.exists ? (memberDoc.data() ?? const {}) : null,
+      org: orgDoc.data(),
     );
   }
 

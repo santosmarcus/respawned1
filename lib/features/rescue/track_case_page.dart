@@ -2012,6 +2012,10 @@ class _CaseSummaryCard extends StatelessWidget {
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary)),
+                // An independent rescuer took the case (never their address).
+                if (data['ownerKind'] == 'independent')
+                  Text('Handled by an independent rescuer',
+                      style: GoogleFonts.zain(fontSize: 12, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
               ],
             ),
           ),

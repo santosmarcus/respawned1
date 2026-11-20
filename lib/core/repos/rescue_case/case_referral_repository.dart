@@ -2,6 +2,7 @@
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 
+import 'package:respawnd1/core/models/rescue/case_claim_rules.dart';
 import 'package:respawnd1/core/models/rescue/referral.dart';
 import 'package:respawnd1/core/models/rescue/referral_type.dart';
 import 'package:respawnd1/core/models/rescue/rescue_status.dart';
@@ -32,6 +33,9 @@ class CaseReferralRepository {
   /// An unowned case is stamped with the referring organization, which gets
   /// it back if the target declines or doesn't answer in time
   /// (functions/index.js followUpCaseReferrals).
+  ///
+  /// [type] rescueVolunteer: the target is an independent rescuer (an
+  /// organization with kind 'independent'); the flow is the same.
   Future<String> referToOrganization({
     required String caseId,
     required String targetOrgId,
@@ -39,6 +43,7 @@ class CaseReferralRepository {
     String? note,
     required String actorUid,
     required String actorName,
+    ReferralType type = ReferralType.anotherOrganization,
   }) async {
     final caseSnap = await _store.caseDoc(caseId).get();
     final caseData = caseSnap.data() ?? const <String, dynamic>{};
@@ -58,7 +63,7 @@ class CaseReferralRepository {
     final referralRef = _store.referralsOf(caseId).doc();
     final batch = _store.db.batch();
     batch.set(referralRef, {
-      'type': ReferralType.anotherOrganization.name,
+      'type': type.name,
       'status': ReferralStatus.referredPending.name,
       'createdAt': FieldValue.serverTimestamp(),
       'createdByUid': actorUid,
@@ -91,7 +96,7 @@ class CaseReferralRepository {
         if (caseOrgId.isEmpty && fromOrgId.isNotEmpty) 'organizationId': fromOrgId,
         'referralOutcome': FieldValue.delete(),
       },
-      action: 'referred_to_organization',
+      action: type == ReferralType.rescueVolunteer ? 'referred_to_volunteer' : 'referred_to_organization',
       actorUid: actorUid,
       actorName: actorName,
       details: {'targetOrgId': targetOrgId, 'targetOrgName': targetOrgName, 'referralId': referralRef.id},
@@ -142,6 +147,14 @@ class CaseReferralRepository {
       if (actorOrgId.isNotEmpty && actorOrgId != targetOrgId) {
         throw StateError('Only ${referral['targetOrgName'] ?? 'the receiving organization'} can answer this referral.');
       }
+      // An independent rescuer accepts only while under capacity.
+      var targetIndependent = false;
+      if (accept) {
+        final target = await tx.get(_store.db.collection('organizations').doc(targetOrgId));
+        final refusal = independentCapacityRefusal(target.data());
+        if (refusal != null) throw refusal;
+        targetIndependent = target.data()?['kind'] == 'independent';
+      }
       final targetOrgName = referral['targetOrgName'] as String? ?? 'The receiving organization';
       final fromOrgName = referral['fromOrgName'] as String? ?? '';
       final referralId = referral['referralId'] as String?;
@@ -165,6 +178,7 @@ class CaseReferralRepository {
           'status': RescueStatus.pendingReview.firestoreValue,
           'referredToOrgId': FieldValue.delete(),
           if (accept) 'organizationId': targetOrgId,
+          if (accept) 'ownerKind': targetIndependent ? 'independent' : FieldValue.delete(),
           'referralOutcome': {
             'status': accept ? 'accepted' : 'declined',
             'referralId': referralId,
@@ -322,33 +336,23 @@ class CaseReferralRepository {
     return referralRef.id;
   }
 
-  /// TODO: rescue-volunteer referral has no assignment/matching logic yet.
-  /// This only records the referral so the modal has something to call;
-  /// wire up actual volunteer notification once that flow is designed.
+  /// Refers the case to an independent rescuer (Refer → Rescue Volunteer):
+  /// the same flow as [referToOrganization] — they accept or decline, with
+  /// the 24 h reminder and 48 h return to the referring organization.
   Future<String> referToVolunteer({
     required String caseId,
+    required String targetOrgId,
+    required String targetOrgName,
     String? note,
     required String actorUid,
     required String actorName,
-  }) async {
-    final referralRef = _store.referralsOf(caseId).doc();
-    final batch = _store.db.batch();
-    batch.set(referralRef, {
-      'type': ReferralType.rescueVolunteer.name,
-      'status': ReferralStatus.referredPending.name,
-      'createdAt': FieldValue.serverTimestamp(),
-      'createdByUid': actorUid,
-      'createdByName': actorName,
-      'note': note,
-    });
-    _store.recordActionInBatch(
-      batch,
-      caseId: caseId,
-      action: 'referred_to_volunteer',
-      actorUid: actorUid,
-      actorName: actorName,
-    );
-    await batch.commit();
-    return referralRef.id;
-  }
+  }) => referToOrganization(
+        caseId: caseId,
+        targetOrgId: targetOrgId,
+        targetOrgName: targetOrgName,
+        note: note,
+        actorUid: actorUid,
+        actorName: actorName,
+        type: ReferralType.rescueVolunteer,
+      );
 }

@@ -14,6 +14,7 @@ import 'package:respawnd1/features/adminhome/dashboard/analytics_view.dart';
 import 'package:respawnd1/features/adminhome/dashboard/admin_notifications.dart';
 import 'package:respawnd1/core/models/dashboard/dashboard_model.dart';
 import 'package:respawnd1/features/adminhome/dashboard/dashboard_ui.dart';
+import 'package:respawnd1/features/adminhome/dashboard/independent_area_card.dart';
 import 'package:respawnd1/features/adminhome/dashboard/today_view.dart';
 
 class AdminHomeScreen extends StatefulWidget {
@@ -128,6 +129,9 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
                     child: Align(alignment: Alignment.centerLeft, child: AnalyticsPeriodButton()),
                   ),
                 const SizedBox(height: 14),
+                // Independent rescuers: their area map, availability and
+                // capacity first (nothing for shelters).
+                if (_tab == _DashTab.today) const IndependentAreaCard(),
                 if (_tab == _DashTab.today) const TodayView() else const AnalyticsView(),
               ],
             ),

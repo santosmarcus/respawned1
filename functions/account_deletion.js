@@ -75,6 +75,9 @@ async function blockerFor(uid, user, subject) {
   const owned = await db.collection('organizations').where('ownerId', '==', uid).get();
   const ownedOrgs = owned.docs.map((d) => ({
     id: d.id, name: d.get('name') || '', status: d.get('verificationStatus') || 'draft',
+    kind: d.get('kind') || 'shelter',
+    activeCaseCount: d.get('activeCaseCount') || 0,
+    animalsInCareCount: d.get('animalsInCareCount') || 0,
   }));
   let isOrgAdmin = false;
   let activeAdminCount = 0;

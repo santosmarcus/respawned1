@@ -23,7 +23,13 @@ class MemberAccess {
 /// Manage money also ticks (and locks) View donations & funds. Used when
 /// inviting and when an Admin edits a member (staff_members_page.dart).
 class MemberAccessEditor extends StatefulWidget {
-  const MemberAccessEditor({super.key, required this.initial, required this.onChanged, this.roleLocked = false});
+  const MemberAccessEditor({
+    super.key,
+    required this.initial,
+    required this.onChanged,
+    this.roleLocked = false,
+    this.available,
+  });
 
   final MemberAccess initial;
   final ValueChanged<MemberAccess> onChanged;
@@ -31,15 +37,21 @@ class MemberAccessEditor extends StatefulWidget {
   /// The owner is always an Admin.
   final bool roleLocked;
 
+  /// What the organization has at all (orgEnabledPermissions); null for a
+  /// shelter, which has everything. Only these boxes are shown.
+  final Set<OrgPermission>? available;
+
   @override
   State<MemberAccessEditor> createState() => _MemberAccessEditorState();
 }
 
 class _MemberAccessEditorState extends State<MemberAccessEditor> {
+  late final Set<OrgPermission> _available = widget.available ?? OrgPermission.values.toSet();
+  late final Set<OrgPermission> _default = OrgPreset.staff.permissions.intersection(_available);
   late OrgRole _role = widget.initial.role;
   late Set<OrgPermission> _perms = widget.initial.role == OrgRole.admin
-      ? {...OrgPreset.staff.permissions}
-      : normalizePermissions(widget.initial.permissions);
+      ? {..._default}
+      : normalizePermissions(widget.initial.permissions).intersection(_available);
 
   void _emit() => widget.onChanged(MemberAccess(_role, {..._perms}));
 
@@ -50,7 +62,7 @@ class _MemberAccessEditorState extends State<MemberAccessEditor> {
 
   /// Back to the default Staff set (no money permissions).
   void _resetToDefault() {
-    setState(() => _perms = {...OrgPreset.staff.permissions});
+    setState(() => _perms = {..._default});
     _emit();
   }
 
@@ -70,7 +82,8 @@ class _MemberAccessEditorState extends State<MemberAccessEditor> {
   @override
   Widget build(BuildContext context) {
     final label = GoogleFonts.zain(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.textPrimary);
-    final isDefault = OrgPreset.matching(_perms) == OrgPreset.staff;
+    final isDefault = _perms.length == _default.length && _perms.containsAll(_default);
+    final limited = widget.available != null;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       mainAxisSize: MainAxisSize.min,
@@ -119,18 +132,20 @@ class _MemberAccessEditorState extends State<MemberAccessEditor> {
             ],
           ),
           Text(
-            'Every Staff member starts with rescue, animal records, daily care (the care-tasks screen), adoptions, '
-            'events and volunteers, and analytics. Tick Money permissions or Facebook posting by hand for the '
-            'people who handle them.',
+            limited
+                ? 'Your team has only the modules turned on for independent rescuers. A system admin can turn on more.'
+                : 'Every Staff member starts with rescue, animal records, daily care (the care-tasks screen), adoptions, '
+                    'events and volunteers, and analytics. Tick Money permissions or Facebook posting by hand for the '
+                    'people who handle them.',
             style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary),
           ),
           const SizedBox(height: 4),
-          for (final group in OrgPermissionGroup.values) ...[
+          for (final group in OrgPermissionGroup.values.where((g) => _available.any((p) => p.group == g))) ...[
             Padding(
               padding: const EdgeInsets.only(top: 8, bottom: 2),
               child: Text(group.label, style: label),
             ),
-            for (final p in OrgPermission.values.where((p) => p.group == group))
+            for (final p in OrgPermission.values.where((p) => p.group == group && _available.contains(p)))
               CheckboxListTile(
                 key: ValueKey('perm-${p.key}'),
                 dense: true,
@@ -171,6 +186,7 @@ Future<({String email, String phone, MemberAccess access})?> showMemberAccessShe
   bool allowPhone = false,
   bool roleLocked = false,
   String? Function(String email)? validateEmail,
+  Set<OrgPermission>? available,
 }) {
   final emailController = TextEditingController();
   final phoneController = TextEditingController();
@@ -236,7 +252,12 @@ Future<({String email, String phone, MemberAccess access})?> showMemberAccessShe
                         ],
                       ),
                     ),
-                  MemberAccessEditor(initial: initial, roleLocked: roleLocked, onChanged: (a) => access = a),
+                  MemberAccessEditor(
+                    initial: initial,
+                    roleLocked: roleLocked,
+                    available: available,
+                    onChanged: (a) => access = a,
+                  ),
                 ],
               ),
             ),

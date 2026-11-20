@@ -195,16 +195,44 @@ service cloud.firestore {
         m.get('facebookPublisher', false) == true ? defaultStaffPerms().concat(['facebookPublish']) : defaultStaffPerms());
     }
 
+    // Independent rescuers (organizations/{id}.kind == 'independent'): the
+    // most a system admin may turn on, and what they have until then.
+    // Copied from `independent` in functions/org_permissions.json.
+    function independentPerms() {
+      return ['rescue', 'animals', 'care', 'adoptions', 'insights'];
+    }
+
+    function independentDefaultPerms() {
+      return ['rescue', 'animals', 'care'];
+    }
+
+    // What an organization has at all; nobody in it, owner included, gets
+    // more (functions/org_access.js orgEnabledPermissions).
+    function orgPermsOf(org) {
+      return org.get('kind', 'shelter') == 'independent'
+        ? org.get('enabledPermissions', independentDefaultPerms()).toSet().intersection(independentPerms().toSet())
+        : allPermKeys().toSet();
+    }
+
     function memberHasAny(orgId, keys) {
       let mp = memberPath(orgId, request.auth.uid);
       let org = get(orgPath(orgId)).data;
-      return org.get('verificationStatus', 'approved') == 'approved' && (
+      let enabled = orgPermsOf(org);
+      return org.get('verificationStatus', 'approved') == 'approved' && enabled.hasAny(keys) && (
         org.get('ownerId', '') == request.auth.uid ||
-        (!exists(mp) && defaultStaffPerms().hasAny(keys)) ||
+        (!exists(mp) && defaultStaffPerms().toSet().intersection(enabled).hasAny(keys)) ||
         (exists(mp) &&
           !(get(mp).data.get('status', 'active') in inactiveStatuses()) &&
-          (get(mp).data.get('role', '') == 'admin' || permsOf(get(mp).data).hasAny(keys)))
+          (get(mp).data.get('role', '') == 'admin' || permsOf(get(mp).data).toSet().intersection(enabled).hasAny(keys)))
       );
+    }
+
+    // An independent rescuer has room for one more member (memberCount is
+    // kept by functions/independent_rescuers.js). Shelters have no cap.
+    function orgHasRoomForMember(orgId) {
+      let org = get(orgPath(orgId)).data;
+      return org.get('kind', 'shelter') != 'independent' ||
+        org.get('memberCount', 1) < org.get('memberCap', 5);
     }
 
     // Active member of `orgId` (their own organization) with any of `keys`.
@@ -290,14 +318,26 @@ service cloud.firestore {
         return isPlatformStaff() && !changedAny(reviewFields().concat(['verificationStatus']));
       }
 
+      // Independent rescuers: the kind is chosen at sign-up and never
+      // changed by a client; modules and caps are set by a system admin
+      // (setIndependentLimits) and the counters by
+      // functions/independent_rescuers.js.
+      function independentFields() {
+        return ['kind', 'enabledPermissions', 'memberCap', 'maxActiveCases', 'maxAnimalsInCare',
+          'activeCaseCount', 'animalsInCareCount', 'memberCount', 'lastActiveAt', 'autoPausedAt'];
+      }
+
       allow read: if signedIn();
       allow create: if signedIn() &&
         request.resource.data.get('ownerId', '') == request.auth.uid &&
+        request.resource.data.get('kind', 'shelter') in ['shelter', 'independent'] &&
+        !request.resource.data.keys().hasAny(independentFields().removeAll(['kind'])) &&
         (isPlatformStaff() || (
           request.resource.data.get('verificationStatus', '') == 'draft' &&
           !('bootstrapped' in request.resource.data)
         ));
       allow update: if request.resource.data.get('ownerId', '') == resource.data.get('ownerId', '') &&
+        !changedAny(independentFields()) &&
         (platformStaffUpdateOk() || (isOrgAdmin(orgId) && verificationOk()));
       allow delete: if false;
     }
@@ -307,8 +347,11 @@ service cloud.firestore {
     // care budget, daily food use, riders wanted free; shelter_settings.dart).
     // Its members read them (the dashboard; settings/care lists the rounds
     // care staff tick); only its Admins change them.
+    // settings/home: an independent rescuer's home or foster pin, kept off
+    // the public organization doc; its Admins read it while signing up too.
     match /organizations/{orgId}/settings/{docId} {
       allow read: if isPlatformStaff() ||
+        (docId == 'home' && isOrgAdmin(orgId)) ||
         (docId == 'care' && isMemberOf(orgId)) ||
         (docId != 'care' && staffWith(orgId, opsKeys()));
       allow write: if isOrgAdmin(orgId);
@@ -397,6 +440,7 @@ service cloud.firestore {
           invitation.organizationId == orgId &&
           invitationIsMine(invitation) &&
           invitation.status == 'pending' &&
+          orgHasRoomForMember(orgId) &&
           request.resource.data.get('role', 'staff') == invitation.get('role', 'staff') &&
           request.resource.data.get('permissions', null) == invitation.get('permissions', null) &&
           request.resource.data.get('preset', null) == invitation.get('preset', null);
@@ -478,7 +522,8 @@ service cloud.firestore {
         (resource != null &&
           (invitationIsMine(resource.data) || managesOrg(resource.data.organizationId))));
 
-      allow create: if managesOrg(request.resource.data.organizationId) && invitationAccessOk(request.resource.data);
+      allow create: if managesOrg(request.resource.data.organizationId) && invitationAccessOk(request.resource.data) &&
+        orgHasRoomForMember(request.resource.data.organizationId);
 
       // The invited person may only flip their own pending invitation to
       // accepted/rejected without touching org, email, or role.
@@ -796,7 +841,7 @@ service cloud.firestore {
       function staffTransporterReview() {
         let data = request.resource.data;
         return (isPlatformStaff() || isSystemAdmin() || myStaffWith(['volunteers'])) &&
-          resource.data.get('role', '') == 'pet_transporter' &&
+          resource.data.get('role', '') in ['pet_transporter', 'rescue_volunteer'] &&
           exists(/databases/$(database)/documents/transporterApplications/$(uid)) &&
           changedOnly(['isVerified', 'transporterVerificationStatus']) &&
           (
@@ -909,8 +954,28 @@ service cloud.firestore {
         (isPlatformStaff() || myStaffWith(['rescue']));
     }
 
+    // An independent rescuer sees an unowned case only if it is listed in
+    // the case's nearbyIndependentIds (assignCaseToServiceAreas,
+    // functions/index.js). Read directly (no default) so the rescuer's query
+    // must filter nearbyIndependentIds array-contains their organization.
+    // Shelters see the whole unowned pool.
+    function poolCaseVisibleToMe(data) {
+      return get(orgPath(myOrgId())).data.get('kind', 'shelter') != 'independent' ||
+        myOrgId() in data.nearbyIndependentIds;
+    }
+
+    // ...and works it (accepts it, adds to it) only once the shelters' head
+    // start has passed (independentsOpenAt).
+    function poolCaseOpenToMe(data) {
+      return get(orgPath(myOrgId())).data.get('kind', 'shelter') != 'independent' ||
+        (myOrgId() in data.get('nearbyIndependentIds', []) &&
+          data.get('independentsOpenAt', request.time) <= request.time);
+    }
+
     function canStaffCase(data) {
-      return canRecordOf(data.get('organizationId', ''), ['rescue']) ||
+      return (data.get('organizationId', '') != '' && canRecordOf(data.get('organizationId', ''), ['rescue'])) ||
+        (data.get('organizationId', '') == '' &&
+          (isPlatformStaff() || (myStaffWith(['rescue']) && poolCaseOpenToMe(data)))) ||
         isReferralTarget(data);
     }
 
@@ -924,9 +989,10 @@ service cloud.firestore {
     function isVerifiedResponder() {
       return isTransporterRole() && (
         (myRole() == 'pet_transporter' && userDoc().get('isVerified', false) == true) ||
-        (myRole() == 'rescue_volunteer' &&
+        (myRole() == 'rescue_volunteer' && (
+          userDoc().get('isVerified', false) == true ||
           get(/databases/$(database)/documents/volunteerApplications/$(request.auth.uid)).data
-            .get('status', '') == 'approved')
+            .get('status', '') == 'approved'))
       );
     }
 
@@ -1121,8 +1187,12 @@ service cloud.firestore {
         isCommunityAdoptable(resource.data) ||
         isPlatformStaff() ||
         (resource.data.get('referredToOrgId', '') == myOrgId() && myOrgId() != '' && myStaffWith(['rescue'])) ||
-        canRecordOf(resource.data.organizationId, readKeys()) ||
+        // Transporters first: they stop here, before the staff lookups.
         isVerifiedResponder() ||
+        // Staff: their own organization's cases, and the unowned pool
+        // (only the part opened to them for an independent rescuer).
+        (resource.data.organizationId != '' && canRecordOf(resource.data.organizationId, readKeys())) ||
+        (resource.data.organizationId == '' && myStaffWith(readKeys()) && poolCaseVisibleToMe(resource.data)) ||
         isOfferedTransporter(caseId, resource.data)
       );
       // Reporters file unowned reports only; an organization claims a case
@@ -1145,10 +1215,19 @@ service cloud.firestore {
       // The cheap, document-only checks run first so the ones with lookups
       // stay inside Firestore's 1,000-expression budget
       // (rules-tests/tests/expression-budget.test.js).
+      // The first organization to accept a case owns it
+      // (CaseStatusRepository.acceptCase): staff stamp their organization
+      // only on an unowned case, or on one referred to them.
+      function claimOk() {
+        return !changedAny(['organizationId']) || isPlatformStaff() ||
+          resource.data.get('organizationId', '') == '' ||
+          resource.data.get('referredToOrgId', '') == request.resource.data.get('organizationId', '');
+      }
+
       allow update: if signedIn() && (
         communityClaimUpdate() ||
         clearOfferPointer() ||
-        (canStaffCase(resource.data) && orgStampOk(['rescue']) && referralWithdrawOk()) ||
+        (canStaffCase(resource.data) && orgStampOk(['rescue']) && claimOk() && referralWithdrawOk()) ||
         reporterUpdate() ||
         transporterUpdate() ||
         willingAdopterUpdate() ||

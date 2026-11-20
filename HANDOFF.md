@@ -1,6 +1,85 @@
 # Handoff
 
-_Latest: animal QR tags fixed, with New Code and Remove (2026-11-20, app only, not checked on a device). Before that, one mobile number and one email per account (2026-11-20, not deployed, not checked on a device). Before that, one default Staff permission set, carers merged into Staff, volunteer naming (2026-11-20, functions and rules deployed; app build pending). Before that, user Events page and Facebook sharing for campaigns and events (2026-11-20, function deployed; app build pending). Before that, Facebook sharing and photo descriptions (2026-11-20, deployed). Before that, feedback round (2026-11-18, Firestore rules deployed; app build pending). Before that, Admin + Staff permissions (2026-11-18, committed and deployed; app build pending). Then the system admin console, one-organization scope and referral links (2026-11-17, committed and deployed). The build-fix sections further down are from branch `marcus` (base `a899293`), 2026-11-04._
+_Latest: independent rescuers (2026-11-20, not deployed, not checked on a device). Before that, animal QR tags fixed, with New Code and Remove (2026-11-20, app only, not checked on a device). Before that, one mobile number and one email per account (2026-11-20, not deployed, not checked on a device). Before that, one default Staff permission set, carers merged into Staff, volunteer naming (2026-11-20, functions and rules deployed; app build pending). Before that, user Events page and Facebook sharing for campaigns and events (2026-11-20, function deployed; app build pending). Before that, Facebook sharing and photo descriptions (2026-11-20, deployed). Before that, feedback round (2026-11-18, Firestore rules deployed; app build pending). Before that, Admin + Staff permissions (2026-11-18, committed and deployed; app build pending). Then the system admin console, one-organization scope and referral links (2026-11-17, committed and deployed). The build-fix sections further down are from branch `marcus` (base `a899293`), 2026-11-04._
+
+## Independent rescuers (2026-11-20, not deployed, not checked on a device)
+
+One person or a small team who rescues like a small organization. They are an `organizations/{id}` doc with `kind: 'independent'`, so cases, animal records, members and rules work as they do for shelters, with these limits. Picks up the volunteer work that was deferred.
+
+- **Sign-up:** **Independent Rescuer** on Select User Type. It saves `role: organization` + `signupKind: independent` and runs the same About → documents → review steps, worded for a person:
+  - **Name and area:** a name, plus a general area (barangay, city) that is shown on the profile.
+  - **Home pin (private):** saved in `organizations/{id}/settings/home`, readable by the team only. The public coverage circle is centred on the pin rounded to about 1 km, 3 km by default.
+  - **Documents:** valid ID, proof of address, rescue history or references, and an optional barangay clearance.
+  - **Review:** system admins approve or reject it in Approvals, where the card shows "Type: Independent rescuer".
+- **Modules:** `functions/org_permissions.json` `independent`, mirrored in `IndependentRescuer` (`org_permission.dart`) and in `independentPerms()`/`independentDefaultPerms()` in firestore.rules.
+  - **Defaults:** rescue, animals, care.
+  - **Optional:** adoptions and insights, which a system admin turns on in Approvals → Approved → **Modules & limits** (`setIndependentLimits`).
+  - **Never:** campaigns, donations/finance, volunteers/events and Facebook posting.
+  - **Owner included:** nobody in the org gets more than what it has (`orgEnabledPermissions` in the app and `org_access.js`, `orgPermsOf` in rules).
+  - **Member editor:** shows only the org's modules.
+- **Limits:** team of 5, 3 active cases, 5 animals in care (a system admin can change each).
+  - **Counters:** `memberCount`, `activeCaseCount`, `animalsInCareCount` and `lastActiveAt` are kept by `functions/independent_rescuers.js`. Clients can't write them, nor `kind`, `enabledPermissions` or the caps.
+  - **Team cap:** rules refuse invitations and joins once the team is full.
+  - **Available/Paused:** the existing `acceptingCases` switch.
+- **Getting cases:**
+  - **Head start:** `assignCaseToServiceAreas` now tags shelters only (`areaOrgIds`). It also writes `nearbyIndependentIds` (approved, available, under-capacity independents covering the point, radius clamped to 1–5 km) and `independentsOpenAt`, which is 15 minutes after the report, or at once for Critical.
+  - **Notifications:** independents get no instant "nearby responder" push. `openCasesToIndependents` (every minute) tells them when a case opens and nobody has taken it.
+  - **Their list:** only their own cases, cases referred to them, and unowned cases opened to them (`watchScopedCaseDocs`).
+  - **Shelters:** their view is unchanged.
+- **First accept wins:**
+  - **App:** `acceptCase` is now a transaction. It throws `CaseClaimException` ("An organization already accepted this case", head start, outside area, at capacity, paused), and Rescue Details shows it and leaves.
+  - **Rules:** `claimOk()` stops anyone re-stamping a case another org owns. This also fixes the last-write-wins race between two shelters.
+  - **Independents:** rules let them work an unowned case only once it opened to them (`poolCaseOpenToMe`).
+- **Referrals:** Refer → **Rescue Volunteer** is live. It lists independents covering the case with their room left; paused or full ones are shown but greyed out. It goes through `referToOrganization` with type `rescueVolunteer`, so accept/decline and the 24 h/48 h follow-ups are unchanged. Accepting checks capacity in the transaction. Independents can refer a case on to a **Shelter or Rescue Group** even while `multiOrganizationEnabled` is off. New flag: `FeatureFlags.independentRescuersEnabled` (on).
+- **Transport:**
+  - **I'll Bring It Myself:** shown on Assign Transport as soon as the clinic is saved (`startOrganizationTransport(byChoice: true)`).
+  - **Switch to a Transporter:** Rescue Details offers it mid-trip (`stopOrganizationTransport`), which sends the case back to Awaiting Assignment.
+  - **Transporter trips end at the clinic:** accepting stamps `ownerKind: 'independent'`, and `statusAfterTreatmentAccepted` then ends the trip there, because the rescuer collects the animal.
+- **Adoption:** the shelter flow, made lighter:
+  - **Interview optional:** a pending application has **Accept Without Interview**.
+  - **No stall withdrawals:** `followUpStalledApplications` skips independents' applications.
+  - **Returns:** approving one while at the animal limit warns the rescuer to transfer an animal on.
+  - **Public label:** the public animal page reads "Independent rescuer · name" (`syncPublicAnimal` adds `ownerKind`/`ownerName`).
+  - **Track Case:** shows "Handled by an independent rescuer".
+- **Dashboard:** `IndependentAreaCard` on Today, a new widget rather than one extracted from `explore_reports_map.dart`:
+  - **Map:** the coverage circle, open cases in it, their own cases, nearby shelters and the home pin.
+  - **Controls:** a radius slider (1–5 km), the Available switch, and room left.
+  - **Left out:** other orgs' cases and reporter details.
+  - **Profile:** for independents it hides the shelter pin, city service areas and Facebook.
+- **Accountability:**
+  - **Weekly check-in:** "Animals in your care" push (`weeklyIndependentCheckIn`, Monday 9:00).
+  - **Auto-pause:** after 30 days with no activity and no open cases.
+  - **Deletion:** account deletion is refused while the rescuer holds cases or animals.
+  - **Users directory:** shows "Independent rescuer · 1/3 cases · 2/5 animals".
+- **Rescue Volunteer accounts** stay transporters (no case ownership) and now verify with the same ID/vehicle documents as pet transporters. `isVerifiedResponder()`, `transitBlockReason` and `staffTransporterReview` accept `isVerified` for them, and an older approved volunteer application still counts. This closes the "nothing creates one now" gap noted below.
+- **Not done:**
+  - **Rules don't enforce the head start on reads.** They check the case lists the rescuer, but the 15 minutes is checked on accept, not on read: a listed independent could open a case early with a direct link, though not take it.
+  - **Storage not capped:** storage.rules doesn't cap independents' modules. Photos only; Firestore refuses the records.
+  - **No expense log:** independents have none (finance is off for them).
+  - **No partner clinics on the map:** there's no saved list of partner clinics.
+
+### Deploy, in this order
+1. `firebase deploy --only firestore:indexes` (three new `cases` indexes: the head-start job and the independents' pool queries).
+2. Functions:
+   - **New:** `setIndependentLimits`, `syncIndependentMemberCount`, `syncIndependentCaseCount`, `syncIndependentAnimalCount`, `openCasesToIndependents`, `weeklyIndependentCheckIn`.
+   - **Changed:** `notifyNewCaseReported`, `setMemberAccess` (and every callable using `org_access.js`), `followUpStalledApplications`, `syncPublicAnimal`, `deleteMyAccount`, `adminDeleteUser`.
+   - `FUNCTIONS_DISCOVERY_TIMEOUT=60 firebase deploy --only functions`.
+3. App build.
+4. `firebase deploy --only firestore:rules`. This only adds access for existing builds, apart from `claimOk`, which older builds never trip, because they accept unowned cases only.
+
+### Checks run
+- `flutter analyze lib`: the 17 issues already there, none in changed files.
+- `flutter test`: 287 pass (new: `test/core/models/rescue/case_claim_rules_test.dart`, more in `org_permission_test.dart` and `transit_rules_test.dart`).
+- `functions`: `npm test` 104 pass (new: `independent_rescuer_rules.test.js`; independent lists added to `org_permissions_sync.test.js`).
+- `rules-tests`: 198 pass with JDK 21 (new: `tests/independent-rescuers.test.js`, 10 tests). Run on ports 8188/9299 because emulators from an interrupted run still held 8080/9199 on this machine.
+
+### Check on a device
+- **Sign-up:** Independent Rescuer → name, area, home pin, documents → Submit. As a system admin, approve it, then Modules & limits → turn on Adoptions.
+- **Head start:** a non-critical report inside the rescuer's circle. The shelter sees it at once; the rescuer sees it after 15 minutes with a "New case near you" push. A Critical report shows to both at once.
+- **Race:** shelter and rescuer tap Accept together. One gets it, and the other sees "already accepted" and is sent back.
+- **Self-transport:** rescuer accepts → saves a clinic → I'll Bring It Myself → Arrived — Start Treatment. On another case, Switch to a Transporter mid-trip.
+- **Referral:** a shelter refers a case to a full rescuer (3 active cases): the rescuer is greyed out. Refer to one with room, who accepts.
+- **Dashboard:** the map shows the circle and pins; the radius slider saves; Paused hides new cases.
 
 ## Animal QR tags: Show/Add fixed, New Code and Remove (2026-11-20, app only, not checked on a device)
 

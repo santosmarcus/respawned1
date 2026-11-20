@@ -346,8 +346,20 @@ exports.followUpStalledApplications = onSchedule(
   async () => {
     const nowMs = Date.now();
     const snap = await db.collection('adoptions').where('status', 'in', PENDING_STATUSES).get();
+    // Independent rescuers may accept without an interview, so an
+    // unbooked interview isn't a stalled application for them.
+    const independentOrg = new Map();
+    const isIndependentOrg = async (orgId) => {
+      if (!orgId) return false;
+      if (!independentOrg.has(orgId)) {
+        const org = await db.collection('organizations').doc(orgId).get();
+        independentOrg.set(orgId, org.exists && org.get('kind') === 'independent');
+      }
+      return independentOrg.get(orgId);
+    };
     for (const doc of snap.docs) {
       if (doc.get('appointmentDate')) continue;
+      if (await isIndependentOrg(doc.get('organizationId'))) continue;
       try {
         const claimed = await claimBookingStep(doc.ref, nowMs);
         if (!claimed) continue;

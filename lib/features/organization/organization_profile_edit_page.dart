@@ -89,6 +89,11 @@ class _OrganizationProfileEditPageState extends State<OrganizationProfileEditPag
   bool _savingAccepting = false;
 
   List<ServiceArea> _serviceAreas = [];
+
+  /// An independent rescuer: no public shelter pin (their home pin is
+  /// private), and their area is the 1–5 km circle on the dashboard map
+  /// instead of whole cities.
+  bool get _isIndependent => _loadedData['kind'] == 'independent';
   final Set<String> _acceptedSpecies = {};
 
   /// An existing organization opens as a read-only profile; the Edit
@@ -854,7 +859,7 @@ class _OrganizationProfileEditPageState extends State<OrganizationProfileEditPag
           ),
           const SizedBox(height: 16),
         ],
-        if (_organizationId != null)
+        if (_organizationId != null && !_isIndependent)
           FacebookIntegrationSection(organizationId: _organizationId!, canManage: _canManageFacebook),
         _sectionTitle('Contact Details'),
         _viewRow('Email Address', orDash(_emailController.text)),
@@ -1050,8 +1055,8 @@ class _OrganizationProfileEditPageState extends State<OrganizationProfileEditPag
                 else ...[
                   _label('Location'),
                   // The transporter's shelter leg needs this pin; there is
-                  // no default shelter.
-                  if (_organizationId != null)
+                  // no default shelter. Independent rescuers have none.
+                  if (_organizationId != null && !_isIndependent)
                     ShelterPinPrompt(organizationId: _organizationId!, canSet: true),
                   Row(
                     children: [
@@ -1062,6 +1067,13 @@ class _OrganizationProfileEditPageState extends State<OrganizationProfileEditPag
                   ),
                   const SizedBox(height: 16),
                 ],
+                if (_isIndependent) ...[
+                  _label('Your Area'),
+                  Text('Set on your dashboard map: a 1–5 km circle around your home. New reports inside it open to '
+                      'you after shelters have had first look.',
+                      style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary)),
+                  const SizedBox(height: 16),
+                ] else ...[
                 _label('Service Areas'),
                 Text('Limited to National Capital Region, CALABARZON, and Central Luzon.',
                     style: GoogleFonts.zain(fontSize: 11, color: AppColors.textSecondary)),
@@ -1095,6 +1107,7 @@ class _OrganizationProfileEditPageState extends State<OrganizationProfileEditPag
                   label: const Text('Select Service Areas'),
                 ),
                 const SizedBox(height: 16),
+                ],
                 _label('Accepted Species'),
                 Wrap(
                   spacing: 8,

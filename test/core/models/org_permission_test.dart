@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:respawnd1/core/models/organization/org_permission.dart';
+import 'package:respawnd1/core/models/organization/organization_capabilities.dart';
 import 'package:respawnd1/core/models/rescue/org_role.dart';
 import 'package:respawnd1/core/repos/org_membership_service.dart';
 
@@ -84,5 +85,44 @@ void main() {
     final legacy = json['legacy'] as Map<String, dynamic>;
     expect(legacy['carer'], OrgPreset.staff.name);
     expect(legacy['staff'], OrgPreset.staff.name);
+    final ind = json['independent'] as Map<String, dynamic>;
+    expect(Set<String>.from(ind['allowed'] as List), IndependentRescuer.allowed.map((p) => p.key).toSet());
+    expect(Set<String>.from(ind['defaults'] as List), IndependentRescuer.defaults.map((p) => p.key).toSet());
+    expect(ind['memberCap'], IndependentRescuer.memberCap);
+    expect(ind['maxActiveCases'], IndependentRescuer.maxActiveCases);
+    expect(ind['maxAnimalsInCare'], IndependentRescuer.maxAnimalsInCare);
+    expect(ind['headStartMinutes'], IndependentRescuer.headStartMinutes);
+    final radius = ind['radiusKm'] as Map<String, dynamic>;
+    expect((radius['min'] as num).toDouble(), IndependentRescuer.minRadiusKm);
+    expect((radius['max'] as num).toDouble(), IndependentRescuer.maxRadiusKm);
+    expect((radius['default'] as num).toDouble(), IndependentRescuer.defaultRadiusKm);
+  });
+
+  group('independent rescuers', () {
+    test('a shelter has everything; an independent its defaults, never more than allowed', () {
+      expect(orgEnabledPermissions(null), OrgPermission.values.toSet());
+      expect(orgEnabledPermissions({'kind': 'independent'}), IndependentRescuer.defaults);
+      expect(
+        orgEnabledPermissions({
+          'kind': 'independent',
+          'enabledPermissions': ['rescue', 'adoptions', 'campaigns'],
+        }),
+        {OrgPermission.rescue, OrgPermission.adoptions},
+      );
+    });
+
+    test("even the owner gets only the organization's modules", () {
+      final org = {'kind': 'independent', 'ownerId': 'me'};
+      final owner = capabilitiesFrom(uid: 'me', ownerId: 'me', member: null, org: org);
+      expect(owner.isAdmin, isTrue);
+      expect(owner.isIndependent, isTrue);
+      expect(owner.permissions, IndependentRescuer.defaults);
+      expect(owner.canViewFinances, isFalse);
+      expect(owner.canManageVolunteers, isFalse);
+      final staff = capabilitiesFrom(uid: 's', ownerId: 'me', member: {'role': 'staff'}, org: org);
+      expect(staff.permissions, IndependentRescuer.defaults);
+      // A shelter is unchanged.
+      expect(capabilitiesFrom(uid: 'me', ownerId: 'me', member: null).permissions, OrgPermission.values.toSet());
+    });
   });
 }

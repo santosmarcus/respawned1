@@ -8,6 +8,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:respawnd1/core/widgets/image_source_sheet.dart';
 import 'package:respawnd1/app_theme.dart';
+import 'package:respawnd1/core/models/organization/org_permission.dart';
 import 'package:respawnd1/core/models/rescue/clinic_search_result.dart';
 import 'package:respawnd1/core/repos/auth_service.dart';
 import 'package:respawnd1/core/repos/organization_repository.dart';
@@ -57,13 +58,42 @@ class OrganizationSignupDetails {
     required this.contactNumber,
     required this.address,
     required this.pin,
+    this.kind = OrgKind.shelter,
   });
 
   final String name;
   final String contactNumber;
   final String address;
   final ClinicSearchResult pin;
+
+  /// An independent rescuer: [address] is a general area and [pin] their
+  /// home or foster location (kept private).
+  final OrgKind kind;
 }
+
+/// One group of verification photos.
+class _DocGroup {
+  const _DocGroup(this.key, this.title, this.hint, {this.required = true});
+  final String key;
+  final String title;
+  final String hint;
+  final bool required;
+}
+
+const _shelterGroups = [
+  _DocGroup('registration', 'Registration Document(s)', 'e.g. SEC/DTI registration, business permit cover page'),
+  _DocGroup('permits', 'Permit or Accreditation', 'e.g. animal welfare accreditation, LGU permit'),
+  _DocGroup('shelterPhotos', 'Shelter / Office Photos', 'Multiple photos of your facility are encouraged'),
+];
+
+const _independentGroups = [
+  _DocGroup('validId', 'Valid ID', 'A government-issued ID of the person applying (front and back)'),
+  _DocGroup('proofOfAddress', 'Proof of Address', 'e.g. a utility bill or barangay certificate. Never shown to the public.'),
+  _DocGroup('rescueHistory', 'Rescue History or References',
+      'Photos of past rescues, vet receipts, or a reference letter from a shelter, vet or barangay'),
+  _DocGroup('barangayClearance', 'Barangay Clearance (optional)', 'Helps your application be approved faster',
+      required: false),
+];
 
 /// Account (switch account) and Log out on a signup screen (they have no
 /// other way out when opened as the first screen). Unsubmitted details and
@@ -111,8 +141,15 @@ class _OrganizationVerificationScreenState extends State<OrganizationVerificatio
   // Null until Submit creates the organization (new signups only).
   late String? _orgId = widget.organizationId;
 
-  final Map<String, List<String>> _existingUrls = {'registration': [], 'permits': [], 'shelterPhotos': []};
-  final Map<String, List<File>> _pendingFiles = {'registration': [], 'permits': [], 'shelterPhotos': []};
+  late OrgKind _kind = widget.details?.kind ?? OrgKind.shelter;
+  List<_DocGroup> get _groups => _kind == OrgKind.independent ? _independentGroups : _shelterGroups;
+
+  final Map<String, List<String>> _existingUrls = {
+    for (final g in [..._shelterGroups, ..._independentGroups]) g.key: <String>[],
+  };
+  final Map<String, List<File>> _pendingFiles = {
+    for (final g in [..._shelterGroups, ..._independentGroups]) g.key: <File>[],
+  };
 
   @override
   void initState() {
@@ -135,6 +172,7 @@ class _OrganizationVerificationScreenState extends State<OrganizationVerificatio
       final verification = (doc.data()?['verification'] as Map?) ?? const {};
       if (!mounted) return;
       setState(() {
+        _kind = OrgKind.fromName(doc.data()?['kind'] as String?);
         for (final group in _existingUrls.keys) {
           _existingUrls[group] = List<String>.from(verification[group] ?? const []);
         }
@@ -165,9 +203,10 @@ class _OrganizationVerificationScreenState extends State<OrganizationVerificatio
 
   void _removePending(String group, int index) => setState(() => _pendingFiles[group]!.removeAt(index));
 
-  /// Every group has a file, already uploaded or picked and waiting.
-  bool get _hasAllGroups =>
-      _existingUrls.keys.every((g) => _existingUrls[g]!.isNotEmpty || _pendingFiles[g]!.isNotEmpty);
+  /// Every required group has a file, already uploaded or picked and waiting.
+  bool get _hasAllGroups => _groups
+      .where((g) => g.required)
+      .every((g) => _existingUrls[g.key]!.isNotEmpty || _pendingFiles[g.key]!.isNotEmpty);
 
   /// Uploads every picked file, group by group, recording each group's
   /// URLs on the organization as soon as that group finishes so a failure
@@ -207,7 +246,9 @@ class _OrganizationVerificationScreenState extends State<OrganizationVerificatio
     if (!_hasAllGroups) {
       ScaffoldMessenger.of(context).showSnackBar(
         appSnackBar(
-          'Registration document(s), permit, and shelter photos are all required.',
+          _kind == OrgKind.independent
+              ? 'A valid ID, proof of address and your rescue history or references are required.'
+              : 'Registration document(s), permit, and shelter photos are all required.',
           kind: AppMessageKind.error,
         ),
       );
@@ -241,6 +282,7 @@ class _OrganizationVerificationScreenState extends State<OrganizationVerificatio
           pinPlaceId: details.pin.placeId,
           pinLat: details.pin.lat,
           pinLng: details.pin.lng,
+          kind: details.kind,
         );
       }
       final orgId = _orgId!;
@@ -305,7 +347,7 @@ class _OrganizationVerificationScreenState extends State<OrganizationVerificatio
       backgroundColor: AppColors.background,
       appBar: AppBar(
         backgroundColor: AppColors.textPrimary,
-        title: Text('Organization Verification', style: GoogleFonts.tiltWarp(fontSize: 17, color: AppColors.background)),
+        title: Text(_kind == OrgKind.independent ? 'Rescuer Verification' : 'Organization Verification', style: GoogleFonts.tiltWarp(fontSize: 17, color: AppColors.background)),
         iconTheme: const IconThemeData(color: AppColors.background),
         actions: const [SignupLogOutButton()],
       ),
@@ -332,14 +374,16 @@ class _OrganizationVerificationScreenState extends State<OrganizationVerificatio
                 Text('Upload verification documents',
                     style: GoogleFonts.tiltWarp(fontSize: 18, color: AppColors.textPrimary)),
                 const SizedBox(height: 6),
-                Text('JPG or PNG only. All three groups are required. Your photos upload when you tap Submit.',
+                Text(
+                    _kind == OrgKind.independent
+                        ? 'JPG or PNG only. A system admin reviews them; they are never shown on your profile. '
+                            'Your photos upload when you tap Submit.'
+                        : 'JPG or PNG only. All three groups are required. Your photos upload when you tap Submit.',
                     style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary)),
-                const SizedBox(height: 20),
-                _uploadGroup('registration', 'Registration Document(s)', 'e.g. SEC/DTI registration, business permit cover page'),
-                const SizedBox(height: 20),
-                _uploadGroup('permits', 'Permit or Accreditation', 'e.g. animal welfare accreditation, LGU permit'),
-                const SizedBox(height: 20),
-                _uploadGroup('shelterPhotos', 'Shelter / Office Photos', 'Multiple photos of your facility are encouraged'),
+                for (final g in _groups) ...[
+                  const SizedBox(height: 20),
+                  _uploadGroup(g.key, g.title, g.hint),
+                ],
                 const SizedBox(height: 28),
                 SizedBox(
                   width: double.infinity,

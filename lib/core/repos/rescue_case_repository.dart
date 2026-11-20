@@ -230,12 +230,27 @@ class RescueCaseRepository {
     required String caseId,
     required String actorUid,
     required String actorName,
+    bool byChoice = false,
     String? note,
   }) => transport.startOrganizationTransport(
     caseId: caseId,
+    byChoice: byChoice,
     actorUid: actorUid,
     actorName: actorName,
     note: note,
+  );
+
+  /// Delegates to [TransportAssignmentRepository.stopOrganizationTransport].
+  Future<void> stopOrganizationTransport({
+    required String caseId,
+    required String actorUid,
+    required String actorName,
+    String? reason,
+  }) => transport.stopOrganizationTransport(
+    caseId: caseId,
+    actorUid: actorUid,
+    actorName: actorName,
+    reason: reason,
   );
 
   /// Delegates to [TransportAssignmentRepository.confirmOrganizationTransportArrived].
@@ -435,11 +450,15 @@ class RescueCaseRepository {
   /// Delegates to [CaseReferralRepository.referToVolunteer].
   Future<String> referToVolunteer({
     required String caseId,
+    required String targetOrgId,
+    required String targetOrgName,
     String? note,
     required String actorUid,
     required String actorName,
   }) => referrals.referToVolunteer(
     caseId: caseId,
+    targetOrgId: targetOrgId,
+    targetOrgName: targetOrgName,
     note: note,
     actorUid: actorUid,
     actorName: actorName,

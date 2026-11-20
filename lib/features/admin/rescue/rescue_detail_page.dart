@@ -7,6 +7,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:video_player/video_player.dart';
+import 'package:respawnd1/core/models/rescue/case_claim_rules.dart';
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/core/models/rescue/activity_log_entry.dart';
 import 'package:respawnd1/core/models/rescue/closure_reason.dart';
@@ -100,6 +101,15 @@ class _RescueDetailPageState extends ConsumerState<RescueDetailPage> {
         openForTransfer: result.openForTransfer,
         readinessSnapshot: result.readinessSnapshot,
       );
+    } on CaseClaimException catch (e) {
+      // Someone else took it first, or an independent rescuer can't take it
+      // yet: say so, and leave a case that's gone.
+      if (mounted) {
+        setState(() => _isLoading = false);
+        ScaffoldMessenger.of(context).showSnackBar(appSnackBar(e.message, kind: AppMessageKind.error));
+        if (e.alreadyTaken) Navigator.maybePop(context);
+      }
+      return;
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -380,6 +390,39 @@ class _RescueDetailPageState extends ConsumerState<RescueDetailPage> {
         ScaffoldMessenger.of(context).showSnackBar(
           appSnackBar('Could not reject case: $e', kind: AppMessageKind.error),
         );
+      }
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
+  /// The team can't finish the trip: back to Awaiting Assignment, then
+  /// straight to Assign Transporter.
+  Future<void> _stopOrganizationTransport(RescueCase c) async {
+    final reason = await showTextInputDialog(
+      context,
+      title: 'Switch to a transporter?',
+      message: 'The case goes back to waiting for a transporter, and you can offer it to one now.',
+      label: 'What happened (optional)',
+      confirmLabel: 'Switch',
+    );
+    if (reason == null || !mounted) return;
+    setState(() => _isLoading = true);
+    try {
+      await ref.read(rescueCaseRepositoryProvider).stopOrganizationTransport(
+        caseId: c.id,
+        actorUid: _actorUid,
+        actorName: _actorName,
+        reason: reason,
+      );
+      if (!mounted) return;
+      _push(AssignRiderPage(
+        caseId: c.id,
+        data: {...c.raw, 'status': RescueStatus.awaitingAssignment.firestoreValue}..remove('organizationTransport'),
+      ));
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(appSnackBar('Could not switch: $e', kind: AppMessageKind.error));
       }
     } finally {
       if (mounted) setState(() => _isLoading = false);
@@ -684,7 +727,8 @@ class _RescueDetailPageState extends ConsumerState<RescueDetailPage> {
         }
       case RescueStatus.ongoing when c.raw['organizationTransport'] is Map:
         primary = CaseAction('Arrived — Start Treatment', () => _confirmOrganizationArrived(c));
-        secondary = CaseAction('Close Case', () => _closeCase(c), destructive: true);
+        secondary = CaseAction('Switch to a Transporter', () => _stopOrganizationTransport(c));
+        overflow.add(CaseAction('Close Case', () => _closeCase(c), icon: Icons.block, destructive: true));
       case RescueStatus.ongoing:
         primary = CaseAction('Track Case', () => _push(AdminTrackCasePage(caseId: c.id, data: c.raw)));
         secondary = reassignClinic;
@@ -837,7 +881,9 @@ class _RescueDetailPageState extends ConsumerState<RescueDetailPage> {
         return CaseOutcomeBanner(
           tone: CaseBannerTone.info,
           icon: Icons.local_shipping_outlined,
-          title: 'Your organization is transporting',
+          title: (c.raw['organizationTransport'] as Map)['byChoice'] == true
+              ? 'Your team is transporting'
+              : 'Your organization is transporting',
           message: 'Bringing this animal to ${c.vetClinicName ?? 'the clinic'} (recorded by '
               '${(c.raw['organizationTransport'] as Map)['byName'] ?? 'staff'}). Confirm arrival to start treatment.',
         );

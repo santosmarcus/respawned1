@@ -2,7 +2,9 @@ import 'package:cloud_functions/cloud_functions.dart';
 import 'package:flutter/material.dart';
 
 import 'package:respawnd1/app_theme.dart';
+import 'package:respawnd1/core/models/organization/org_permission.dart';
 import 'package:respawnd1/core/repos/organization_repository.dart';
+import 'package:respawnd1/features/admin/organizations/independent_limits_sheet.dart';
 import 'package:respawnd1/core/widgets/app_dialogs.dart';
 import 'package:respawnd1/core/widgets/app_messages.dart';
 import 'package:respawnd1/features/admin/volunteers/application_review.dart';
@@ -63,7 +65,10 @@ class _OrganizationReviewPageState extends State<OrganizationReviewPage> {
         final ok = await showConfirmActionDialog(
           context,
           title: 'Approve $name?',
-          message: 'Its staff get the admin tools, and it starts receiving cases in its service areas.',
+          message: org.kind == OrgKind.independent
+              ? 'They get rescue, animal records and daily care, and nearby cases open to them after shelters '
+                  'have had first look. You can turn on more modules from Approved.'
+              : 'Its staff get the admin tools, and it starts receiving cases in its service areas.',
           confirmLabel: 'Approve',
         );
         if (!ok) return;
@@ -115,26 +120,48 @@ class _OrganizationReviewPageState extends State<OrganizationReviewPage> {
         name: org.name,
         phone: org.phone,
         lines: [
+          if (org.kind == OrgKind.independent) ('Type', 'Independent rescuer'),
           ('Email', org.email),
-          ('Location', org.location),
+          (org.kind == OrgKind.independent ? 'Area' : 'Location', org.location),
           ('Reviewed by', org.reviewedByName),
           if (org.documents.isEmpty) ('Documents', 'None uploaded'),
         ],
         submittedAt: org.submittedAt,
         reviewedAt: org.reviewedAt,
         reviewNote: org.note,
-        extra: org.documents.isEmpty
+        extra: org.documents.isEmpty && !_canSetLimits(org)
             ? null
-            : SizedBox(
-                height: 92,
-                child: ListView.separated(
-                  scrollDirection: Axis.horizontal,
-                  itemCount: org.documents.length,
-                  separatorBuilder: (_, _) => const SizedBox(width: 8),
-                  itemBuilder: (context, i) => DocumentThumb(doc: org.documents[i]),
-                ),
+            : Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  if (org.documents.isNotEmpty)
+                    SizedBox(
+                      height: 92,
+                      child: ListView.separated(
+                        scrollDirection: Axis.horizontal,
+                        itemCount: org.documents.length,
+                        separatorBuilder: (_, _) => const SizedBox(width: 8),
+                        itemBuilder: (context, i) => DocumentThumb(doc: org.documents[i]),
+                      ),
+                    ),
+                  if (_canSetLimits(org))
+                    TextButton.icon(
+                      onPressed: () => showIndependentLimitsSheet(
+                        context,
+                        organizationId: org.id,
+                        name: org.name,
+                        repository: _repo,
+                      ),
+                      icon: const Icon(Icons.tune, size: 18, color: AppColors.textPrimary),
+                      label: const Text('Modules & limits', style: TextStyle(color: AppColors.textPrimary)),
+                    ),
+                ],
               ),
       );
+
+  /// Approved independent rescuers: modules, team size and capacity.
+  bool _canSetLimits(OrganizationReviewItem org) =>
+      org.kind == OrgKind.independent && org.status == OrgVerificationStatus.approved;
 
   bool _matches(OrganizationReviewItem org) {
     if (_query.isEmpty) return true;

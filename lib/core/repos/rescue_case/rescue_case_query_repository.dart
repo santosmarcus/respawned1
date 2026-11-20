@@ -5,6 +5,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/foundation.dart';
 
+import 'package:respawnd1/core/models/organization/org_permission.dart';
 import 'package:respawnd1/core/models/rescue/activity_log_entry.dart';
 import 'package:respawnd1/core/models/rescue/community_report.dart';
 import 'package:respawnd1/core/models/rescue/rescue_case.dart';
@@ -33,9 +34,16 @@ class RescueCaseQueryRepository {
   /// own query, merged and de-duplicated by id. A case referred elsewhere
   /// that is still in the unowned pool (referred by platform staff) is left
   /// out: only the target organization answers it.
+  ///
+  /// An independent rescuer gets only the unowned cases that opened to it
+  /// (nearbyIndependentIds contains it, and independentsOpenAt has passed:
+  /// shelters see a new report first). [includePool] false leaves the
+  /// unowned pool out for an independent, for a [refine] that already has an
+  /// array-contains filter (Firestore allows one per query).
   Stream<List<QueryDocumentSnapshot<Map<String, dynamic>>>> watchScopedCaseDocs(
     Query<Map<String, dynamic>> Function(Query<Map<String, dynamic>> q) refine, {
     bool includeReferred = false,
+    bool includePool = true,
   }) async* {
     final scope = await OrgListScope.current(firestore: _store.db);
     if (scope.isAll) {
@@ -47,14 +55,27 @@ class RescueCaseQueryRepository {
       return;
     }
     final myOrgId = scope is OneOrganization ? scope.organizationId : '';
+    var independent = false;
+    if (myOrgId.isNotEmpty) {
+      try {
+        final org = await _store.db.collection('organizations').doc(myOrgId).get();
+        independent = OrgKind.fromName(org.data()?['kind'] as String?) == OrgKind.independent;
+      } catch (_) {}
+    }
+    bool openToMe(QueryDocumentSnapshot<Map<String, dynamic>> d) {
+      final target = d.data()['referredToOrgId'] as String? ?? '';
+      if (target.isNotEmpty && target != myOrgId) return false;
+      if (!independent) return true;
+      final openAt = d.data()['independentsOpenAt'];
+      return openAt is Timestamp && !openAt.toDate().isAfter(DateTime.now());
+    }
+
+    var pool = _store.cases.where('organizationId', isEqualTo: '');
+    if (independent) pool = pool.where('nearbyIndependentIds', arrayContains: myOrgId);
     final streams = [
       refine(scope.apply(_store.cases)).snapshots().map((s) => s.docs),
-      refine(_store.cases.where('organizationId', isEqualTo: '')).snapshots().map(
-            (s) => s.docs.where((d) {
-              final target = d.data()['referredToOrgId'] as String? ?? '';
-              return target.isEmpty || target == myOrgId;
-            }).toList(),
-          ),
+      if (!independent || includePool)
+        refine(pool).snapshots().map((s) => s.docs.where(openToMe).toList()),
       if (includeReferred && myOrgId.isNotEmpty)
         _store.cases.where('referredToOrgId', isEqualTo: myOrgId).snapshots().map((s) => s.docs),
     ];
@@ -216,7 +237,7 @@ class RescueCaseQueryRepository {
   /// case with no `activeAnimalStages` written yet (every case predating
   /// this round) still appears via its scalar `status` exactly as before.
   Stream<List<RescueCase>> streamCasesByActiveStage(String stage) {
-    return watchScopedCaseDocs((q) => q.where('activeAnimalStages', arrayContains: stage))
+    return watchScopedCaseDocs((q) => q.where('activeAnimalStages', arrayContains: stage), includePool: false)
         .map((docs) {
           final cases = <RescueCase>[];
           for (final doc in docs) {
