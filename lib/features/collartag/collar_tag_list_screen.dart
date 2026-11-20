@@ -281,7 +281,7 @@ class _TagRow extends StatelessWidget {
   const _TagRow({required this.tag, required this.onTap});
 
   String get _statusText =>
-      tag.qrEnabled ? 'Ready to view' : 'Order is being processed';
+      tag.qrEnabled ? 'QR code ready' : 'Waiting for QR code approval';
 
   @override
   Widget build(BuildContext context) {

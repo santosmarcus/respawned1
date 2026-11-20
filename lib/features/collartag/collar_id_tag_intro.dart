@@ -85,8 +85,8 @@ class CollarIdTagIntroScreen extends StatelessWidget {
                   ),
                   const SizedBox(height: 16),
                   Text(
-                    'A small fee applies, with all proceeds donated to partner rescue '
-                        'organizations to support animal rescue and welfare programs.',
+                    'Creating a collar tag is free. Once our team approves its QR '
+                        'code, you can share it and print it for your pet\'s collar.',
                     style: GoogleFonts.zain(
                         fontSize: 14, color: AppColors.textPrimary),
                   ),

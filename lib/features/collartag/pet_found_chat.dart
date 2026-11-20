@@ -1,10 +1,12 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/core/widgets/app_messages.dart';
 import 'package:respawnd1/core/utils/app_date_format.dart';
+import 'collar_tag_data_model.dart';
 
 class PetFoundChatScreen extends StatefulWidget {
   final String tagId;
@@ -54,6 +56,8 @@ class _PetFoundChatScreenState extends State<PetFoundChatScreen> {
     try {
       await _sessionRef.collection('messages').add({
         'sender': widget.isOwner ? 'owner' : 'finder',
+        // firestore.rules checks this is the chat's owner or its finder.
+        'senderId': FirebaseAuth.instance.currentUser!.uid,
         'text': text,
         'sentAt': FieldValue.serverTimestamp(),
       });
@@ -63,34 +67,19 @@ class _PetFoundChatScreenState extends State<PetFoundChatScreen> {
     }
   }
 
+  // Closes every finder's chat for this tag, puts the tag back to active
+  // (clearing the last-seen pin) and marks its Lost & Found report reunited
+  // — the same as "Mark as Found" on the ID card (CollarTagLostFound).
   Future<void> _markAsFound() async {
     setState(() => _resolving = true);
     try {
+      final tagSnap = await FirebaseFirestore.instance
+          .collection('collarTags')
+          .doc(widget.tagId)
+          .get();
+      final tag = CollarTagData.fromFirestore(tagSnap.data() ?? const {}, widget.tagId);
       await _sessionRef.set({'status': 'resolved'}, SetOptions(merge: true));
-
-      final tagRef =
-      FirebaseFirestore.instance.collection('collarTags').doc(widget.tagId);
-      final update = <String, dynamic>{
-        'status': 'active',
-        'activeRescueSessionId': FieldValue.delete(),
-      };
-      await tagRef.set(update, SetOptions(merge: true));
-
-      // Keep the owner's users/{uid}/collarTags mirror in sync too — this
-      // screen previously only wrote the root collarTags doc, so a pet
-      // resolved from here (rather than the ID card's own toggle) left
-      // the mirrored copy stuck showing status:'lost' forever, which is
-      // what CollarTagsListScreen actually reads from.
-      final tagSnap = await tagRef.get();
-      final ownerId = tagSnap.data()?['ownerId'] as String?;
-      if (ownerId != null) {
-        await FirebaseFirestore.instance
-            .collection('users')
-            .doc(ownerId)
-            .collection('collarTags')
-            .doc(widget.tagId)
-            .set(update, SetOptions(merge: true));
-      }
+      await CollarTagLostFound.markFound(tag);
 
       if (mounted) Navigator.pop(context);
     } catch (e) {
@@ -323,7 +312,7 @@ class _PetFoundChatScreenState extends State<PetFoundChatScreen> {
                     const SizedBox(height: 8),
                     Text(
                       widget.isOwner
-                          ? 'A rescuer has found your pet at this location:'
+                          ? '${(session['finderName'] as String?)?.trim().isNotEmpty == true ? session['finderName'] : 'A rescuer'} found your pet at this location:'
                           : "Thanks for helping! We've notified ${widget.petName.isNotEmpty ? widget.petName : 'the pet'}'s "
                           'owner. Here\'s where you scanned the tag:',
                       textAlign: TextAlign.center,

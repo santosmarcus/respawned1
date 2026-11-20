@@ -1270,3 +1270,85 @@ describe('dashboard and analytics gaps: care rounds, alert claims, summaries, il
     await assertFails(as('staffB').doc('animals/animalA').update(review));
   });
 });
+
+// Collar tags and their scan chats: a tag opens for anyone with its id, but
+// only its owner lists or edits it; staff approve QR codes. Each finder of
+// a lost pet gets a private chat with the owner.
+describe('collar tags and scan chats', () => {
+  beforeEach(async () => {
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      const db = ctx.firestore();
+      await db.doc('collarTags/tag1').set({ ownerId: 'reporter', name: 'Bantay', ownerMobile: '0917', status: 'lost', qrEnabled: true });
+      await db.doc('collarTags/tag2').set({ ownerId: 'stranger', name: 'Mingming', status: 'active' });
+      await db.doc('rescueSessions/s1').set({ tagId: 'tag1', ownerId: 'reporter', finderId: 'adopter', status: 'active', chatEnabledByOwner: true });
+      await db.doc('rescueSessions/s2').set({ tagId: 'tag1', ownerId: 'reporter', finderId: 'adopter', status: 'active', chatEnabledByOwner: false });
+      await db.doc('rescueSessions/legacy').set({ tagId: 'tag1', status: 'active', chatEnabledByOwner: true });
+    });
+  });
+
+  test('anyone signed in opens a tag by its id, but only owners list theirs', async () => {
+    await assertSucceeds(as('adopter').doc('collarTags/tag1').get());
+    await assertSucceeds(as('reporter').collection('collarTags').where('ownerId', '==', 'reporter').get());
+    await assertFails(as('adopter').collection('collarTags').where('ownerId', '==', 'reporter').get());
+    await assertFails(as('adopter').collection('collarTags').get());
+    await assertSucceeds(as('admin').collection('collarTags').get());
+  });
+
+  test("nobody edits or deletes someone else's tag", async () => {
+    await assertFails(as('adopter').doc('collarTags/tag1').update({ ownerMobile: '000' }));
+    await assertFails(as('adopter').doc('collarTags/tag1').update({ ownerId: 'adopter' }));
+    await assertFails(as('adopter').doc('collarTags/tag1').delete());
+  });
+
+  test('owners edit and mark their own tag lost or found, but not approve its QR', async () => {
+    await assertSucceeds(as('reporter').doc('collarTags/tag1').update({ status: 'active', linkedAlertId: FieldValue.delete() }));
+    await assertFails(as('reporter').doc('collarTags/tag1').update({ qrEnabled: false }));
+    await assertFails(as('reporter').doc('collarTags/tag1').update({ ownerId: 'adopter' }));
+    await assertSucceeds(as('reporter').doc('collarTags/tag1').delete());
+  });
+
+  test('a new tag is created by its owner, without staff fields', async () => {
+    await assertSucceeds(as('adopter').doc('collarTags/new1').set({ ownerId: 'adopter', name: 'Brownie' }));
+    await assertFails(as('adopter').doc('collarTags/new2').set({ ownerId: 'reporter', name: 'Brownie' }));
+    await assertFails(as('adopter').doc('collarTags/new3').set({ ownerId: 'adopter', qrEnabled: true }));
+  });
+
+  test('staff approve QR codes and nothing else', async () => {
+    await assertSucceeds(as('admin').doc('collarTags/tag2').update({ qrEnabled: true }));
+    await assertFails(as('admin').doc('collarTags/tag2').update({ ownerMobile: '000' }));
+  });
+
+  test("only the chat's owner and finder read it", async () => {
+    await assertSucceeds(as('reporter').doc('rescueSessions/s1').get());
+    await assertSucceeds(as('adopter').doc('rescueSessions/s1').get());
+    await assertFails(as('stranger').doc('rescueSessions/s1').get());
+    await assertSucceeds(as('adopter').collection('rescueSessions/s1/messages').get());
+    await assertFails(as('stranger').collection('rescueSessions/s1/messages').get());
+    await assertSucceeds(as('reporter').collection('rescueSessions').where('tagId', '==', 'tag1').where('ownerId', '==', 'reporter').get());
+    await assertFails(as('stranger').collection('rescueSessions').where('tagId', '==', 'tag1').get());
+  });
+
+  test('the owner enables or closes the chat; the finder cannot', async () => {
+    await assertSucceeds(as('reporter').doc('rescueSessions/s2').update({ chatEnabledByOwner: true }));
+    await assertFails(as('adopter').doc('rescueSessions/s2').update({ chatEnabledByOwner: true }));
+    await assertFails(as('adopter').doc('rescueSessions/s1').update({ status: 'resolved' }));
+    await assertSucceeds(as('reporter').doc('rescueSessions/s1').update({ status: 'resolved' }));
+  });
+
+  test('each side posts as itself, only once the owner enabled the chat', async () => {
+    const msg = (uid, sender, over = {}) => ({ sender, senderId: uid, text: 'Hi', sentAt: new Date(), ...over });
+    await assertSucceeds(as('adopter').collection('rescueSessions/s1/messages').add(msg('adopter', 'finder')));
+    await assertSucceeds(as('reporter').collection('rescueSessions/s1/messages').add(msg('reporter', 'owner')));
+    await assertFails(as('adopter').collection('rescueSessions/s1/messages').add(msg('adopter', 'owner')));
+    await assertFails(as('stranger').collection('rescueSessions/s1/messages').add(msg('stranger', 'finder')));
+    await assertFails(as('adopter').collection('rescueSessions/s1/messages').add(msg('reporter', 'finder')));
+    await assertFails(as('adopter').collection('rescueSessions/s2/messages').add(msg('adopter', 'finder')));
+  });
+
+  test('chats from before they were per finder keep working', async () => {
+    await assertSucceeds(as('stranger').doc('rescueSessions/legacy').get());
+    await assertSucceeds(as('stranger').collection('rescueSessions/legacy/messages').add({ sender: 'finder', text: 'Found him', sentAt: new Date() }));
+    await assertSucceeds(as('reporter').doc('rescueSessions/legacy').update({ status: 'resolved' }));
+    await assertFails(as('stranger').doc('rescueSessions/legacy').update({ status: 'resolved' }));
+  });
+});

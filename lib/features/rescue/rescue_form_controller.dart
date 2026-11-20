@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 
 import 'package:respawnd1/core/utils/validators.dart';
+import 'package:respawnd1/features/collartag/collar_tag_data_model.dart';
 import 'package:respawnd1/features/rescue/rescue_form_options.dart';
 
 /// One media slot (photo or video) picked for the report.
@@ -183,6 +184,43 @@ class RescueFormController {
   /// The lost pet's Health & Behavior Assessment and Bite Risk, as the
   /// owner knows them (same fields and choices as a found animal's card).
   final FoundAnimalEntry lostAnimal = FoundAnimalEntry();
+
+  /// The owner's registered collar-tag pet this lost report is for, if they
+  /// picked one. Submitting marks that tag lost and links the report to it
+  /// (CollarTagLostFound.linkLostReport).
+  CollarTagData? linkedCollarTag;
+
+  /// The tag's photo stands in for the report's photo when none is added.
+  bool get hasLinkedTagPhoto => linkedCollarTag?.petImageUrl?.isNotEmpty == true;
+
+  /// Fills the owner's fields from a registered collar tag.
+  void applyCollarTag(CollarTagData tag) {
+    linkedCollarTag = tag;
+    if (tag.name.trim().isNotEmpty) petNameController.text = tag.name.trim();
+    final (species, breed) = CollarTagLostFound.speciesAndBreed(tag.breed);
+    if (species != null) {
+      selectedAnimalType = species;
+      if (breed.isEmpty) {
+        lostBreed = null;
+      } else if (breedOptionsFor(species).contains(breed)) {
+        lostBreed = breed;
+      } else {
+        lostBreed = kOthersBreedLabel;
+        lostBreedOtherController.text = breed;
+      }
+    }
+    lostSex = switch (tag.sex.trim().toUpperCase()) {
+      'M' || 'MALE' => 'Male',
+      'F' || 'FEMALE' => 'Female',
+      _ => lostSex,
+    };
+    if (tag.colorMarkings.trim().isNotEmpty) {
+      lostColorController.text = tag.colorMarkings.trim();
+    }
+    if (tag.ownerMobile.trim().isNotEmpty) {
+      ownerContactController.text = tag.ownerMobile.trim();
+    }
+  }
 
   String get lostBreedText {
     if (lostBreed == null) return '';
@@ -386,7 +424,8 @@ class RescueFormController {
       return 'Please tell us whether you are the owner.';
     }
 
-    if (filledMediaCount < 1) {
+    // An owner who picked a registered pet can use its collar-tag photo.
+    if (filledMediaCount < 1 && !(isOwner == true && hasLinkedTagPhoto)) {
       return 'Please add at least 1 photo.';
     }
 

@@ -248,6 +248,11 @@ class _CollarTagFormScreenState extends State<CollarTagFormScreen> {
         vacImageUrl = await _uploadImage(
             _vaccinationImage!, 'collar_tags/$uid/$tagId/vaccination.jpg');
       }
+      // Editing without picking new photos keeps the saved ones (they used
+      // to be overwritten with empty URLs). The vaccination photo goes only
+      // when the pet is no longer marked vaccinated.
+      petImageUrl ??= widget.existingTag?.petImageUrl;
+      if (_vaccinated) vacImageUrl ??= widget.existingTag?.vaccinationImageUrl;
 
       final breedValue = _petType != null
           ? '$_petType - ${_breedCtrl.text.trim()}'
@@ -311,8 +316,16 @@ class _CollarTagFormScreenState extends State<CollarTagFormScreen> {
           context,
           MaterialPageRoute(
             builder: (_) => CollarIdTagCardScreen(
-              tagData: tagData,
-              isNewlyCreated: true,
+              // The saved tag as stored (status, QR, links), so an edited
+              // tag opens as itself rather than as a brand-new one.
+              tagData: tagData
+                ..ownerId = uid
+                ..status = widget.existingTag?.status ?? 'active'
+                ..qrEnabled = widget.existingTag?.qrEnabled ?? false
+                ..linkedAlertId = widget.existingTag?.linkedAlertId
+                ..activeRescueSessionId = widget.existingTag?.activeRescueSessionId
+                ..lastSeenAddress = widget.existingTag?.lastSeenAddress,
+              isNewlyCreated: !isEditing,
             ),
           ),
         );
@@ -382,6 +395,12 @@ class _CollarTagFormScreenState extends State<CollarTagFormScreen> {
                           ? ClipRRect(
                         borderRadius: BorderRadius.circular(8),
                         child: Image.file(_petImage!, fit: BoxFit.cover),
+                      )
+                          : (widget.existingTag?.petImageUrl?.isNotEmpty == true)
+                          ? ClipRRect(
+                        borderRadius: BorderRadius.circular(8),
+                        child: Image.network(widget.existingTag!.petImageUrl!,
+                            fit: BoxFit.cover),
                       )
                           : const Center(
                         child: Icon(Icons.add,
@@ -521,6 +540,13 @@ class _CollarTagFormScreenState extends State<CollarTagFormScreen> {
                             ? ClipRRect(
                           borderRadius: BorderRadius.circular(8),
                           child: Image.file(_vaccinationImage!, fit: BoxFit.cover),
+                        )
+                            : (widget.existingTag?.vaccinationImageUrl?.isNotEmpty == true)
+                            ? ClipRRect(
+                          borderRadius: BorderRadius.circular(8),
+                          child: Image.network(
+                              widget.existingTag!.vaccinationImageUrl!,
+                              fit: BoxFit.cover),
                         )
                             : const Center(
                           child: Icon(Icons.add,

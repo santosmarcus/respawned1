@@ -1,5 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:respawnd1/features/collartag/collar_tag_data_model.dart';
 import 'package:respawnd1/features/rescue/rescue_form_controller.dart';
 import 'package:respawnd1/features/rescue/rescue_form_options.dart';
 
@@ -353,5 +354,52 @@ void main() {
       ..breed = kOthersBreedLabel
       ..breedOtherController.text = '  Mixed  ';
     expect(entry.breedText, 'Mixed');
+  });
+
+  group('registered collar-tag pet on the owner form', () {
+    test('picking a pet fills the owner fields', () {
+      final form = _form()..isOwner = true;
+      form.applyCollarTag(CollarTagData(
+        tagId: 't1',
+        name: 'Bantay',
+        breed: 'Dog - Aspin',
+        sex: 'M',
+        colorMarkings: 'Brown with white chest',
+        ownerMobile: '+639171234567',
+        petImageUrl: 'https://example.com/bantay.jpg',
+      ));
+      expect(form.linkedCollarTag?.tagId, 't1');
+      expect(form.petNameController.text, 'Bantay');
+      expect(form.selectedAnimalType, kDogSpecies);
+      expect(form.lostBreedText, 'Aspin');
+      expect(form.lostSex, 'Male');
+      expect(form.lostColorController.text, 'Brown with white chest');
+      expect(form.ownerContactController.text, '+639171234567');
+    });
+
+    test('a breed not on the list goes to Others with its name', () {
+      final form = _form()..isOwner = true;
+      form.applyCollarTag(CollarTagData(tagId: 't2', name: 'Kit', breed: 'Cat - Munchkin X'));
+      expect(form.selectedAnimalType, kCatSpecies);
+      expect(form.lostBreed, kOthersBreedLabel);
+      expect(form.lostBreedText, 'Munchkin X');
+    });
+
+    test("the tag's photo counts as the report's photo", () {
+      final form = _form()..isOwner = true;
+      form.applyCollarTag(CollarTagData(
+        tagId: 't1',
+        name: 'Bantay',
+        breed: 'Dog - Aspin',
+        colorMarkings: 'Brown',
+        ownerMobile: '+639171234567',
+        petImageUrl: 'https://example.com/bantay.jpg',
+      ));
+      form.lastSeenDate = DateTime(2026, 11, 20);
+      expect(form.validateLostPetReport(), isNull);
+
+      form.linkedCollarTag = null;
+      expect(form.validateLostPetReport(), 'Please add at least 1 photo.');
+    });
   });
 }

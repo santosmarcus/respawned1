@@ -8,6 +8,7 @@ import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:image_picker/image_picker.dart';
 
 import 'package:respawnd1/core/models/rescue/report_verification.dart';
+import 'package:respawnd1/features/collartag/collar_tag_data_model.dart';
 import 'package:respawnd1/features/rescue/rescue_form_controller.dart';
 import 'package:respawnd1/features/rescue/rescue_form_options.dart';
 
@@ -338,7 +339,17 @@ class RescueReportService {
         'lat': location.latitude,
         'lng': location.longitude,
         'scannedTagId': form.scannedTagId,
-        'photoUrls': [],
+        // The registered collar tag this report is for (picked on the
+        // form); the tag is marked lost and linked once the report exists.
+        if (form.linkedCollarTag?.tagId != null) ...{
+          'collarTagId': form.linkedCollarTag!.tagId,
+          'source': 'collar_tag',
+        },
+        // The tag's photo until the report's own photos are uploaded (and
+        // when none were added).
+        'photoUrls': [
+          if (form.hasLinkedTagPhoto) form.linkedCollarTag!.petImageUrl!,
+        ],
         'status': 'open',
         'createdAt': Timestamp.now(),
         'serverCreatedAt': FieldValue.serverTimestamp(),
@@ -445,6 +456,23 @@ class RescueReportService {
           'videoUrls': media.videoUrls,
         });
       }
+    }
+
+    // An owner who picked their registered pet: its collar tag goes lost
+    // with the same pin and links this report, so anyone who scans the tag
+    // (in the app or on the web page) can message the owner, and finding
+    // the pet closes both.
+    final tag = form.linkedCollarTag;
+    if (form.isOwner == true && tag?.tagId != null) {
+      await CollarTagLostFound.linkLostReport(
+        tag!,
+        alertId: groupId,
+        lat: location.latitude,
+        lng: location.longitude,
+        address: form.addressController.text.trim().isEmpty
+            ? pinnedAddress
+            : form.addressController.text.trim(),
+      );
     }
   }
 }

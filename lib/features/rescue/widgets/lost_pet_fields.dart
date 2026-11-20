@@ -1,9 +1,14 @@
 // Extracted from rescue_page.dart (behavior-preserving refactor).
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/core/utils/rescue_risk.dart';
+import 'package:respawnd1/features/collartag/collar_id_tag_screen.dart';
+import 'package:respawnd1/features/collartag/collar_tag_data_model.dart';
+import 'package:respawnd1/features/rescue/lost_found_track_case.dart';
 import 'package:respawnd1/features/rescue/rescue_form_controller.dart';
 import 'package:respawnd1/features/rescue/widgets/found_animal_card.dart';
 import 'package:respawnd1/features/rescue/widgets/health_behavior_assessment.dart';
@@ -217,6 +222,10 @@ class OwnerFields extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       mainAxisSize: MainAxisSize.min,
       children: [
+        // The owner's pets with a collar tag: picking one fills the form,
+        // and submitting marks its tag lost (so whoever scans it can
+        // message the owner, in the app or on the web page).
+        _RegisteredPetsPicker(form: form, onChanged: onChanged),
         const SizedBox(height: 20),
         RescueFieldLabel('Pet Name', required: true),
         const SizedBox(height: 6),
@@ -553,6 +562,157 @@ class FinderFields extends StatelessWidget {
           style: GoogleFonts.zain(fontSize: 11, color: AppColors.textSecondary),
         ),
       ],
+    );
+  }
+}
+
+/// "Is it one of your registered pets?" — the signed-in owner's collar-tag
+/// pets (users/{uid}/collarTags). Picking one fills the owner's fields
+/// (RescueFormController.applyCollarTag); tapping it again unpicks it. A
+/// pet already reported lost opens its report instead, so it isn't filed
+/// twice. Hidden when the owner has no collar tags.
+class _RegisteredPetsPicker extends StatelessWidget {
+  const _RegisteredPetsPicker({required this.form, required this.onChanged});
+
+  final RescueFormController form;
+  final VoidCallback onChanged;
+
+  void _openExisting(BuildContext context, CollarTagData tag) {
+    final alertId = tag.linkedAlertId;
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => alertId != null && alertId.isNotEmpty
+            ? LostFoundTrackCasePage(alertId: alertId)
+            : CollarIdTagCardScreen(tagData: tag),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    String? uid;
+    try {
+      uid = FirebaseAuth.instance.currentUser?.uid;
+    } catch (_) {
+      // Firebase not set up (widget tests): no registered pets to show.
+    }
+    if (uid == null) return const SizedBox.shrink();
+    return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+      stream: FirebaseFirestore.instance
+          .collection('users')
+          .doc(uid)
+          .collection('collarTags')
+          .snapshots(),
+      builder: (context, snap) {
+        final tags = [
+          for (final d in snap.data?.docs ??
+              const <QueryDocumentSnapshot<Map<String, dynamic>>>[])
+            CollarTagData.fromFirestore(d.data(), d.id),
+        ]..sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
+        if (tags.isEmpty) return const SizedBox.shrink();
+        final picked = form.linkedCollarTag?.tagId;
+
+        return Padding(
+          padding: const EdgeInsets.only(top: 20),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const RescueSubsectionHeader(
+                'Is it one of your registered pets?',
+                subtitle: 'Pick your pet to fill in its details. Its collar tag '
+                    'will be marked lost, so anyone who scans it can message '
+                    'you, even without the app.',
+              ),
+              const SizedBox(height: 10),
+              SizedBox(
+                height: 112,
+                child: ListView.separated(
+                  scrollDirection: Axis.horizontal,
+                  itemCount: tags.length,
+                  separatorBuilder: (_, _) => const SizedBox(width: 10),
+                  itemBuilder: (context, i) {
+                    final tag = tags[i];
+                    final isLost = tag.status == 'lost';
+                    final selected = tag.tagId == picked;
+                    return GestureDetector(
+                      onTap: () {
+                        if (isLost) {
+                          _openExisting(context, tag);
+                          return;
+                        }
+                        if (selected) {
+                          form.linkedCollarTag = null;
+                        } else {
+                          form.applyCollarTag(tag);
+                        }
+                        onChanged();
+                      },
+                      child: Container(
+                        width: 96,
+                        padding: const EdgeInsets.all(8),
+                        decoration: BoxDecoration(
+                          color: selected ? kRescueSelectedFill : Colors.white,
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(
+                            color: selected ? AppColors.textPrimary : kRescueFieldBorder,
+                            width: selected ? 1.5 : 1,
+                          ),
+                        ),
+                        child: Column(
+                          children: [
+                            CircleAvatar(
+                              radius: 22,
+                              backgroundColor: AppColors.tearspwn,
+                              backgroundImage: tag.petImageUrl?.isNotEmpty == true
+                                  ? NetworkImage(tag.petImageUrl!)
+                                  : null,
+                              child: tag.petImageUrl?.isNotEmpty == true
+                                  ? null
+                                  : const Icon(Icons.pets,
+                                  size: 20, color: AppColors.textPrimary),
+                            ),
+                            const SizedBox(height: 6),
+                            Text(
+                              tag.name.isNotEmpty ? tag.name : 'Unnamed',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: GoogleFonts.zain(
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w700,
+                                  color: AppColors.textPrimary),
+                            ),
+                            Text(
+                              isLost
+                                  ? 'Reported lost'
+                                  : (selected ? 'Selected' : 'Tap to pick'),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: GoogleFonts.zain(
+                                  fontSize: 11,
+                                  color: isLost
+                                      ? AppColors.error
+                                      : AppColors.textSecondary),
+                            ),
+                          ],
+                        ),
+                      ),
+                    );
+                  },
+                ),
+              ),
+              if (picked != null && form.hasLinkedTagPhoto && form.filledMediaCount == 0)
+                Padding(
+                  padding: const EdgeInsets.only(top: 6),
+                  child: Text(
+                    'Your pet\'s collar-tag photo will be used if you don\'t add new photos.',
+                    style: GoogleFonts.zain(fontSize: 11, color: AppColors.textSecondary),
+                  ),
+                ),
+            ],
+          ),
+        );
+      },
     );
   }
 }

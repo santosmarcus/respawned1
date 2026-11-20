@@ -10,6 +10,7 @@ import 'package:geolocator/geolocator.dart';
 import 'package:respawnd1/features/admin/collarTags/nfc_service.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:respawnd1/core/constants/app.links.dart';
+import 'package:respawnd1/features/collartag/collar_id_tag_screen.dart';
 import 'package:respawnd1/features/collartag/scan_tag_flow.dart';
 import 'package:respawnd1/features/collartag/pet_found_chat.dart';
 import 'package:respawnd1/core/models/rescue/report_verification.dart';
@@ -454,9 +455,10 @@ class _RescuePageState extends State<RescuePage> {
   }
 
   Future<void> _handleScanResult(String result) async {
-    setState(() => _form.scannedTagId = result);
-
     final tagId = AppLinks.tagIdFromScan(result);
+    // The tag's id when the scan is a ResPAWnd tag link, not the whole link.
+    setState(() => _form.scannedTagId = tagId ?? result);
+
     if (tagId == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         appSnackBar('Tag scanned: $result', kind: AppMessageKind.success),
@@ -490,6 +492,22 @@ class _RescuePageState extends State<RescuePage> {
           appSnackBar(_form.isLostPetType
               ? 'Tag scanned, but no registered profile was found for it.'
               : 'Tag scanned: $result', kind: AppMessageKind.success),
+        );
+        return;
+      }
+
+      // A registered pet that isn't reported lost (or the owner scanning
+      // their own tag) has no scan chat: show its ID card with the owner's
+      // contact instead. This used to crash on the missing chat.
+      if (!outcome.isLost || outcome.sessionId == null) {
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => CollarIdTagCardScreen(
+              tagData: outcome.tagData!,
+              readOnly: !outcome.isOwner,
+            ),
+          ),
         );
         return;
       }
@@ -918,7 +936,8 @@ class _RescuePageState extends State<RescuePage> {
               "We're checking open reports for possible matches now. "
                   "We'll notify you when a likely match comes in — you can "
                   'also check the Possible Matches section on this report '
-                  'from your Activity feed.',
+                  'from your Activity feed.'
+                  '${_form.isOwner == true && _form.linkedCollarTag != null ? '\n\n${_form.linkedCollarTag!.name.isNotEmpty ? _form.linkedCollarTag!.name : 'Your pet'}\'s collar tag is now marked lost. Anyone who scans it, in the app or on the web, can message you.' : ''}',
               style: GoogleFonts.zain(
                 fontSize: 14,
                 color: AppColors.textSecondary,

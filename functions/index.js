@@ -9,10 +9,17 @@ const {orgMemberUids, requireOrgPermission, isIndependent} = require('./org_acce
 const independentRules = require('./independent_rescuer_rules');
 const db = admin.firestore();
 
+// A finder scanning a lost pet's collar tag (in the app or on the web page
+// public/tag/index.html) gets their own private chat with the owner:
+// rescueSessions/{id} with tagId, ownerId and finderId (firestore.rules lets
+// only those two read it). Scanning again reuses the finder's open chat and
+// refreshes where the pet was seen. Every scan updates the tag's last-seen
+// pin and notifies the owner (notifyTagScan).
 exports.getOrCreateRescueSession = onCall(async (request) => {
   if (!request.auth) {
     throw new HttpsError('unauthenticated', 'Sign in required.');
   }
+  const finderId = request.auth.uid;
 
   const {tagId, location} = request.data || {};
   if (!tagId) {
@@ -25,126 +32,97 @@ exports.getOrCreateRescueSession = onCall(async (request) => {
     throw new HttpsError('not-found', 'This tag is not registered.');
   }
   const tagData = tagSnap.data();
+  const ownerId = tagData.ownerId || null;
 
-  // Only a pet its owner has marked lost gets a rescue session. Previously
-  // any scan created one AND flipped the tag to status 'lost' below, so
-  // scanning a pet that wasn't lost marked it lost and opened the lost-pet
-  // chat.
+  // Only a pet its owner has marked lost gets a scan chat.
   if (tagData.status !== 'lost') {
     throw new HttpsError('failed-precondition', 'This pet is not marked as lost.');
+  }
+  // The owner scanning their own tag doesn't chat with themselves.
+  if (ownerId && ownerId === finderId) {
+    throw new HttpsError('failed-precondition', 'This is your own pet\'s tag.');
   }
 
   const lat = location && typeof location.lat === 'number' ? location.lat : null;
   const lng = location && typeof location.lng === 'number' ? location.lng : null;
   const address = location && typeof location.address === 'string' ? location.address : null;
+  const hasLocation = lat !== null && lng !== null;
+  const now = admin.firestore.FieldValue.serverTimestamp();
 
-  // Reuse the existing session if this tag already has one that's still
-  // active, instead of spawning a new one on every re-scan of an
-  // already-lost pet.
-  const existingSessionId = tagData.activeRescueSessionId;
-  if (existingSessionId) {
-    const existingRef = db.collection('rescueSessions').doc(existingSessionId);
-    const existingSnap = await existingRef.get();
-    if (existingSnap.exists && existingSnap.data().status !== 'resolved') {
-      // Keep the location fresh on every re-scan — a later scan (better
-      // GPS fix, a successful reverse-geocode where an earlier one failed,
-      // or the animal having moved somewhere new) shouldn't be stuck
-      // showing whatever the very first scan happened to save.
-      if (lat !== null && lng !== null) {
-        await existingRef.set(
-          {
-            lat,
-            lng,
-            ...(address !== null ? {address} : {}),
-            lastScannedAt: admin.firestore.FieldValue.serverTimestamp(),
-          },
-          {merge: true},
-        );
-
-        const tagRescanUpdate = {
-          lastSeenLat: lat,
-          lastSeenLng: lng,
-          ...(address !== null ? {lastSeenAddress: address} : {}),
-        };
-        await tagRef.set(tagRescanUpdate, {merge: true});
-        const rescanOwnerId = tagData.ownerId;
-        if (rescanOwnerId) {
-          await db
-            .collection('users')
-            .doc(rescanOwnerId)
-            .collection('collarTags')
-            .doc(tagId)
-            .set(tagRescanUpdate, {merge: true});
-        }
-      }
-
-      try {
-        await notifyTagScan({
-          tagId,
-          tagData,
-          sessionId: existingSessionId,
-          scannerUid: request.auth.uid,
-          lat,
-          lng,
-          address,
-          isNewSession: false,
-        });
-      } catch (e) {
-        console.warn('notifyTagScan failed', e.message);
-      }
-
-      return {sessionId: existingSessionId};
+  // The pin follows the latest sighting.
+  if (hasLocation) {
+    const pin = {lastSeenLat: lat, lastSeenLng: lng, ...(address !== null ? {lastSeenAddress: address} : {})};
+    await tagRef.set(pin, {merge: true});
+    if (ownerId) {
+      await db.collection('users').doc(ownerId).collection('collarTags').doc(tagId).set(pin, {merge: true});
     }
   }
 
-  const sessionRef = db.collection('rescueSessions').doc();
-  await sessionRef.set({
-    tagId,
-    status: 'active',
-    chatEnabledByOwner: false,
-    createdAt: admin.firestore.FieldValue.serverTimestamp(),
-    ...(lat !== null ? {lat} : {}),
-    ...(lng !== null ? {lng} : {}),
-    ...(address !== null ? {address} : {}),
-  });
+  // This finder's open chat on this tag, if they scanned it before.
+  const mine = await db.collection('rescueSessions')
+    .where('tagId', '==', tagId)
+    .where('finderId', '==', finderId)
+    .get();
+  const open = mine.docs.find((d) => d.get('status') !== 'resolved');
 
-  const tagUpdate = {
-    status: 'lost',
-    activeRescueSessionId: sessionRef.id,
-    lostAt: admin.firestore.FieldValue.serverTimestamp(),
-    ...(lat !== null ? {lastSeenLat: lat} : {}),
-    ...(lng !== null ? {lastSeenLng: lng} : {}),
-    ...(address !== null ? {lastSeenAddress: address} : {}),
-  };
-
-  await tagRef.set(tagUpdate, {merge: true});
-
-  const ownerId = tagData.ownerId;
-  if (ownerId) {
-    await db
-      .collection('users')
-      .doc(ownerId)
-      .collection('collarTags')
-      .doc(tagId)
-      .set(tagUpdate, {merge: true});
+  let sessionId;
+  let isNewSession = false;
+  if (open) {
+    sessionId = open.id;
+    if (hasLocation) {
+      await open.ref.set(
+        {lat, lng, ...(address !== null ? {address} : {}), lastScannedAt: now},
+        {merge: true},
+      );
+    }
+  } else {
+    let finderName = '';
+    try {
+      const u = (await db.collection('users').doc(finderId).get()).data() || {};
+      finderName = (u.displayName || `${u.firstName || ''} ${u.lastName || ''}`.trim() || u.name || '').toString().trim();
+    } catch (e) {
+      // Anonymous web finders have no profile.
+    }
+    const sessionRef = db.collection('rescueSessions').doc();
+    await sessionRef.set({
+      tagId,
+      ownerId,
+      finderId,
+      finderName: finderName || null,
+      status: 'active',
+      chatEnabledByOwner: false,
+      createdAt: now,
+      lastScannedAt: now,
+      ...(lat !== null ? {lat} : {}),
+      ...(lng !== null ? {lng} : {}),
+      ...(address !== null ? {address} : {}),
+    });
+    sessionId = sessionRef.id;
+    isNewSession = true;
+    // The latest chat, for app versions that only read this one field.
+    const latest = {activeRescueSessionId: sessionId};
+    await tagRef.set(latest, {merge: true});
+    if (ownerId) {
+      await db.collection('users').doc(ownerId).collection('collarTags').doc(tagId).set(latest, {merge: true});
+    }
   }
 
   try {
     await notifyTagScan({
       tagId,
       tagData,
-      sessionId: sessionRef.id,
-      scannerUid: request.auth.uid,
+      sessionId,
+      scannerUid: finderId,
       lat,
       lng,
       address,
-      isNewSession: true,
+      isNewSession,
     });
   } catch (e) {
     console.warn('notifyTagScan failed', e.message);
   }
 
-  return {sessionId: sessionRef.id};
+  return {sessionId};
 });
 const UNCONFIRMED_THRESHOLD_MINUTES = 15;
 const NUDGE_COOLDOWN_MINUTES = 20;

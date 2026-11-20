@@ -52,6 +52,41 @@ function roleIn(chat, uid) {
 }
 
 module.exports = ({db, safeNotifyUser}) => {
+  // The collar tag behind a reunited lost report: back to active, pin
+  // cleared, its scan chats closed. Skipped when the tag already moved on
+  // (found, or marked lost again with a newer report).
+  async function syncCollarTagFound(tagId, alertId) {
+    const tagRef = db.collection('collarTags').doc(tagId);
+    const tagSnap = await tagRef.get();
+    if (!tagSnap.exists) return;
+    const tag = tagSnap.data();
+    if (tag.status !== 'lost') return;
+    if (tag.linkedAlertId && tag.linkedAlertId !== alertId) return;
+    const del = admin.firestore.FieldValue.delete();
+    const update = {
+      status: 'active',
+      lastSeenLat: del,
+      lastSeenLng: del,
+      lastSeenAddress: del,
+      lostAt: del,
+      activeRescueSessionId: del,
+      linkedAlertId: del,
+    };
+    await tagRef.set(update, {merge: true});
+    if (tag.ownerId) {
+      await db.collection('users').doc(tag.ownerId).collection('collarTags').doc(tagId).set(update, {merge: true});
+    }
+    const sessions = await db.collection('rescueSessions').where('tagId', '==', tagId).get();
+    const batch = db.batch();
+    let n = 0;
+    sessions.forEach((d) => {
+      if (d.get('status') === 'resolved') return;
+      batch.update(d.ref, {status: 'resolved', resolvedAt: admin.firestore.FieldValue.serverTimestamp()});
+      n += 1;
+    });
+    if (n) await batch.commit();
+  }
+
   // The report's owner, everyone who posted on its old public thread, and
   // everyone with a chat about it.
   async function threadParticipants(alertId, alert) {
@@ -250,6 +285,18 @@ module.exports = ({db, safeNotifyUser}) => {
         batch.update(c.ref, {reunitedAt: admin.firestore.FieldValue.serverTimestamp()});
       });
       await batch.commit();
+    }
+
+    // A lost report opened from a collar tag: the tag goes back to active
+    // and its scan chats close, the same as "Mark as Found" on the ID card
+    // (CollarTagLostFound.markFound), which already did this when it was
+    // the one that closed the report.
+    if (after.collarTagId) {
+      try {
+        await syncCollarTagFound(after.collarTagId, alertId);
+      } catch (e) {
+        console.warn('[onPetAlertReunited] collar tag sync failed', after.collarTagId, e.message);
+      }
     }
 
     const recipients = await threadParticipants(alertId, after);

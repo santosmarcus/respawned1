@@ -9,6 +9,7 @@ import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/features/collartag/collar_tag_data_model.dart';
 import 'package:respawnd1/features/collartag/collar_id_tag_screen.dart';
 import 'package:respawnd1/features/collartag/collar_tag_list_screen.dart';
+import 'package:respawnd1/features/collartag/lost_pet_location_picker.dart';
 import 'package:respawnd1/core/models/adoption/adoption_application.dart';
 import 'package:respawnd1/core/models/adoption/follow_up_record.dart';
 import 'package:respawnd1/core/models/adoption/return_request.dart';
@@ -583,57 +584,42 @@ class PostAdoptionMonitoringPage extends StatelessWidget {
 
       if (!context.mounted) return;
       final confirmed = await showConfirmActionDialog(context, title: 'Report $animalName as lost?', message: 'This uses $animalName\'s registered ID tag. Their status '
-          'switches to "Lost", your contact info becomes visible to '
-          'anyone who scans the tag, and you\'ll be notified here to '
-          'chat the moment someone finds them.', confirmLabel: 'Report Lost');
+          'switches to "Lost", $animalName shows on the Explore Reports map '
+          'and nearby users are alerted, and you\'ll be notified here to '
+          'chat the moment someone scans the tag.', confirmLabel: 'Report Lost');
 
       if (confirmed != true || !context.mounted) return;
 
-      final uid = FirebaseAuth.instance.currentUser?.uid;
-      final ownerId = tag.ownerId ?? uid;
+      // Where the pet was last seen: the map pin and the nearby alerts.
+      final lastSeen = await Navigator.push<PickedLostLocation>(
+        context,
+        MaterialPageRoute(
+          builder: (_) => LastSeenLocationPicker(petName: animalName),
+        ),
+      );
+      if (lastSeen == null || !context.mounted) return;
 
-      final update = <String, dynamic>{
-        'status': 'lost',
-        // Marks this as originating from an already-identified adopted pet
-        // (verified via its registered tag) rather than a fresh, unknown
-        // sighting — admin/matching views can rely on the tag scan instead
-        // of heuristic species/photo matching.
-        'lastReportSource': 'adoption',
-        'linkedAdoptionId': adoptionId,
-      };
-
-      await tagRef.set(update, SetOptions(merge: true));
-
-      if (ownerId != null) {
-        await FirebaseFirestore.instance
-            .collection('users')
-            .doc(ownerId)
-            .collection('collarTags')
-            .doc(collarTagId)
-            .set(update, SetOptions(merge: true));
-      }
-
-      // Cross-post to the shared Lost & Found board so the community can
-      // help keep an eye out too — flagged with the same 'adoption' source
-      // so it's treated as identity-verified rather than a fresh report.
+      // Same as "Mark as Lost" on the ID card: the tag goes lost and a Lost
+      // & Found report with the pin is opened, flagged as coming from this
+      // adoption (identity verified by the registered tag).
       final personal = (data['personal'] as Map?) ?? {};
-      await FirebaseFirestore.instance.collection('petAlerts').add({
-        'type': 'lost',
-        'source': 'adoption',
-        'collarTagId': collarTagId,
-        'linkedAdoptionId': adoptionId,
-        'reporterId': uid,
-        'petName': tag.name.isNotEmpty ? tag.name : animalName,
-        'species': personal['species'],
-        'breed': tag.breed,
-        'colorMarkings': tag.colorMarkings,
-        'photoUrls': tag.petImageUrl != null && tag.petImageUrl!.isNotEmpty
-            ? [tag.petImageUrl]
-            : [],
-        'status': 'open',
-        'createdAt': Timestamp.now(),
-        'serverCreatedAt': FieldValue.serverTimestamp(),
-      });
+      if (tag.name.isEmpty) tag.name = animalName;
+      await CollarTagLostFound.markLost(
+        tag,
+        lat: lastSeen.lat,
+        lng: lastSeen.lng,
+        address: lastSeen.address,
+        species: personal['species'] as String?,
+        extraTagFields: {
+          'lastReportSource': 'adoption',
+          'linkedAdoptionId': adoptionId,
+        },
+        extraAlertFields: {
+          'source': 'adoption',
+          'linkedAdoptionId': adoptionId,
+        },
+      );
+      final update = <String, dynamic>{'status': 'lost'};
 
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -733,24 +719,41 @@ class PostAdoptionMonitoringPage extends StatelessWidget {
         required String animalName,
         required Map<String, dynamic> data,
       }) async {
+    // Where the pet was last seen. Without it the report never reached the
+    // map, nearby users or matching (they all need a location).
+    final lastSeen = await Navigator.push<PickedLostLocation>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => LastSeenLocationPicker(petName: animalName),
+      ),
+    );
+    if (lastSeen == null || !context.mounted) return;
+
     try {
       final uid = FirebaseAuth.instance.currentUser?.uid;
       final personal = (data['personal'] as Map?) ?? {};
 
-      await FirebaseFirestore.instance.collection('petAlerts').add({
+      final ref = await FirebaseFirestore.instance.collection('petAlerts').add({
         'type': 'lost',
         // No verified tag on file yet — matching still has to fall back to
         // manual/heuristic review, same as a fresh report, so this is kept
         // distinguishable from the tag-verified 'adoption' source above.
         'source': 'adoption_no_tag',
         'linkedAdoptionId': adoptionId,
+        'groupId': null,
         'reporterId': uid,
         'petName': animalName,
         'species': personal['species'],
+        'address': lastSeen.address,
+        'lat': lastSeen.lat,
+        'lng': lastSeen.lng,
+        'lastSeenDate': Timestamp.now(),
+        'photoUrls': [],
         'status': 'open',
         'createdAt': Timestamp.now(),
         'serverCreatedAt': FieldValue.serverTimestamp(),
       });
+      await ref.update({'groupId': ref.id});
 
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(

@@ -16,9 +16,8 @@ rules_version = '2';
 // adoptions (the public map, job board and the duplicate-application check
 // in adoption_application_service.dart query them unfiltered), organization
 // subcollections other than members/integrations, and every collection not
-// named below (collarTags, rescueSessions, petAlerts, ...). collarTags/
-// rescueSessions have specific rules further down, but the app still
-// creates and edits tags directly, so the catch-all keeps them open.
+// named below (petAlerts, ...). collarTags and rescueSessions have their own
+// rules further down and are excluded from the catch-all.
 //
 // Staff roles: users/{uid}.role 'admin'/'ngo_staff' (platform staff, set in
 // the console only) or membership of an approved organization. An
@@ -1821,40 +1820,82 @@ service cloud.firestore {
       }
     }
 
-    // ---- Collar tags / rescue sessions -------------------------------------
-    // Not excluded from the catch-all below (see the header note), so these
-    // only add to its open access today.
-
+    // ---- Collar tags / scan chats ------------------------------------------
+    // collarTags/{tagId}: a pet's collar ID (lib/features/collartag). Anyone
+    // signed in (anonymous web scanners included) can open one tag by its id
+    // (unguessable; the QR/NFC link carries it), but only the owner lists or
+    // edits theirs. Staff approve QR codes and record NFC chips. Lost/found
+    // fields are the owner's (CollarTagLostFound); scan pins and the latest
+    // chat id are written by getOrCreateRescueSession.
     match /collarTags/{tagId} {
-      allow get: if signedIn() &&
-        (resource.data.qrEnabled == true || request.auth.uid == resource.data.ownerId);
+      function staffFields() {
+        return ['qrEnabled', 'nfcWritten', 'nfcWrittenAt', 'nfcUrl'];
+      }
+      function isTagStaff() {
+        return isPlatformStaff() || myStaffWith(['rescue']);
+      }
 
-      allow update: if signedIn() &&
-        request.auth.uid == resource.data.ownerId &&
-        changedOnly(['status', 'lastSeenLat', 'lastSeenLng', 'lastSeenAddress', 'lostAt', 'activeRescueSessionId']);
+      allow get: if signedIn();
+      allow list: if signedIn() &&
+        (resource.data.get('ownerId', '') == request.auth.uid ||
+          isPlatformStaff() || myStaffWith(readKeys()));
+      allow create: if signedIn() &&
+        request.resource.data.ownerId == request.auth.uid &&
+        !request.resource.data.keys().hasAny(staffFields());
+      allow update: if signedIn() && (
+        (request.auth.uid == resource.data.get('ownerId', '') &&
+          request.resource.data.get('ownerId', '') == request.auth.uid &&
+          !changedAny(staffFields())) ||
+        (isTagStaff() && changedOnly(staffFields()))
+      );
+      allow delete: if signedIn() &&
+        (request.auth.uid == resource.data.get('ownerId', '') || isPlatformStaff());
     }
 
+    // rescueSessions/{id}: one private chat per person who scanned a lost
+    // pet's tag, with its owner. Created by getOrCreateRescueSession only.
+    // Sessions from before chats were per finder have no finderId/ownerId:
+    // the tag's owner and any signed-in finder can still use those.
     match /rescueSessions/{sessionId} {
+      function tagOwner(data) {
+        return get(/databases/$(database)/documents/collarTags/$(data.tagId)).data.get('ownerId', '');
+      }
+      function isLegacy(data) {
+        return !('finderId' in data);
+      }
+      function isSessionOwner(data) {
+        return signedIn() &&
+          (data.get('ownerId', '') == request.auth.uid ||
+            (isLegacy(data) && tagOwner(data) == request.auth.uid));
+      }
+      function isSessionFinder(data) {
+        return signedIn() &&
+          (data.get('finderId', '') == request.auth.uid || isLegacy(data));
+      }
+
       allow create: if false;
-      allow get: if signedIn();
-      allow list: if false;
-      allow update: if signedIn() &&
-        request.auth.uid == get(/databases/$(database)/documents/collarTags/$(resource.data.tagId)).data.ownerId &&
-        changedOnly(['chatEnabledByOwner', 'status']);
+      allow get: if isSessionOwner(resource.data) || isSessionFinder(resource.data);
+      allow list: if signedIn() && resource.data.get('ownerId', '') == request.auth.uid;
+      allow update: if isSessionOwner(resource.data) &&
+        changedOnly(['chatEnabledByOwner', 'status', 'resolvedAt']);
+      allow delete: if false;
 
       match /messages/{messageId} {
-        allow read: if signedIn();
+        function session() {
+          return get(/databases/$(database)/documents/rescueSessions/$(sessionId)).data;
+        }
+        allow read: if isSessionOwner(session()) || isSessionFinder(session());
         allow create: if signedIn() &&
-          get(/databases/$(database)/documents/rescueSessions/$(sessionId)).data.chatEnabledByOwner == true &&
-          get(/databases/$(database)/documents/rescueSessions/$(sessionId)).data.status != 'resolved' &&
-          request.resource.data.keys().hasOnly(['sender', 'text', 'sentAt']) &&
-          request.resource.data.sender in ['owner', 'finder'] &&
-          (request.resource.data.sender == 'finder' ||
-           request.auth.uid == get(
-             /databases/$(database)/documents/collarTags/$(
-               get(/databases/$(database)/documents/rescueSessions/$(sessionId)).data.tagId
-             )
-           ).data.ownerId);
+          session().get('chatEnabledByOwner', false) == true &&
+          session().get('status', 'active') != 'resolved' &&
+          request.resource.data.keys().hasOnly(['sender', 'senderId', 'text', 'sentAt']) &&
+          request.resource.data.get('senderId', request.auth.uid) == request.auth.uid &&
+          request.resource.data.text is string &&
+          request.resource.data.text.size() > 0 &&
+          request.resource.data.text.size() <= 2000 &&
+          ((request.resource.data.sender == 'owner' && isSessionOwner(session())) ||
+            (request.resource.data.sender == 'finder' && isSessionFinder(session()) &&
+              !isSessionOwner(session())));
         allow update, delete: if false;
       }
     }
@@ -1940,7 +1981,8 @@ service cloud.firestore {
         'users', 'cases', 'publicCases', 'animals', 'publicAnimals', 'adoptions', 'volunteerApplications',
         'transporterApplications', 'auditLogs', 'orgExpenses', 'communityAdoptionCheckIns',
         'communityAdoptionRequests',
-        'referralShares', 'possibleMatches', 'petAlertChats'
+        'referralShares', 'possibleMatches', 'petAlertChats',
+        'collarTags', 'rescueSessions'
       ]);
     }
   }
