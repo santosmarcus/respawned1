@@ -5,10 +5,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:respawnd1/core/models/volunteer/volunteer_event.dart';
 import 'package:respawnd1/core/repos/volunteer_event_repository.dart';
 import 'package:respawnd1/core/widgets/event_cover_image.dart';
-import 'package:respawnd1/features/generalhome/notifications_screen.dart';
-import 'package:respawnd1/features/generalhome/user_profile.dart';
 import 'package:respawnd1/app_theme.dart';
-import 'package:respawnd1/features/generalhome/home_screen.dart';
 import 'event_detail_page.dart';
 import 'volunteer_application_screen.dart';
 
@@ -16,7 +13,11 @@ export 'package:respawnd1/core/models/volunteer/volunteer_event.dart' show Volun
 
 // VolunteerPage
 class VolunteerPage extends StatefulWidget {
-  const VolunteerPage({super.key});
+  /// Opened from the home screen's Events card: titled "Events", without
+  /// the volunteer-application banner.
+  final bool eventsOnly;
+
+  const VolunteerPage({super.key, this.eventsOnly = false});
 
   @override
   State<VolunteerPage> createState() => _VolunteerPageState();
@@ -119,53 +120,13 @@ class _VolunteerPageState extends State<VolunteerPage> {
         automaticallyImplyLeading: true,
         centerTitle: true,
         title: Text(
-          'Volunteer',
+          widget.eventsOnly ? 'Events' : 'Volunteer',
           style: GoogleFonts.tiltWarp(
             fontSize: 28,
             fontWeight: FontWeight.bold,
             color: AppColors.textPrimary,
           ),
         ),
-      ),
-      bottomNavigationBar: BottomNavigationBar(
-        currentIndex: 0,
-        items: const [
-          BottomNavigationBarItem(
-            icon: Icon(Icons.home_outlined),
-            activeIcon: Icon(Icons.home),
-            label: 'Home',
-          ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.notifications_outlined),
-            activeIcon: Icon(Icons.notifications),
-            label: 'Notifications',
-          ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.person_outline),
-            activeIcon: Icon(Icons.person),
-            label: 'My Profile',
-          ),
-        ],
-        onTap: (index) {
-          if (index == 0) {
-            Navigator.pushReplacement(
-              context,
-              MaterialPageRoute(builder: (context) => const HomeScreen()),
-            );
-          }
-          else if (index == 1) {
-            Navigator.push(
-              context,
-              MaterialPageRoute(builder: (context) => const NotificationsScreen()),
-            );
-          }
-          else if (index == 2) {
-            Navigator.push(
-              context,
-              MaterialPageRoute(builder: (context) => const UserProfile()),
-            );
-          }
-        },
       ),
       body: _loading
           ? const Center(
@@ -182,8 +143,10 @@ class _VolunteerPageState extends State<VolunteerPage> {
           children: [
             const SizedBox(height: 8),
 
-            const VolunteerApplicationBanner(),
-            const SizedBox(height: 12),
+            if (!widget.eventsOnly) ...[
+              const VolunteerApplicationBanner(),
+              const SizedBox(height: 12),
+            ],
 
             // Search bar
             Row(

@@ -413,7 +413,17 @@ class _ExploreReportsMapState extends State<ExploreReportsMap> {
   List<ReportMapEntry> _caseMyReports = [];
   List<ReportMapEntry> _alertMyReports = [];
 
-  List<ReportMapEntry> get _allReports => [..._caseReports, ..._alertReports];
+  /// "All" = everyone else's public reports plus the viewer's own. The
+  /// public pool leaves out the viewer's own reports (isCasePublic), which
+  /// made a reporter's only nearby report vanish from the home map unless
+  /// "My Reports" was selected — and the map said "No public reports yet".
+  List<ReportMapEntry> get _allReports {
+    final seen = <String>{};
+    return [
+      for (final r in [..._myReports, ..._caseReports, ..._alertReports])
+        if (seen.add(r.caseId)) r,
+    ];
+  }
   // The viewer's own reports — only computed/used when the My Reports
   // filter is active; kept as a separate list rather than folded into
   // _allReports since the two use different visibility rules (see
@@ -837,7 +847,7 @@ class _ExploreReportsMapState extends State<ExploreReportsMap> {
                       left: 12,
                       right: 12,
                       bottom: 12,
-                      child: _MapBanner(text: 'No public reports yet.'),
+                      child: _MapBanner(text: 'No reports nearby yet.'),
                     ),
                 ],
               ),

@@ -13,8 +13,6 @@ import 'package:respawnd1/features/donation/models.dart';
 import 'package:respawnd1/features/donation/sponsorship_detail.dart';
 import 'package:respawnd1/features/generalhome/certificates_page.dart';
 import 'package:respawnd1/features/generalhome/history_screen.dart';
-import 'package:respawnd1/features/generalhome/home_screen.dart';
-import 'package:respawnd1/features/generalhome/user_profile.dart';
 import 'package:respawnd1/features/rescue/track_case_page.dart';
 import 'package:respawnd1/features/adoption/adopter_adoption_route.dart';
 import 'package:respawnd1/core/models/adoption/community_adoption_request.dart';
@@ -1084,42 +1082,6 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
             color: AppColors.textPrimary,
           ),
         ),
-      ),
-      bottomNavigationBar: BottomNavigationBar(
-        currentIndex: 1,
-        items: const [
-          BottomNavigationBarItem(
-            icon: Icon(Icons.home_outlined),
-            activeIcon: Icon(Icons.home),
-            label: 'Home',
-          ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.notifications_outlined),
-            activeIcon: Icon(Icons.notifications),
-            label: 'Notifications',
-          ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.person_outline),
-            activeIcon: Icon(Icons.person),
-            label: 'My Profile',
-          ),
-        ],
-        onTap: (index) {
-          if (index == 0) {
-            if (Navigator.canPop(context)) {
-              Navigator.pop(context);
-            } else {
-              Navigator.pushReplacement(
-                context,
-                MaterialPageRoute(builder: (context) => const HomeScreen()),
-              );
-            }
-          } else if (index == 2) {
-            Navigator.pushReplacement(
-              context, MaterialPageRoute(builder: (_) => const UserProfile()),
-            );
-          }
-        },
       ),
       body: !_ready
           ? const Center(

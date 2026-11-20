@@ -1,13 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:respawnd1/core/constants/feature_flags.dart';
 import 'package:respawnd1/features/adoption/adoption_page.dart';
 import 'package:respawnd1/features/adoption/community_adoption_checkins.dart';
 import 'package:respawnd1/features/adoption/post_adoption_page.dart';
 import 'package:respawnd1/features/adoption/sponsored_animals_section.dart';
 import 'package:respawnd1/features/donation/donation_page.dart';
 import 'package:respawnd1/features/volunteerevent/volunteer_page.dart';
-import 'package:respawnd1/features/organization/organization_list_page.dart';
 import 'package:respawnd1/features/generalhome/activity_feed.dart';
 import 'package:respawnd1/features/generalhome/all_activity_page.dart';
 import 'package:respawnd1/features/rescue/all_explore_page.dart';
@@ -20,8 +18,82 @@ import 'package:respawnd1/features/generalhome/notifications_screen.dart';
 import 'package:respawnd1/core/widgets/welcome_greeting.dart';
 
 
-class HomeScreen extends StatelessWidget {
-  const HomeScreen({super.key});
+/// The signed-in user's app shell: Home, Notifications and My Profile as
+/// tabs under one bottom bar that stays put. Each tab is built the first
+/// time it is opened and then kept alive in an IndexedStack, so switching
+/// tabs is instant and keeps scroll position — the bar used to be rebuilt
+/// (and slide in with a new route) on every page.
+///
+/// Task pages (Report a Rescue, Adoption, Donations, Events, ...) are
+/// pushed on top of the shell without the bar, with a back button, so an
+/// unfinished form can't be left by an accidental tab tap.
+class HomeScreen extends StatefulWidget {
+  final int initialTab;
+  const HomeScreen({super.key, this.initialTab = 0});
+
+  @override
+  State<HomeScreen> createState() => _HomeScreenState();
+}
+
+class _HomeScreenState extends State<HomeScreen> {
+  late int _index = widget.initialTab;
+  late final Set<int> _opened = {widget.initialTab};
+
+  static const _tabs = <Widget>[HomeTab(), NotificationsScreen(), UserProfile()];
+
+  void _select(int i) {
+    if (i == _index) return;
+    setState(() {
+      _index = i;
+      _opened.add(i);
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return PopScope(
+      // Back from Notifications/Profile goes to Home before leaving the app.
+      canPop: _index == 0,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop) _select(0);
+      },
+      child: Scaffold(
+        body: IndexedStack(
+          index: _index,
+          children: [
+            for (var i = 0; i < _tabs.length; i++)
+              _opened.contains(i) ? _tabs[i] : const SizedBox.shrink(),
+          ],
+        ),
+        bottomNavigationBar: BottomNavigationBar(
+          currentIndex: _index,
+          onTap: _select,
+          items: const [
+            BottomNavigationBarItem(
+              icon: Icon(Icons.home_outlined),
+              activeIcon: Icon(Icons.home),
+              label: 'Home',
+            ),
+            BottomNavigationBarItem(
+              icon: Icon(Icons.notifications_outlined),
+              activeIcon: Icon(Icons.notifications),
+              label: 'Notifications',
+            ),
+            BottomNavigationBarItem(
+              icon: Icon(Icons.person_outline),
+              activeIcon: Icon(Icons.person),
+              label: 'My Profile',
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// The Home tab's content.
+class HomeTab extends StatelessWidget {
+  const HomeTab({super.key});
 
   @override
   Widget build(BuildContext context) {
@@ -30,37 +102,6 @@ class HomeScreen extends StatelessWidget {
         toolbarHeight: 80,
         title: const WelcomeGreeting(exclaim: true),
         automaticallyImplyLeading: false,
-      ),
-      bottomNavigationBar: BottomNavigationBar(
-        currentIndex: 0,
-        items: const [
-          BottomNavigationBarItem(
-            icon: Icon(Icons.home_outlined),
-            activeIcon: Icon(Icons.home),
-            label: 'Home',
-          ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.notifications_outlined),
-            activeIcon: Icon(Icons.notifications),
-            label: 'Notifications',
-          ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.person_outline),
-            activeIcon: Icon(Icons.person),
-            label: 'My Profile',
-          ),
-        ],
-        onTap: (index) {
-          if (index == 1) {
-            Navigator.push(
-              context, MaterialPageRoute(builder: (_) => const NotificationsScreen()),
-            );
-          } else if (index == 2) {
-            Navigator.push(
-              context, MaterialPageRoute(builder: (_) => const UserProfile()),
-            );
-          }
-        },
       ),
       body: Stack(
         children: [
@@ -112,7 +153,7 @@ class HomeScreen extends StatelessWidget {
                         },
                       ),
                       _QuickActionCard(
-                        label: 'Donate or\nSponsor',
+                        label: 'Donations &\nSponsorships',
                         color: AppColors.pinkrspwn,
                         onTap: (){
                           Navigator.push(context, MaterialPageRoute(
@@ -131,17 +172,12 @@ class HomeScreen extends StatelessWidget {
                           );
                         },
                       ),
-                      // Temporarily disabled (FeatureFlags.
-                      // organizationsFeatureEnabled) — route, page, models,
-                      // and repositories all stay in the codebase; only
-                      // this user-facing entry point is hidden/disabled.
                       _QuickActionCard(
-                        label: 'Organization',
+                        label: 'Events',
                         color: AppColors.lavenderrspwn,
-                        disabled: !FeatureFlags.organizationsFeatureEnabled,
                         onTap: (){
                           Navigator.push(context, MaterialPageRoute(
-                            builder: (context) => OrganizationsListPage(),
+                            builder: (context) => const VolunteerPage(eventsOnly: true),
                           ),
                           );
                         },
@@ -244,22 +280,13 @@ class _QuickActionCard extends StatelessWidget {
   final String label;
   final Color color;
   final VoidCallback? onTap;
-  // Feature-flagged entries (e.g. Organizations) render dimmed with a
-  // "Coming soon" line instead of a silently-inert active-looking button —
-  // never show a button that looks tappable but does nothing.
-  final bool disabled;
-
-  const _QuickActionCard({required this.label, required this.color, this.onTap,
-    this.disabled = false,
-  });
+  const _QuickActionCard({required this.label, required this.color, this.onTap});
 
   @override
   Widget build(BuildContext context) {
     return GestureDetector(
-      onTap: disabled ? null : onTap,
-      child: Opacity(
-        opacity: disabled ? 0.5 : 1,
-        child: Container(
+      onTap: onTap,
+      child: Container(
           width: 111,
           height: 139,
           margin: const EdgeInsets.only(right: 12),
@@ -283,23 +310,10 @@ class _QuickActionCard extends StatelessWidget {
                         color: AppColors.textPrimary,
                       ),
                     ),
-                    if (disabled) ...[
-                      const SizedBox(height: 4),
-                      Text(
-                        'Coming soon',
-                        textAlign: TextAlign.center,
-                        style: GoogleFonts.zain(
-                          fontSize: 10,
-                          fontWeight: FontWeight.w600,
-                          color: AppColors.textSecondary,
-                        ),
-                      ),
-                    ],
                   ]),
             ),
           ),
         ),
-      ),
     );
   }
 }

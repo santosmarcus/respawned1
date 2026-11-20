@@ -2,16 +2,16 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:respawnd1/features/generalhome/notifications_screen.dart';
-import 'package:respawnd1/features/generalhome/user_profile.dart';
 import '../../../app_theme.dart';
 import 'donation_detail.dart';
 import 'sponsorship_detail.dart';
 import 'models.dart';
 import 'package:intl/intl.dart';
+import 'package:respawnd1/core/models/donation/donation_model.dart' show kPurposeTags;
 
-// Categories
-const _categories = ['All', 'Rescue', 'Medicine & Treatment', 'Food & Supplies', 'Shelter'];
+// Category chips — the same purpose tags staff pick when creating a
+// campaign (kPurposeTags), so a chip actually filters campaigns.
+const _categories = ['All', ...kPurposeTags];
 
 class DonationPage extends StatefulWidget {
   const DonationPage({super.key});
@@ -129,30 +129,9 @@ class _DonationPageState extends State<DonationPage> {
         automaticallyImplyLeading: true,
         centerTitle: true,
         title: Text(
-          'Donate/Sponsor',
-          style: GoogleFonts.tiltWarp(
-            fontSize: 28,
-            fontWeight: FontWeight.bold,
-            color: AppColors.textPrimary,
-          ),
+          'Donations & Sponsorships',
+          style: GoogleFonts.tiltWarp(fontSize: 20, color: AppColors.textPrimary),
         ),
-      ),
-      bottomNavigationBar: BottomNavigationBar(
-        currentIndex: 0,
-        items: const [
-          BottomNavigationBarItem(icon: Icon(Icons.home_outlined), activeIcon: Icon(Icons.home), label: 'Home'),
-          BottomNavigationBarItem(icon: Icon(Icons.notifications_outlined), activeIcon: Icon(Icons.notifications), label: 'Notifications'),
-          BottomNavigationBarItem(icon: Icon(Icons.person_outline), activeIcon: Icon(Icons.person), label: 'My Profile'),
-        ],
-        onTap: (index) {
-          if (index == 0) {
-            Navigator.popUntil(context, (route) => route.isFirst);
-          } else if (index == 1) {
-            Navigator.push(context, MaterialPageRoute(builder: (context) => const NotificationsScreen()));
-          } else if (index == 2) {
-            Navigator.push(context, MaterialPageRoute(builder: (context) => const UserProfile()));
-          }
-        },
       ),
       body: _userDataLoading
           ? const Center(child: CircularProgressIndicator(color: AppColors.greenrspwn))
@@ -161,24 +140,34 @@ class _DonationPageState extends State<DonationPage> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const SizedBox(height: 8),
+            Text(
+              'Fund rescues, treatment and care, or sponsor an animal monthly.',
+              style: GoogleFonts.zain(fontSize: 14, color: AppColors.textSecondary),
+            ),
+            const SizedBox(height: 12),
             _buildSearchBar(),
-            const SizedBox(height: 16),
-            Text('Donations', style: GoogleFonts.tiltWarp(fontSize: 16, color: AppColors.textPrimary)),
+            const SizedBox(height: 20),
+            const _SectionHeader(
+              title: 'Campaigns',
+              subtitle: 'Open fundraisers from rescue organizations.',
+            ),
             const SizedBox(height: 10),
             _buildCategoryChips(),
-            const SizedBox(height: 14),
+            const SizedBox(height: 12),
             _buildDonationList(),
-            const SizedBox(height: 8),
-            Text('Sponsorship', style: GoogleFonts.tiltWarp(fontSize: 16, color: AppColors.textPrimary)),
+            const SizedBox(height: 12),
+            const _SectionHeader(
+              title: 'Sponsor a Pet',
+              subtitle: "Cover one animal's care every month.",
+            ),
             const SizedBox(height: 10),
             _buildSponsorshipList(),
             const SizedBox(height: 20),
-            Text('Past Campaigns', style: GoogleFonts.tiltWarp(fontSize: 16, color: AppColors.textPrimary)),
-            const SizedBox(height: 2),
-            Text('Completed campaigns stay here so you can see where the funds went.',
-                style: GoogleFonts.zain(fontSize: 13, color: AppColors.textPrimary.withValues(alpha: 0.6))),
-            const SizedBox(height: 8),
+            const _SectionHeader(
+              title: 'Past Campaigns',
+              subtitle: 'Finished campaigns stay here so you can see where the funds went.',
+            ),
+            const SizedBox(height: 10),
             _buildPastList(),
             const SizedBox(height: 32),
           ],
@@ -188,33 +177,31 @@ class _DonationPageState extends State<DonationPage> {
   }
 
   Widget _buildSearchBar() {
-    return Row(
-      children: [
-        Expanded(
-          child: Container(
-            height: 44,
-            decoration: BoxDecoration(color: AppColors.yellowrspwn, borderRadius: BorderRadius.circular(12)),
-            child: TextField(
-              controller: _searchController,
-              onChanged: (v) => setState(() => _searchQuery = v),
-              style: GoogleFonts.zain(fontSize: 15, color: AppColors.textPrimary),
-              decoration: InputDecoration(
-                hintText: 'Search',
-                hintStyle: GoogleFonts.zain(fontSize: 15, color: AppColors.textPrimary.withValues(alpha: 0.6)),
-                prefixIcon: const Icon(Icons.search, color: AppColors.textPrimary, size: 20),
-                border: InputBorder.none,
-                contentPadding: const EdgeInsets.symmetric(vertical: 12),
-              ),
-            ),
-          ),
+    return Container(
+      height: 46,
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: AppColors.textPrimary.withValues(alpha: 0.12)),
+      ),
+      child: TextField(
+        controller: _searchController,
+        onChanged: (v) => setState(() => _searchQuery = v),
+        style: GoogleFonts.zain(fontSize: 15, color: AppColors.textPrimary),
+        decoration: InputDecoration(
+          hintText: 'Search campaigns, pets or organizations',
+          hintStyle: GoogleFonts.zain(fontSize: 15, color: AppColors.textSecondary),
+          prefixIcon: const Icon(Icons.search, color: AppColors.textPrimary, size: 20),
+          border: InputBorder.none,
+          contentPadding: const EdgeInsets.symmetric(vertical: 12),
         ),
-      ],
+      ),
     );
   }
 
   Widget _buildCategoryChips() {
     return SizedBox(
-      height: 32,
+      height: 34,
       child: ListView.separated(
         scrollDirection: Axis.horizontal,
         itemCount: _categories.length,
@@ -224,12 +211,24 @@ class _DonationPageState extends State<DonationPage> {
           final selected = _selectedCategory == cat;
           return GestureDetector(
             onTap: () => setState(() => _selectedCategory = cat),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(cat, style: GoogleFonts.zain(fontSize: 15, fontWeight: selected ? FontWeight.w700 : FontWeight.normal, color: AppColors.textPrimary)),
-                if (selected) Container(margin: const EdgeInsets.only(top: 2), height: 2, width: 24, color: AppColors.textPrimary),
-              ],
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 14),
+              alignment: Alignment.center,
+              decoration: BoxDecoration(
+                color: selected ? AppColors.yellowrspwn.withValues(alpha: 0.35) : Colors.white,
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(
+                  color: selected ? AppColors.textPrimary : AppColors.textPrimary.withValues(alpha: 0.15),
+                ),
+              ),
+              child: Text(
+                cat,
+                style: GoogleFonts.zain(
+                  fontSize: 14,
+                  fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+                  color: AppColors.textPrimary,
+                ),
+              ),
             ),
           );
         },
@@ -237,12 +236,15 @@ class _DonationPageState extends State<DonationPage> {
     );
   }
 
+  bool _inSelectedCategory(DonationListing d) =>
+      _selectedCategory == 'All' || d.purposeTags.contains(_selectedCategory);
+
   Widget _buildDonationList() {
     return StreamBuilder<QuerySnapshot>(
       stream: FirebaseFirestore.instance.collection('campaigns').where('type', isEqualTo: 'donation').snapshots(),
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) return const Center(child: CircularProgressIndicator());
-        if (!snapshot.hasData || snapshot.data!.docs.isEmpty) return const Center(child: Text('No donations found.'));
+        if (!snapshot.hasData || snapshot.data!.docs.isEmpty) return const _EmptyCard('No open campaigns right now.');
 
         final donations = snapshot.data!.docs.map((doc) => DonationListing.fromFirestore(doc)).where((d) {
           // Only campaigns still taking donations; finished ones (goal
@@ -252,18 +254,23 @@ class _DonationPageState extends State<DonationPage> {
           final q = _searchQuery.toLowerCase();
           final matchesSearch = q.isEmpty || d.title.toLowerCase().contains(q) || d.organizer.toLowerCase().contains(q);
 
-          return matchesSearch;
+          return matchesSearch && _inSelectedCategory(d);
         }).toList();
 
         final donatedList = donations.where((d) => _donatedIds.contains(d.id)).toList();
         final activeDonations = donations.where((d) => !_donatedIds.contains(d.id)).toList();
 
+        if (donations.isEmpty) {
+          return const _EmptyCard('No campaigns match your search or category.');
+        }
+
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             if (donatedList.isNotEmpty) ...[
-              Text('Donated', style: GoogleFonts.tiltWarp(fontSize: 14, color: AppColors.textPrimary)),
-              const SizedBox(height: 10),
+              Text('You donated',
+                  style: GoogleFonts.zain(fontSize: 14, fontWeight: FontWeight.w700, color: AppColors.textSecondary)),
+              const SizedBox(height: 8),
               ...donatedList.map((d) => _donationListItem(d, _favoriteIds.contains(d.id), () => _toggleFavorite(d), () => _openDetail(d))),
             ],
             if (activeDonations.isNotEmpty)
@@ -293,21 +300,21 @@ class _DonationPageState extends State<DonationPage> {
             .toList()
           ..sort((a, b) => (b.endDate ?? b.createdAt ?? DateTime(0)).compareTo(a.endDate ?? a.createdAt ?? DateTime(0)));
         if (past.isEmpty) {
-          return Text('No past campaigns yet.',
-              style: GoogleFonts.zain(fontSize: 14, color: AppColors.textPrimary.withValues(alpha: 0.6)));
+          return const _EmptyCard('No past campaigns yet.');
         }
         return Column(
           children: [
             for (final c in past)
-              InkWell(
-                onTap: () => c.type == 'sponsorship' ? _openSponsorDetail(c) : _openDetail(c),
-                child: Container(
-                  padding: const EdgeInsets.symmetric(vertical: 12),
-                  decoration: BoxDecoration(
-                    border: Border(bottom: BorderSide(color: AppColors.textPrimary.withValues(alpha: 0.12))),
-                  ),
+              Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: _CardShell(
+                  onTap: () => c.type == 'sponsorship' ? _openSponsorDetail(c) : _openDetail(c),
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
                   child: Row(
                     children: [
+                      Icon(c.type == 'sponsorship' ? Icons.pets : Icons.volunteer_activism,
+                          size: 20, color: AppColors.textSecondary),
+                      const SizedBox(width: 10),
                       Expanded(
                         child: Text(
                           c.type == 'sponsorship' ? (c.animalName ?? c.title) : c.title,
@@ -338,13 +345,14 @@ class _DonationPageState extends State<DonationPage> {
       stream: FirebaseFirestore.instance.collection('campaigns').where('type', isEqualTo: 'sponsorship').snapshots(),
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) return const SizedBox.shrink();
-        if (!snapshot.hasData || snapshot.data!.docs.isEmpty) return const Center(child: Text('No sponsorships found.'));
+        if (!snapshot.hasData || snapshot.data!.docs.isEmpty) return const _EmptyCard('No pets to sponsor right now.');
 
         final campaigns = snapshot.data!.docs.map((doc) => DonationListing.fromFirestore(doc)).where((c) {
           if (c.isEnded) return false; // drafts, archived and finished listings
           final q = _searchQuery.toLowerCase();
           return q.isEmpty || (c.animalName?.toLowerCase().contains(q) ?? false) || c.organizer.toLowerCase().contains(q);
         }).toList();
+        if (campaigns.isEmpty) return const _EmptyCard('No pets match your search.');
 
         return Column(
           children: campaigns.map((c) => Padding(
@@ -378,6 +386,90 @@ class _DonationPageState extends State<DonationPage> {
   }
 }
 
+/// White card with a subtle border — the one card style on this page.
+class _CardShell extends StatelessWidget {
+  final Widget child;
+  final VoidCallback? onTap;
+  final EdgeInsetsGeometry padding;
+  const _CardShell({required this.child, this.onTap, this.padding = const EdgeInsets.all(12)});
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.white,
+      borderRadius: BorderRadius.circular(16),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(16),
+        onTap: onTap,
+        child: Container(
+          padding: padding,
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: AppColors.textPrimary.withValues(alpha: 0.1)),
+          ),
+          child: child,
+        ),
+      ),
+    );
+  }
+}
+
+class _SectionHeader extends StatelessWidget {
+  final String title;
+  final String subtitle;
+  const _SectionHeader({required this.title, required this.subtitle});
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(title, style: GoogleFonts.tiltWarp(fontSize: 17, color: AppColors.textPrimary)),
+        const SizedBox(height: 2),
+        Text(subtitle, style: GoogleFonts.zain(fontSize: 13, color: AppColors.textSecondary)),
+      ],
+    );
+  }
+}
+
+class _EmptyCard extends StatelessWidget {
+  final String text;
+  const _EmptyCard(this.text);
+
+  @override
+  Widget build(BuildContext context) {
+    return _CardShell(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 18),
+      child: Center(
+        child: Text(text,
+            textAlign: TextAlign.center,
+            style: GoogleFonts.zain(fontSize: 14, color: AppColors.textSecondary)),
+      ),
+    );
+  }
+}
+
+class _FavoriteButton extends StatelessWidget {
+  final bool favorited;
+  final VoidCallback onPressed;
+  const _FavoriteButton({required this.favorited, required this.onPressed});
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.white,
+      shape: const CircleBorder(),
+      child: IconButton(
+        visualDensity: VisualDensity.compact,
+        tooltip: favorited ? 'Remove from favorites' : 'Save to favorites',
+        icon: Icon(favorited ? Icons.favorite : Icons.favorite_border,
+            size: 20, color: favorited ? AppColors.error : AppColors.textPrimary),
+        onPressed: onPressed,
+      ),
+    );
+  }
+}
+
 class _DonationCard extends StatelessWidget {
   final DonationListing donation;
   final bool favorited;
@@ -388,72 +480,84 @@ class _DonationCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final days = donation.daysRemaining;
-    return GestureDetector(
+    final money = NumberFormat('#,##0');
+    return _CardShell(
       onTap: onTap,
+      padding: EdgeInsets.zero,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Stack(
             children: [
-              Container(
-                height: 140, width: double.infinity,
-                decoration: BoxDecoration(color: donation.backgroundColor, borderRadius: BorderRadius.circular(16)),
-                child: donation.imageUrl != null ? ClipRRect(borderRadius: BorderRadius.circular(16), child: Image.network(donation.imageUrl!, fit: BoxFit.cover)) : null,
-              ),
-              Positioned(
-                top: 10, right: 12,
-                child: IconButton(icon: Icon(favorited ? Icons.favorite : Icons.favorite_border, color: favorited ? AppColors.error : AppColors.textPrimary), onPressed: onFavorite),
-              ),
-              if (donation.isEnded)
-                Positioned(
-                  top: 10, left: 12,
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                    decoration: BoxDecoration(color: Colors.black.withValues(alpha: 0.6), borderRadius: BorderRadius.circular(8)),
-                    child: Text('Ended', style: GoogleFonts.zain(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.white)),
-                  ),
+              ClipRRect(
+                borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
+                child: Container(
+                  height: 140,
+                  width: double.infinity,
+                  color: donation.backgroundColor,
+                  child: donation.imageUrl != null
+                      ? Image.network(donation.imageUrl!,
+                          fit: BoxFit.cover,
+                          errorBuilder: (_, _, _) =>
+                              const Icon(Icons.volunteer_activism, color: AppColors.textSecondary))
+                      : const Icon(Icons.volunteer_activism, size: 36, color: AppColors.textSecondary),
                 ),
+              ),
+              Positioned(top: 8, right: 8, child: _FavoriteButton(favorited: favorited, onPressed: onFavorite)),
             ],
           ),
           Padding(
-            padding: const EdgeInsets.fromLTRB(4, 8, 4, 4),
-            child: Row(
+            padding: const EdgeInsets.fromLTRB(14, 12, 14, 14),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(donation.title, style: GoogleFonts.tiltWarp(fontSize: 16, color: AppColors.textPrimary)),
-                      const SizedBox(height: 4),
-                      RichText(text: TextSpan(children: [
-                        TextSpan(text: '₱ ${NumberFormat('#,##0').format(donation.target)}  ', style: GoogleFonts.zain(fontSize: 16, color: AppColors.greenrspwn, fontWeight: FontWeight.w800)),
-                        TextSpan(text: 'Funds: ₱ ${NumberFormat('#,##0').format(donation.collected)}  |  ', style: GoogleFonts.zain(fontSize: 16, color: AppColors.textPrimary)),
-                        TextSpan(text: '$days days left!', style: GoogleFonts.zain(fontSize: 16, color: AppColors.textPrimary)),
-                      ])),
-                    ],
+                Text(donation.title,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: GoogleFonts.tiltWarp(fontSize: 16, color: AppColors.textPrimary)),
+                if (donation.organizer.isNotEmpty)
+                  Text(donation.organizer,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: GoogleFonts.zain(fontSize: 13, color: AppColors.textSecondary)),
+                const SizedBox(height: 10),
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(6),
+                  child: LinearProgressIndicator(
+                    value: (donation.percentage / 100).clamp(0, 1).toDouble(),
+                    minHeight: 6,
+                    backgroundColor: AppColors.textPrimary.withValues(alpha: 0.08),
+                    valueColor: const AlwaysStoppedAnimation<Color>(AppColors.yellowrspwn),
                   ),
                 ),
-                _PercentCircle(percent: donation.percentage),
+                const SizedBox(height: 8),
+                Row(
+                  children: [
+                    Expanded(
+                      child: RichText(
+                        text: TextSpan(children: [
+                          TextSpan(
+                              text: '₱${money.format(donation.collected)}',
+                              style: GoogleFonts.zain(
+                                  fontSize: 15, fontWeight: FontWeight.w800, color: AppColors.greenrspwn)),
+                          TextSpan(
+                              text: ' raised of ₱${money.format(donation.target)}',
+                              style: GoogleFonts.zain(fontSize: 14, color: AppColors.textSecondary)),
+                        ]),
+                      ),
+                    ),
+                    Text(
+                      '${donation.percentage}% · ${days <= 0 ? 'Last day' : '$days days left'}',
+                      style: GoogleFonts.zain(
+                          fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.textPrimary),
+                    ),
+                  ],
+                ),
               ],
             ),
           ),
         ],
       ),
-    );
-  }
-}
-
-class _PercentCircle extends StatelessWidget {
-  final int percent;
-  const _PercentCircle({required this.percent});
-  @override
-  Widget build(BuildContext context) {
-    return SizedBox(
-      width: 44, height: 44,
-      child: Stack(alignment: Alignment.center, children: [
-        CircularProgressIndicator(value: percent / 100, strokeWidth: 4, backgroundColor: AppColors.textPrimary.withValues(alpha: 0.1), valueColor: const AlwaysStoppedAnimation<Color>(AppColors.yellowrspwn)),
-        Text('$percent%', style: GoogleFonts.zain(fontSize: 10, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
-      ]),
     );
   }
 }
@@ -468,56 +572,74 @@ class _SponsorPetCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
+    final monthly = sponsorship.monthlyAmount;
+    return _CardShell(
       onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.all(12),
-        decoration: BoxDecoration(color: AppColors.background, borderRadius: BorderRadius.circular(12), border: Border.all(color: AppColors.textPrimary.withValues(alpha: 0.05))),
-        child: Row(
-          children: [
-            Container(
-              width: 56, height: 56,
-              decoration: BoxDecoration(color: sponsorship.backgroundColor, borderRadius: BorderRadius.circular(12)),
-              child: Stack(
-                children: [
-                  sponsorship.imageUrl != null
-                      ? ClipRRect(borderRadius: BorderRadius.circular(12), child: Image.network(sponsorship.imageUrl!, fit: BoxFit.cover, width: 56, height: 56))
-                      : const Center(child: Icon(Icons.pets, size: 28, color: AppColors.textPrimary)),
-                  if (sponsorship.isEnded)
-                    Container(
-                      decoration: BoxDecoration(color: Colors.black.withValues(alpha: 0.4), borderRadius: BorderRadius.circular(12)),
-                      alignment: Alignment.center,
-                      child: Text('Ended', style: GoogleFonts.zain(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.white)),
+      child: Row(
+        children: [
+          ClipRRect(
+            borderRadius: BorderRadius.circular(12),
+            child: Container(
+              width: 64,
+              height: 64,
+              color: sponsorship.backgroundColor,
+              child: sponsorship.imageUrl != null
+                  ? Image.network(sponsorship.imageUrl!,
+                      fit: BoxFit.cover,
+                      errorBuilder: (_, _, _) => const Icon(Icons.pets, color: AppColors.textPrimary))
+                  : const Icon(Icons.pets, size: 28, color: AppColors.textPrimary),
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Flexible(
+                      child: Text(sponsorship.animalName ?? 'Rescue Pet',
+                          style: GoogleFonts.tiltWarp(fontSize: 16, color: AppColors.textPrimary),
+                          overflow: TextOverflow.ellipsis),
                     ),
-                ],
-              ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Flexible(child: Text(sponsorship.animalName ?? 'Rescue Pet', style: GoogleFonts.tiltWarp(fontSize: 16, color: AppColors.textPrimary), overflow: TextOverflow.ellipsis)),
-                      if (isSponsored) ...[
-                        const SizedBox(width: 8),
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                          decoration: BoxDecoration(color: AppColors.greenrspwn.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(4)),
-                          child: Text('Sponsored', style: GoogleFonts.zain(fontSize: 12, fontWeight: FontWeight.bold, color: AppColors.greenrspwn)),
-                        ),
-                      ],
+                    if (isSponsored) ...[
+                      const SizedBox(width: 8),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                        decoration: BoxDecoration(
+                            color: AppColors.greenrspwn.withValues(alpha: 0.12),
+                            borderRadius: BorderRadius.circular(20)),
+                        child: Text('Sponsored',
+                            style: GoogleFonts.zain(
+                                fontSize: 12, fontWeight: FontWeight.bold, color: AppColors.greenrspwn)),
+                      ),
                     ],
-                  ),
-                  Text('Rescue Pet • Young', style: GoogleFonts.zain(fontSize: 14, color: AppColors.textPrimary)),
-                  Text(sponsorship.description, style: GoogleFonts.zain(fontSize: 14, color: AppColors.textPrimary.withValues(alpha: 0.7)), maxLines: 1, overflow: TextOverflow.ellipsis),
-                ],
-              ),
+                  ],
+                ),
+                if (sponsorship.organizer.isNotEmpty)
+                  Text(sponsorship.organizer,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: GoogleFonts.zain(fontSize: 13, color: AppColors.textSecondary)),
+                if (sponsorship.description.isNotEmpty)
+                  Text(sponsorship.description,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: GoogleFonts.zain(fontSize: 14, color: AppColors.textPrimary.withValues(alpha: 0.75))),
+                if (monthly != null && monthly > 0)
+                  Text('₱${NumberFormat('#,##0').format(monthly)} / month',
+                      style: GoogleFonts.zain(
+                          fontSize: 13, fontWeight: FontWeight.w700, color: AppColors.greenrspwn)),
+              ],
             ),
-            IconButton(icon: Icon(favorited ? Icons.favorite : Icons.favorite_border, color: favorited ? AppColors.error : AppColors.textPrimary), onPressed: onFavorite),
-          ],
-        ),
+          ),
+          IconButton(
+            tooltip: favorited ? 'Remove from favorites' : 'Save to favorites',
+            icon: Icon(favorited ? Icons.favorite : Icons.favorite_border,
+                color: favorited ? AppColors.error : AppColors.textPrimary),
+            onPressed: onFavorite,
+          ),
+        ],
       ),
     );
   }
