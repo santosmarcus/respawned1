@@ -51,4 +51,13 @@ flutter {
 dependencies {
     // Required by flutter_local_notifications.
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")
+
+    // 16 KB page size (Play requirement for Android 15+): mobile_scanner
+    // 5.2.3 pulls in CameraX 1.3.3 and ML Kit barcode-scanning 17.2.0, whose
+    // native libraries (libimage_processing_util_jni.so, libbarhopper_v3.so)
+    // aren't 16 KB aligned. Gradle uses the highest version requested, so
+    // these pull the aligned releases without changing mobile_scanner.
+    implementation("androidx.camera:camera-camera2:1.4.2")
+    implementation("androidx.camera:camera-lifecycle:1.4.2")
+    implementation("com.google.mlkit:barcode-scanning:17.3.0")
 }
