@@ -154,56 +154,205 @@ class BreedDropdown extends StatelessWidget {
   }
 }
 
-/// Single-choice option rendered as a square checkbox + label.
+/// One answer of a single-choice question: a bordered tile with a radio
+/// mark, so mutually exclusive answers look and behave like radio buttons
+/// (they used to be square checkboxes, which read as "pick any").
+/// [value] is what gets stored; it defaults to [label].
 class RescueRadioOption extends StatelessWidget {
   const RescueRadioOption(
     this.label,
     this.selected,
     this.onSelect, {
     super.key,
+    this.value,
   });
 
   final String label;
   final String? selected;
   final ValueChanged<String> onSelect;
+  final String? value;
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: () => onSelect(label),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 4),
-        child: Row(
-          children: [
-            SizedBox(
-              width: 20,
-              height: 20,
-              child: Checkbox(
-                value: selected == label,
-                onChanged: (_) => onSelect(label),
-                activeColor: AppColors.textPrimary,
-                side: const BorderSide(
-                  color: AppColors.textPrimary,
-                  width: 1.5,
-                ),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(2),
-                ),
-                materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+    final v = value ?? label;
+    final isSelected = selected == v;
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Semantics(
+        inMutuallyExclusiveGroup: true,
+        checked: isSelected,
+        button: true,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(12),
+          onTap: () => onSelect(v),
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 120),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            decoration: BoxDecoration(
+              color: isSelected ? kRescueSelectedFill : Colors.white,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(
+                color: isSelected ? AppColors.textPrimary : kRescueFieldBorder,
+                width: isSelected ? 1.5 : 1,
               ),
             ),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Text(
-                label,
-                style: GoogleFonts.zain(
-                  fontSize: 14,
-                  color: AppColors.textPrimary,
+            child: Row(
+              children: [
+                Icon(
+                  isSelected ? Icons.radio_button_checked : Icons.radio_button_unchecked,
+                  size: 20,
+                  color: isSelected ? AppColors.textPrimary : AppColors.textSecondary,
                 ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    label,
+                    style: GoogleFonts.zain(
+                      fontSize: 14,
+                      fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
+                      color: AppColors.textPrimary,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Pale yellow fill for a selected chip/option, with a dark olive border.
+const Color kRescueSelectedFill = Color(0xFFFFF4CC);
+
+/// Subtle gray border for unselected chips/options and form cards.
+const Color kRescueFieldBorder = Color(0xFFDAD7CC);
+
+/// A titled card grouping one part of the form ("1 · Location", ...), so
+/// the long form reads as a few clear steps.
+class RescueFormSection extends StatelessWidget {
+  const RescueFormSection({
+    super.key,
+    required this.step,
+    required this.title,
+    this.subtitle,
+    required this.child,
+  });
+
+  final int step;
+  final String title;
+  final String? subtitle;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.symmetric(horizontal: 16),
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 18),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: kRescueFieldBorder),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 24,
+                height: 24,
+                alignment: Alignment.center,
+                decoration: const BoxDecoration(color: AppColors.yellowrspwn, shape: BoxShape.circle),
+                child: Text('$step',
+                    style: GoogleFonts.zain(fontSize: 13, fontWeight: FontWeight.w800, color: AppColors.textPrimary)),
               ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(title, style: GoogleFonts.tiltWarp(fontSize: 16, color: AppColors.textPrimary)),
+              ),
+            ],
+          ),
+          if (subtitle != null) ...[
+            const SizedBox(height: 4),
+            Padding(
+              padding: const EdgeInsets.only(left: 34),
+              child: Text(subtitle!, style: GoogleFonts.zain(fontSize: 13, color: AppColors.textSecondary)),
             ),
           ],
-        ),
+          const SizedBox(height: 14),
+          child,
+        ],
+      ),
+    );
+  }
+}
+
+/// Small section heading inside an animal card ("Health assessment").
+class RescueSubsectionHeader extends StatelessWidget {
+  const RescueSubsectionHeader(this.title, {super.key, this.subtitle});
+
+  final String title;
+  final String? subtitle;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(title,
+            style: GoogleFonts.zain(fontSize: 15, fontWeight: FontWeight.w800, color: AppColors.textPrimary)),
+        if (subtitle != null)
+          Text(subtitle!, style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary)),
+      ],
+    );
+  }
+}
+
+/// The rescue type's urgency, set automatically, with the reason — so a
+/// reporter (and later staff) can see why a case is Critical/Medium/Low.
+class RescueUrgencyCard extends StatelessWidget {
+  const RescueUrgencyCard({super.key, required this.rescueType, required this.urgency});
+
+  final String rescueType;
+  final String? urgency;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = urgencyColorFor(urgency);
+    String? description;
+    for (final o in kRescueTypeOptions) {
+      if (o['label'] == rescueType) description = o['description'];
+    }
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.1),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: color.withValues(alpha: 0.5)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
+            decoration: BoxDecoration(color: color, borderRadius: BorderRadius.circular(20)),
+            child: Text('${urgency ?? 'N/A'} urgency',
+                style: GoogleFonts.zain(fontSize: 12, fontWeight: FontWeight.w800, color: AppColors.textPrimary)),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              'Set automatically from the rescue type'
+              '${description == null ? '' : ' — $rescueType: ${description[0].toLowerCase()}${description.substring(1)}'}.'
+              ' Staff may update the animal\'s condition after the rescue.',
+              style: GoogleFonts.zain(fontSize: 12, color: AppColors.textPrimary),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -362,21 +511,32 @@ class RescueToggleChip extends StatelessWidget {
     return GestureDetector(
       onTap: onTap,
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+        height: 34,
+        padding: const EdgeInsets.symmetric(horizontal: 12),
         decoration: BoxDecoration(
-          color: selected ? AppColors.yellowrspwn : Colors.white,
+          color: selected ? kRescueSelectedFill : Colors.white,
           borderRadius: BorderRadius.circular(20),
           border: Border.all(
-            color: selected ? AppColors.yellowrspwn : AppColors.slaterspwn,
+            color: selected ? AppColors.textPrimary : kRescueFieldBorder,
+            width: selected ? 1.5 : 1,
           ),
         ),
-        child: Text(
-          label,
-          style: GoogleFonts.zain(
-            fontSize: 12,
-            fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
-            color: AppColors.textPrimary,
-          ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (selected) ...[
+              const Icon(Icons.check, size: 14, color: AppColors.textPrimary),
+              const SizedBox(width: 4),
+            ],
+            Text(
+              label,
+              style: GoogleFonts.zain(
+                fontSize: 13,
+                fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+                color: AppColors.textPrimary,
+              ),
+            ),
+          ],
         ),
       ),
     );

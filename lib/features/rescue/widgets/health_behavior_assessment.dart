@@ -72,13 +72,9 @@ class HealthBehaviorAssessment extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
-          'Health & Behavior Assessment',
-          style: GoogleFonts.zain(
-            fontSize: 13,
-            fontWeight: FontWeight.w700,
-            color: AppColors.textPrimary,
-          ),
+        const RescueSubsectionHeader(
+          'Health assessment',
+          subtitle: 'Select what you observed. Choose "Not sure / Not assessed" if you could not check.',
         ),
         const SizedBox(height: 8),
         AssessmentDropdown(
@@ -186,16 +182,9 @@ class HealthBehaviorAssessment extends StatelessWidget {
             'How long has the pet stayed with you? (e.g. 2 years)',
           ),
         ],
-        const SizedBox(height: 12),
-        Text(
-          'Behavior',
-          style: GoogleFonts.zain(
-            fontSize: 12,
-            fontWeight: FontWeight.w600,
-            color: AppColors.textPrimary,
-          ),
-        ),
-        const SizedBox(height: 6),
+        const SizedBox(height: 16),
+        const RescueSubsectionHeader('Behavior', subtitle: 'Select all that apply.'),
+        const SizedBox(height: 8),
         Wrap(
           spacing: 8,
           runSpacing: 8,
@@ -250,7 +239,7 @@ class HealthBehaviorAssessment extends StatelessWidget {
             ],
           ),
         ] else ...[
-          const SizedBox(height: 12),
+          const SizedBox(height: 16),
           EnvironmentSafetySection(
             entry: entry,
             onChanged: () => _set(() {}),

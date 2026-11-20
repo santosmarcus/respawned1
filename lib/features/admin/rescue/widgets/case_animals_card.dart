@@ -5,6 +5,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/core/models/rescue/rescue_case.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/case_page_kit.dart';
+import 'package:respawnd1/features/rescue/rescue_form_options.dart' show visibleSignsLabelFor;
 
 /// Per-animal details. Current submissions keep every animal of a report
 /// in this case's `animals` array; older group reports stored one case per
@@ -15,7 +16,7 @@ class CaseAnimalsSection extends StatelessWidget {
   const CaseAnimalsSection({super.key, required this.currentCase});
 
   // Maps an `animals[]` entry onto the case-doc key shape.
-  static Map<String, dynamic> animalMap(Map raw) => {
+  static Map<String, dynamic> animalMap(Map raw, {String? rescueType}) => {
         'animalType': raw['species'],
         'breed': raw['breed'],
         'sex': raw['sex'],
@@ -31,13 +32,27 @@ class CaseAnimalsSection extends StatelessWidget {
         'environmentSafety': raw['environmentSafety'],
         'biteRisk': raw['biteRisk'],
         'escapeRisk': raw['escapeRisk'],
+        // Added to the reporter's form later: visible signs + medical
+        // question (Injury / Illness / Neglect or Abuse; older reports
+        // saved the Neglect signs as `harmSigns`), and Pet Surrender's
+        // per-animal questions.
+        'visibleSigns': raw['visibleSigns'] ?? raw['harmSigns'],
+        'visibleSignsLabel': visibleSignsLabelFor(rescueType),
+        'needsMedical': raw['needsMedical'],
+        'age': raw['age'],
+        'vaccination': raw['vaccination'],
+        'spayNeuter': raw['spayNeuter'],
+        'stayDuration': raw['stayDuration'],
+        'acquisitionSource': raw['acquisitionSource'],
+        'compatibility': raw['compatibility'],
       };
 
   @override
   Widget build(BuildContext context) {
     final animals = currentCase.raw['animals'] as List?;
     if (animals != null && animals.isNotEmpty) {
-      return CaseAnimalsCard(animals: [for (final a in animals) animalMap(a as Map)]);
+      final type = currentCase.raw['rescueType'] as String?;
+      return CaseAnimalsCard(animals: [for (final a in animals) animalMap(a as Map, rescueType: type)]);
     }
     final groupId = currentCase.raw['groupId'] as String?;
     if (groupId == null || groupId.isEmpty) return CaseAnimalsCard(animals: [currentCase.raw]);
@@ -86,6 +101,7 @@ class CaseAnimalsCard extends StatelessWidget {
       CaseInfoItem('Size', _s(data, 'size')),
       CaseInfoItem('Bite risk', (bite?.isNotEmpty ?? false) ? bite : 'Not assessed'),
       CaseInfoItem('Escape risk', (escape?.isNotEmpty ?? false) ? escape : 'Not assessed'),
+      CaseInfoItem('Age', _s(data, 'age')),
       CaseInfoItem('Color / markings', _s(data, 'colorMarkings'), wide: true),
     ];
   }
@@ -97,6 +113,22 @@ class CaseAnimalsCard extends StatelessWidget {
         CaseInfoItem('Eyes, nose, mouth', _s(data, 'eyesNoseMouth')),
         CaseInfoItem('Skin and coat', _s(data, 'skinAndCoat')),
         CaseInfoItem('Appetite and hydration', _s(data, 'appetiteHydration')),
+        CaseInfoItem(_signsLabel(data), _stringList(data['visibleSigns']).join(', '), wide: true),
+        CaseInfoItem('Needs immediate medical attention', _s(data, 'needsMedical'), wide: true),
+        CaseInfoItem('Vaccination', _s(data, 'vaccination')),
+        CaseInfoItem('Spayed / neutered', _s(data, 'spayNeuter')),
+      ];
+
+  static String _signsLabel(Map<String, dynamic> data) {
+    final label = (data['visibleSignsLabel'] as String?)?.trim() ?? '';
+    if (label.isEmpty) return 'Visible signs';
+    return '${label[0].toUpperCase()}${label.substring(1)}';
+  }
+
+  static List<CaseInfoItem> _ownerHistory(Map<String, dynamic> data) => [
+        CaseInfoItem('Acquired from', _s(data, 'acquisitionSource')),
+        CaseInfoItem('Time with owner', _s(data, 'stayDuration')),
+        CaseInfoItem('Gets along with', _stringList(data['compatibility']).join(', '), wide: true),
       ];
 
   static List<CaseInfoItem> _behavior(Map<String, dynamic> data) => [
@@ -112,6 +144,7 @@ class CaseAnimalsCard extends StatelessWidget {
   Widget _animal(Map<String, dynamic> data) {
     final health = _health(data);
     final behavior = _behavior(data);
+    final owner = _ownerHistory(data);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -123,6 +156,10 @@ class CaseAnimalsCard extends StatelessWidget {
         if (behavior.any((i) => i.hasValue)) ...[
           _subHeader('Behavior'),
           CaseInfoGrid(card: false, items: behavior),
+        ],
+        if (owner.any((i) => i.hasValue)) ...[
+          _subHeader('Owner history'),
+          CaseInfoGrid(card: false, items: owner),
         ],
       ],
     );

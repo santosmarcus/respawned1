@@ -39,8 +39,8 @@ class SurrenderFields extends StatelessWidget {
     final picker = ImagePicker();
     // pickMultiImage only accepts a limit of 2 or more.
     final picked = remaining == 1
-    ? [?await picker.pickImage(source: ImageSource.gallery, imageQuality: 80)]
-        : await picker.pickMultiImage(imageQuality: 80, limit: remaining);
+    ? [?await picker.pickImage(source: ImageSource.gallery, imageQuality: 80, maxWidth: 1280)]
+        : await picker.pickMultiImage(imageQuality: 80, maxWidth: 1280, limit: remaining);
     if (picked.isEmpty) return;
     _set(() => form.vetRecordPhotos.addAll(picked.take(remaining)));
   }

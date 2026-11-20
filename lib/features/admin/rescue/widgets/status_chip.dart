@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
+import 'package:respawnd1/app_theme.dart';
+
 import 'package:respawnd1/core/models/rescue/rescue_status.dart';
 
 /// Small rounded chip showing a [RescueStatus]. Reused on the rescue list,
@@ -39,7 +41,12 @@ class UrgencyChip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final level = UrgencyLevel.fromFirestoreValue(urgency);
-    return Container(
+    // Urgency is set once, from the report, and never changes afterwards —
+    // the tooltip says so, so it isn't read as the animal's current state
+    // (see [TreatmentConditionChip] for that).
+    return Tooltip(
+      message: 'Reported urgency',
+      child: Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
       decoration: BoxDecoration(
         color: level?.color ?? const Color(0xFFD9D9D9),
@@ -51,6 +58,47 @@ class UrgencyChip extends StatelessWidget {
           fontSize: 11,
           fontWeight: FontWeight.bold,
           color: Colors.white,
+        ),
+      ),
+      ),
+    );
+  }
+}
+
+/// The animal's latest condition from its treatment logs ('Critical',
+/// 'Stable', 'Recovering', 'Ready for Discharge', 'Deceased'). Unlike
+/// [UrgencyChip] — fixed at report time — this follows treatment, so the
+/// Treatment tab shows how the animal is doing now.
+class TreatmentConditionChip extends StatelessWidget {
+  final String condition;
+  const TreatmentConditionChip({super.key, required this.condition});
+
+  static Color colorFor(String condition) => switch (condition.toLowerCase()) {
+        'critical' => AppColors.error,
+        'stable' => const Color(0xFF4E8FE0),
+        'recovering' => AppColors.greenrspwn,
+        'ready for discharge' => AppColors.success,
+        'deceased' => AppColors.textSecondary,
+        _ => const Color(0xFFD9D9D9),
+      };
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: 'Latest treatment condition',
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
+        decoration: BoxDecoration(
+          color: colorFor(condition),
+          borderRadius: BorderRadius.circular(20),
+        ),
+        child: Text(
+          condition,
+          style: GoogleFonts.zain(
+            fontSize: 11,
+            fontWeight: FontWeight.bold,
+            color: Colors.white,
+          ),
         ),
       ),
     );

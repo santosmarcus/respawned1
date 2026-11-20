@@ -3,10 +3,7 @@ import 'package:respawnd1/core/utils/photo_metadata.dart';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:respawnd1/features/generalhome/notifications_screen.dart';
-import 'package:respawnd1/features/generalhome/user_profile.dart';
 import 'package:respawnd1/app_theme.dart';
-import 'package:respawnd1/features/generalhome/home_screen.dart';
 import 'package:respawnd1/features/rescue/track_case_page.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:geolocator/geolocator.dart';
@@ -524,165 +521,109 @@ class _RescuePageState extends State<RescuePage> {
       backgroundColor: AppColors.background,
       appBar: AppBar(
         title: Text(
-          'Report a Stray',
-          style: Theme.of(context).textTheme.displayLarge,
+          _form.isPetSurrenderType
+              ? 'Surrender a Pet'
+              : _form.isLostPetType
+                  ? 'Report a Lost or Found Pet'
+                  : 'Report a Stray',
+          style: GoogleFonts.tiltWarp(fontSize: 20, color: AppColors.textPrimary),
         ),
         automaticallyImplyLeading: true,
         centerTitle: true,
-      ),
-      bottomNavigationBar: BottomNavigationBar(
-        currentIndex: 0,
-        items: const [
-          BottomNavigationBarItem(
-            icon: Icon(Icons.home_outlined),
-            activeIcon: Icon(Icons.home),
-            label: 'Home',
-          ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.notifications_outlined),
-            activeIcon: Icon(Icons.notifications),
-            label: 'Notifications',
-          ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.person_outline),
-            activeIcon: Icon(Icons.person),
-            label: 'My Profile',
-          ),
-        ],
-        onTap: (index) {
-          if (index == 0) {
-            Navigator.pushReplacement(
-              context,
-              MaterialPageRoute(builder: (context) => const HomeScreen()),
-            );
-          } else if (index == 1) {
-            Navigator.push(
-              context,
-              MaterialPageRoute(
-                builder: (context) => const NotificationsScreen(),
-              ),
-            );
-          } else if (index == 2) {
-            Navigator.push(
-              context,
-              MaterialPageRoute(builder: (context) => const UserProfile()),
-            );
-          }
-        },
       ),
       body: SingleChildScrollView(
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const SizedBox(height: 16),
-
-            RescueLocationSection(
-              pinnedLocation: _pinnedLocation,
-              hasResolvedLocation: _hasResolvedLocation,
-              pinnedAddress: _pinnedAddress,
-              loadingLocation: _loadingLocation,
-              addressController: _form.addressController,
-              onMapCreated: (ctrl) => _mapController = ctrl,
-              onMapTap: (pos) => _updatePin(pos, source: PinSource.map),
-              onLocateMe: _fetchCurrentLocation,
-              onSearch: _geocodeAddress,
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 4, 16, 14),
+              child: Text(
+                'Three short steps: where the animal is, photos, and what you saw. '
+                'Our partner organizations review every report.',
+                style: GoogleFonts.zain(fontSize: 14, color: AppColors.textSecondary),
+              ),
             ),
 
-            const SizedBox(height: 20),
+            RescueFormSection(
+              step: 1,
+              title: 'Location',
+              subtitle: 'Pin where the animal is right now.',
+              child: RescueLocationSection(
+                pinnedLocation: _pinnedLocation,
+                hasResolvedLocation: _hasResolvedLocation,
+                pinnedAddress: _pinnedAddress,
+                loadingLocation: _loadingLocation,
+                addressController: _form.addressController,
+                onMapCreated: (ctrl) => _mapController = ctrl,
+                onMapTap: (pos) => _updatePin(pos, source: PinSource.map),
+                onLocateMe: _fetchCurrentLocation,
+                onSearch: _geocodeAddress,
+              ),
+            ),
 
-            // Include images and videos
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16),
+            const SizedBox(height: 14),
+
+            RescueFormSection(
+              step: 2,
+              title: 'Photos and videos',
+              subtitle: 'Actual photos or videos of the animal. At least 2 are required.',
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  RescueFieldLabel('Include images and videos', required: true),
-                  const SizedBox(height: 4),
-                  Text(
-                    'Provide actual images or videos of the animal. '
-                        'At least 2 are required.',
-                    style: GoogleFonts.zain(
-                      fontSize: 11,
-                      color: AppColors.textSecondary,
-                    ),
-                  ),
-                  const SizedBox(height: 10),
                   Wrap(
                     spacing: 12,
                     runSpacing: 12,
                     children: List.generate(
                       4,
-                          (i) => RescueMediaBox(
+                      (i) => RescueMediaBox(
                         item: _form.mediaFiles[i],
                         progress: _form.uploadProgress[i],
                         onTap: _isLoading ? null : () => _pickMedia(i),
                       ),
                     ),
                   ),
+                  const SizedBox(height: 14),
+                  // Scan NFC / QR
+                  ScanTagButton(onPressed: _showScanOptions),
                 ],
               ),
             ),
 
-            const SizedBox(height: 24),
+            const SizedBox(height: 14),
 
-            // Scan NFC / QR
-            ScanTagButton(onPressed: _showScanOptions),
-            const SizedBox(height: 24),
-
-            // Divider
-            const Divider(
-              height: 1,
-              thickness: 1,
-              indent: 16,
-              endIndent: 16,
-              color: AppColors.slaterspwn,
-            ),
-
-            const SizedBox(height: 20),
-
-            // Details Section
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16),
+            RescueFormSection(
+              step: 3,
+              title: 'Rescue details',
+              subtitle: 'Tell us about the animal and its current condition.',
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
-                    'Details:',
-                    style: GoogleFonts.tiltWarp(
-                      fontSize: 16,
-                      fontWeight: FontWeight.w300,
-                      color: AppColors.textPrimary,
-                    ),
-                  ),
-
-                  const SizedBox(height: 18),
-
                   // Rescue Type
-                  RescueFieldLabel('Rescue Type', required: true),
+                  RescueFieldLabel('Rescue type', required: true),
                   const SizedBox(height: 6),
-                  GestureDetector(
+                  InkWell(
                     onTap: _pickRescueType,
+                    borderRadius: BorderRadius.circular(12),
                     child: Container(
                       width: double.infinity,
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 14,
-                        vertical: 12,
-                      ),
+                      height: 48,
+                      padding: const EdgeInsets.symmetric(horizontal: 14),
                       decoration: BoxDecoration(
                         color: Colors.white,
                         borderRadius: BorderRadius.circular(12),
-                        border: Border.all(color: AppColors.slaterspwn),
+                        border: Border.all(color: kRescueFieldBorder),
                       ),
                       child: Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
-                          Text(
-                            _form.selectedRescueType ?? 'Select',
-                            style: GoogleFonts.zain(
-                              fontSize: 14,
-                              color: _form.selectedRescueType == null
-                                  ? AppColors.textSecondary
-                                  : AppColors.textPrimary,
+                          Expanded(
+                            child: Text(
+                              _form.selectedRescueType ?? 'Select rescue type',
+                              style: GoogleFonts.zain(
+                                fontSize: 15,
+                                color: _form.selectedRescueType == null
+                                    ? AppColors.textSecondary
+                                    : AppColors.textPrimary,
+                              ),
                             ),
                           ),
                           const Icon(
@@ -695,7 +636,7 @@ class _RescuePageState extends State<RescuePage> {
                     ),
                   ),
 
-                  const SizedBox(height: 20),
+                  const SizedBox(height: 16),
 
                   if (_form.isPetSurrenderType) ...[
                     SurrenderFields(form: _form, onChanged: _onFormChanged),
@@ -712,7 +653,7 @@ class _RescuePageState extends State<RescuePage> {
               ),
             ),
 
-            const SizedBox(height: 28),
+            const SizedBox(height: 20),
 
             // Declaration + notice, shown for every report type.
             Padding(
@@ -985,11 +926,9 @@ class _RescuePageState extends State<RescuePage> {
                 width: double.infinity,
                 child: ElevatedButton(
                   onPressed: () {
-                    Navigator.pop(context);
-                    Navigator.pushReplacement(
-                      context,
-                      MaterialPageRoute(builder: (_) => const HomeScreen()),
-                    );
+                    // Back to the existing home shell rather than
+                    // stacking a second one on top of it.
+                    Navigator.of(context).popUntil((route) => route.isFirst);
                   },
                   style: AppButtons.primary,
                   child: Text(

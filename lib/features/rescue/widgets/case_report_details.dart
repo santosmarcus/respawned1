@@ -5,28 +5,34 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/features/rescue/rescue_form_options.dart';
 
-/// Everything the reporter entered on the rescue form, laid out per rescue
-/// type so Case Detail mirrors the form that was filled in:
+/// Everything the reporter entered on the rescue form, grouped into cards
+/// so each kind of information has one place (shared by the reporter's
+/// Track Case, staff Rescue Details and the transporter's job screen):
 ///
-/// * Pet Surrender — the surrender reason, explanation, rehoming timeline
-///   and vet records, plus each animal's surrender answers.
-/// * Lost Pet (a finder who asked for pickup) — the found animals and
-///   their status, read from the linked `petAlerts` docs.
-/// * Every other type — each animal's Health & Behavior and Risk
-///   Assessment, the Abandonment follow-up answers, on-site and access
-///   details, shelter coordination, witnesses and adoption interest.
-///
-/// Reports with two or more animals show each one as a collapsed card
-/// that opens when tapped.
+/// 1. Rescue details — type, urgency and why, and the type's own answers
+///    (Surrender, Neglect or Abuse, Abandonment).
+/// 2. Condition reported — the reporter's own description.
+/// 3. Animal information — each animal's details, health, behavior and
+///    risk. Lost Pet reads the finder's animals from the linked
+///    `petAlerts` docs. Two or more animals show as collapsed cards.
+/// 4. Location — address (unless the screen shows its own location card),
+///    on-site, access instructions.
+/// 5. Coordination — shelter coordination, contact time, witnesses and
+///    adoption interest (not asked on Surrender / Lost Pet).
 class CaseReportDetails extends StatelessWidget {
   const CaseReportDetails({
     super.key,
     required this.caseId,
     required this.data,
+    this.showAddress = true,
   });
 
   final String caseId;
   final Map<String, dynamic> data;
+
+  /// False on screens with their own location card (staff Rescue Details),
+  /// so the address isn't shown twice.
+  final bool showAddress;
 
   String? get _type => data['rescueType'] as String?;
   bool get _isSurrender => _type == 'Pet Surrender';
@@ -34,28 +40,82 @@ class CaseReportDetails extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final condition = (data['condition'] as String?)?.trim() ?? '';
+    final location = _locationRows();
     return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        CaseDetailRow('Rescue Type', _type),
-        CaseDetailRow('Urgency', data['urgency']),
-        CaseDetailRow('Description', data['condition']),
-        if (_isLostPet)
-          _LostPetSection(caseId: caseId, data: data)
-        else
-          _AnimalsSection(data: data, isSurrender: _isSurrender),
-        if (_isSurrender)
-          ..._surrenderRows(context)
-        else if (!_isLostPet)
-          ..._strayRows(),
-        CaseDetailRow.optional('Scanned Tag ID', data['scannedTagId']),
+        CaseDetailGroup(
+          title: 'Rescue details',
+          icon: Icons.assignment_outlined,
+          children: [
+            CaseDetailRow('Rescue Type', _type),
+            _UrgencyRow(rescueType: _type, urgency: data['urgency'] as String?),
+            if (_isSurrender) ..._surrenderRows(context) else if (!_isLostPet) ..._typeRows(),
+            if (data['communityCat'] == true) const CaseDetailRow('Community Cat', 'Yes'),
+            CaseDetailRow.optional('Scanned Tag ID', data['scannedTagId']),
+          ],
+        ),
+        if (condition.isNotEmpty)
+          CaseDetailGroup(
+            title: 'Condition reported',
+            icon: Icons.notes_outlined,
+            children: [
+              Text(
+                condition,
+                style: GoogleFonts.zain(fontSize: 14, height: 1.35, color: AppColors.textPrimary),
+              ),
+            ],
+          ),
+        CaseDetailGroup(
+          title: 'Animal information',
+          icon: Icons.pets_outlined,
+          children: [
+            if (_isLostPet)
+              _LostPetSection(caseId: caseId, data: data)
+            else
+              _AnimalsSection(data: data, isSurrender: _isSurrender),
+          ],
+        ),
+        if (location.isNotEmpty)
+          CaseDetailGroup(
+            // Without the address (the screen has its own location card)
+            // this is only on-site and access.
+            title: showAddress ? 'Location' : 'On-site and access',
+            icon: Icons.place_outlined,
+            children: location,
+          ),
+        if (!_isSurrender && !_isLostPet)
+          CaseDetailGroup(
+            title: 'Coordination',
+            icon: Icons.handshake_outlined,
+            children: _coordinationRows(),
+          ),
       ],
     );
+  }
+
+  List<Widget> _locationRows() {
+    final address = (data['address'] as String?)?.trim() ?? '';
+    final onSite = data['onSite'];
+    final access = (data['accessInstructions'] as String?)?.trim() ?? '';
+    return [
+      if (showAddress && address.isNotEmpty) CaseDetailRow('Address', address),
+      if (!_isSurrender && !_isLostPet && onSite != null) CaseDetailRow('On-site with the Animal', onSite),
+      if (access.isNotEmpty) CaseDetailRow('Access Instructions', access),
+    ];
   }
 
   List<Widget> _surrenderRows(BuildContext context) {
     final vetRecords = List<String>.from(data['vetRecordUrls'] ?? const []);
     return [
+      const _SectionHeading('Surrender', small: true),
+      CaseDetailRow('Reason for Surrender', data['surrenderReason']),
+      CaseDetailRow.optional(
+        'Explanation and Actions Taken',
+        data['surrenderExplanation'],
+      ),
+      CaseDetailRow('Rehoming Timeline', data['surrenderTimeline']),
       // Reports filed before these moved into each animal's card.
       CaseDetailRow.optional('Age of the Pet', data['surrenderAge']),
       CaseDetailRow.optional(
@@ -63,13 +123,6 @@ class CaseReportDetails extends StatelessWidget {
         data['surrenderDuration'],
       ),
       CaseDetailRow.optional('Acquired From', data['petAcquisitionSource']),
-      const _SectionHeading('Surrender Details'),
-      CaseDetailRow('Reason for Surrender', data['surrenderReason']),
-      CaseDetailRow.optional(
-        'Explanation and Actions Taken',
-        data['surrenderExplanation'],
-      ),
-      CaseDetailRow('Rehoming Timeline', data['surrenderTimeline']),
       if (vetRecords.isNotEmpty) ...[
         Text('Vaccination Card / Vet Records', style: _labelStyle),
         const SizedBox(height: 6),
@@ -79,19 +132,18 @@ class CaseReportDetails extends StatelessWidget {
     ];
   }
 
-  List<Widget> _strayRows() {
+  /// Neglect or Abuse / Abandonment follow-up answers.
+  List<Widget> _typeRows() {
     final abandonment = data['abandonment'];
     final neglect = data['neglectAbuse'];
-    final coordinate = data['coordinateWithShelter'] as String?;
     return [
       if (neglect is Map) ...[
-        const _SectionHeading('Neglect or Abuse Details'),
+        const _SectionHeading('Neglect or Abuse', small: true),
         CaseDetailRow('What Was Observed', _list(neglect['observed'])),
         CaseDetailRow('Happening at Time of Report', neglect['happeningNow']),
         CaseDetailRow('Known Owner', neglect['ownerKnown']),
         CaseDetailRow.optional('Owner Details', neglect['ownerDetails']),
         CaseDetailRow('How Long / How Often', neglect['frequency']),
-        const _SectionHeading('Reporting to Authorities', small: true),
         CaseDetailRow(
           'Reported to Barangay / Police',
           neglect['reportedToAuthorities'],
@@ -105,7 +157,7 @@ class CaseReportDetails extends StatelessWidget {
           const CaseDetailRow('Reporter Identity', 'Confidential'),
       ],
       if (abandonment is Map) ...[
-        const _SectionHeading('Abandonment Details'),
+        const _SectionHeading('Abandonment', small: true),
         CaseDetailRow('Time at Location', abandonment['duration']),
         CaseDetailRow('Where the Animal Was Left', abandonment['location']),
         CaseDetailRow('Access to Food and Water', abandonment['hasFoodWater']),
@@ -124,11 +176,12 @@ class CaseReportDetails extends StatelessWidget {
           abandonment['belongingsDetails'],
         ),
       ],
-      const _SectionHeading('Reporter Details'),
-      CaseDetailRow('On-site with the Animal', data['onSite']),
-      CaseDetailRow.optional('Access Instructions', data['accessInstructions']),
-      if (data['communityCat'] == true)
-        const CaseDetailRow('Community Cat', 'Yes'),
+    ];
+  }
+
+  List<Widget> _coordinationRows() {
+    final coordinate = data['coordinateWithShelter'] as String?;
+    return [
       CaseDetailRow('Coordinate with Shelter', _yesNo(coordinate)),
       if (coordinate == 'yes')
         CaseDetailRow.optional(
@@ -141,6 +194,98 @@ class CaseReportDetails extends StatelessWidget {
       ],
       CaseDetailRow('Interest to Adopt', _yesNo(data['interestedToAdopt'])),
     ];
+  }
+}
+
+/// One titled card of [CaseReportDetails]. Public so screens can add their
+/// own groups in the same style.
+class CaseDetailGroup extends StatelessWidget {
+  const CaseDetailGroup({
+    super.key,
+    required this.title,
+    required this.children,
+    this.icon,
+  });
+
+  final String title;
+  final IconData? icon;
+  final List<Widget> children;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.fromLTRB(14, 12, 14, 4),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: const Color(0xFFDAD7CC)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              if (icon != null) ...[
+                Icon(icon, size: 18, color: AppColors.textPrimary),
+                const SizedBox(width: 8),
+              ],
+              Expanded(
+                child: Text(title, style: GoogleFonts.tiltWarp(fontSize: 15, color: AppColors.textPrimary)),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          ...children,
+        ],
+      ),
+    );
+  }
+}
+
+/// Urgency with the reason it was set — it comes from the rescue type.
+class _UrgencyRow extends StatelessWidget {
+  const _UrgencyRow({required this.rescueType, required this.urgency});
+
+  final String? rescueType;
+  final String? urgency;
+
+  @override
+  Widget build(BuildContext context) {
+    final u = urgency?.trim() ?? '';
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('Urgency', style: _labelStyle),
+          const SizedBox(height: 2),
+          if (u.isEmpty)
+            Text('Not provided', style: GoogleFonts.zain(fontSize: 13, color: AppColors.textSecondary))
+          else
+            Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: urgencyColorFor(u),
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: Text(u,
+                      style: GoogleFonts.zain(fontSize: 12, fontWeight: FontWeight.w800, color: AppColors.textPrimary)),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    rescueType == null ? 'Set from the rescue type' : 'Set from the rescue type ($rescueType)',
+                    style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary),
+                  ),
+                ),
+              ],
+            ),
+        ],
+      ),
+    );
   }
 }
 
@@ -270,7 +415,8 @@ List<Widget> _animalRows(Map<String, dynamic> a, bool isSurrender) {
       // Injury, Illness and Neglect or Abuse only.
       CaseDetailRow.optional(
         a['visibleSignsLabel'] as String? ?? 'Visible Signs',
-        _list(a['visibleSigns']),
+        // Reports from before the form change kept these as harmSigns.
+        _list(a['visibleSigns'] ?? a['harmSigns']),
       ),
       if (isSurrender) ...[
         CaseDetailRow.optional('Vaccination Status', a['vaccination']),
@@ -372,7 +518,7 @@ String? _list(Object? v) {
   return v.join(', ');
 }
 
-/// Label above its value; '-' when unanswered.
+/// Label above its value; "Not provided" when unanswered.
 class CaseDetailRow extends StatelessWidget {
   const CaseDetailRow(this.label, this.value, {super.key})
       : hideWhenEmpty = false;
@@ -397,7 +543,7 @@ class CaseDetailRow extends StatelessWidget {
         children: [
           Text(label, style: _labelStyle),
           Text(
-            text.isEmpty ? '-' : text,
+            text.isEmpty ? 'Not provided' : text,
             style: GoogleFonts.zain(
               fontSize: 13,
               color: AppColors.textSecondary,

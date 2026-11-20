@@ -1047,14 +1047,12 @@ class _RescueDetailPageState extends ConsumerState<RescueDetailPage> {
             ),
 
             gap,
-            // Everything the reporter entered on the rescue form, laid out
-            // for this report's rescue type — the same section the
-            // reporter sees on Track Case. Two or more animals show as
-            // collapsed cards.
-            CaseCard(
-              title: 'Report Details',
-              child: CaseReportDetails(caseId: c.id, data: c.raw),
-            ),
+            // Everything the reporter entered on the rescue form, grouped
+            // into cards — the same section the reporter sees on Track
+            // Case. Two or more animals show as collapsed cards.
+            // Already grouped into its own cards; the address is in the
+            // Location card below.
+            CaseReportDetails(caseId: c.id, data: c.raw, showAddress: false),
 
             gap,
             _LocationCard(rescueCase: c, pendingLocationReports: pendingLocationReports),

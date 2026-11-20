@@ -1,5 +1,6 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:respawnd1/core/widgets/progress_timeline.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:respawnd1/app_theme.dart';
@@ -588,6 +589,29 @@ class _IntakeDetailPageState extends ConsumerState<IntakeDetailPage> {
                       icon: Icons.assignment_return_outlined,
                       color: AppColors.pinkrspwn),
               ],
+            ),
+            const SizedBox(height: kCaseGap),
+            // The intake sequence, so the next step is obvious.
+            ProgressTimeline(
+              title: 'Animal intake',
+              statusLabel: completedIndexes.length >= totalAnimals && selectedAnimalsReceived ? 'Done' : 'In progress',
+              steps: ProgressTimeline.sequence(
+                [
+                  ('Confirm intake', 'Check the shelter destination and transporter, then start the trip.'),
+                  ('Confirm animal received', 'Confirm the animal physically arrived at the shelter.'),
+                  ('Quarantine', 'Start, finish or skip the quarantine period.'),
+                  ('Create animal records', '$totalAnimals ${totalAnimals == 1 ? 'animal' : 'animals'} · ${completedIndexes.length} done'),
+                ],
+                c.intakeConfirmedAt == null
+                    ? 0
+                    : !selectedAnimalsReceived
+                        ? 1
+                        : (c.quarantineStatus != 'completed' && c.quarantineStatus != 'skipped')
+                            ? 2
+                            : completedIndexes.length < totalAnimals
+                                ? 3
+                                : 4,
+              ),
             ),
             const SizedBox(height: kCaseGap),
             if (c.intakeConfirmedAt == null)
@@ -1293,7 +1317,8 @@ class _AnimalRecordsSection extends StatelessWidget {
         Text(
           received
               ? '$completedCount of $totalAnimals records created'
-              : 'Confirm that the animal has been received before creating its record.',
+              : 'Locked until step 2 is done: confirm the animal was received '
+                  '(the Confirm Animal Received button at the bottom).',
           style: GoogleFonts.zain(fontSize: 13, color: AppColors.textSecondary),
         ),
         const SizedBox(height: 8),

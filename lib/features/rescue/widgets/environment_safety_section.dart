@@ -5,6 +5,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/core/utils/animal_health_assessment.dart';
 import 'package:respawnd1/features/rescue/rescue_form_controller.dart';
+import 'package:respawnd1/features/rescue/widgets/rescue_form_fields.dart';
 
 /// Environment and Safety chips for one animal — the predefined options
 /// plus an optional reporter-added custom entry. Values belong to this
@@ -70,21 +71,19 @@ class _EnvironmentSafetySectionState extends State<EnvironmentSafetySection> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
-          'Environment and Safety',
-          style: GoogleFonts.zain(
-            fontSize: 12,
-            fontWeight: FontWeight.w600,
-            color: AppColors.textPrimary,
-          ),
+        const RescueSubsectionHeader(
+          'Environment and safety',
+          subtitle: 'Where the animal is right now. Select all that apply.',
         ),
-        const SizedBox(height: 6),
+        const SizedBox(height: 8),
         Wrap(
           spacing: 8,
           runSpacing: 8,
           children: [
             for (final option in _options)
-              GestureDetector(
+              RescueToggleChip(
+                label: option,
+                selected: entry.environmentSafety.contains(option),
                 onTap: () {
                   setState(() {
                     if (entry.environmentSafety.contains(option)) {
@@ -95,33 +94,6 @@ class _EnvironmentSafetySectionState extends State<EnvironmentSafetySection> {
                   });
                   widget.onChanged();
                 },
-                child: Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 7,
-                  ),
-                  decoration: BoxDecoration(
-                    color: entry.environmentSafety.contains(option)
-                        ? AppColors.yellowrspwn
-                        : Colors.white,
-                    borderRadius: BorderRadius.circular(20),
-                    border: Border.all(
-                      color: entry.environmentSafety.contains(option)
-                          ? AppColors.yellowrspwn
-                          : AppColors.slaterspwn,
-                    ),
-                  ),
-                  child: Text(
-                    option,
-                    style: GoogleFonts.zain(
-                      fontSize: 12,
-                      fontWeight: entry.environmentSafety.contains(option)
-                          ? FontWeight.w700
-                          : FontWeight.w500,
-                      color: AppColors.textPrimary,
-                    ),
-                  ),
-                ),
               ),
             for (final custom in customValues)
               GestureDetector(
@@ -135,9 +107,9 @@ class _EnvironmentSafetySectionState extends State<EnvironmentSafetySection> {
                     vertical: 7,
                   ),
                   decoration: BoxDecoration(
-                    color: AppColors.yellowrspwn,
+                    color: kRescueSelectedFill,
                     borderRadius: BorderRadius.circular(20),
-                    border: Border.all(color: AppColors.yellowrspwn),
+                    border: Border.all(color: AppColors.textPrimary, width: 1.5),
                   ),
                   child: Row(
                     mainAxisSize: MainAxisSize.min,

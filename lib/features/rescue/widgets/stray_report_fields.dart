@@ -4,7 +4,6 @@ import 'package:google_fonts/google_fonts.dart';
 
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/features/rescue/rescue_form_controller.dart';
-import 'package:respawnd1/features/rescue/rescue_form_options.dart';
 import 'package:respawnd1/features/rescue/widgets/abandonment_fields.dart';
 import 'package:respawnd1/features/rescue/widgets/found_animal_card.dart';
 import 'package:respawnd1/features/rescue/widgets/neglect_abuse_fields.dart';
@@ -38,34 +37,9 @@ class StrayReportFields extends StatelessWidget {
       mainAxisSize: MainAxisSize.min,
       children: [
         if (form.selectedRescueType != null) ...[
-          Row(
-            children: [
-              Container(
-                width: 8,
-                height: 8,
-                decoration: BoxDecoration(
-                  color: urgencyColorFor(form.selectedUrgency),
-                  shape: BoxShape.circle,
-                ),
-              ),
-              const SizedBox(width: 6),
-              Text(
-                'Urgency level: ${form.selectedUrgency ?? 'N/A'}',
-                style: GoogleFonts.zain(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w600,
-                  color: AppColors.textPrimary,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 4),
-          Text(
-            'Set automatically based on the rescue type you chose.',
-            style: GoogleFonts.zain(
-              fontSize: 11,
-              color: AppColors.textSecondary,
-            ),
+          RescueUrgencyCard(
+            rescueType: form.selectedRescueType!,
+            urgency: form.selectedUrgency,
           ),
           const SizedBox(height: 20),
         ],
@@ -156,92 +130,23 @@ class StrayReportFields extends StatelessWidget {
 
         const SizedBox(height: 20),
 
-        // Coordinate with shelter
-        Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Expanded(
-              child: Text(
-                'Would you be willing to coordinate with the shelter to assist in the rescue?',
-                style: GoogleFonts.zain(
-                  fontWeight: FontWeight.w600,
-                  fontSize: 16,
-                  color: AppColors.textPrimary,
-                ),
-              ),
-            ),
-            const SizedBox(width: 4),
-            const Text(
-              '*',
-              style: TextStyle(
-                color: AppColors.error,
-                fontSize: 14,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-          ],
+        // Coordinate with shelter — one answer only, so radio tiles.
+        RescueFieldLabel(
+          'Would you be willing to coordinate with the shelter to assist in the rescue?',
+          required: true,
         ),
         const SizedBox(height: 8),
-        Row(
-          children: [
-            SizedBox(
-              width: 20,
-              height: 20,
-              child: Checkbox(
-                value: form.coordinateChoice == 'yes',
-                onChanged: (val) => _set(() => form.coordinateChoice = 'yes'),
-                activeColor: AppColors.textPrimary,
-                side: const BorderSide(
-                  color: AppColors.textPrimary,
-                  width: 1.5,
-                ),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(2),
-                ),
-                materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-              ),
-            ),
-            const SizedBox(width: 8),
-            Text(
-              'Yes, I would.',
-              style: GoogleFonts.zain(
-                fontSize: 14,
-                color: AppColors.textPrimary,
-              ),
-            ),
-          ],
+        RescueRadioOption(
+          'Yes, I would.',
+          form.coordinateChoice,
+          (v) => _set(() => form.coordinateChoice = v),
+          value: 'yes',
         ),
-        const SizedBox(height: 8),
-        Row(
-          children: [
-            SizedBox(
-              width: 20,
-              height: 20,
-              child: Checkbox(
-                value: form.coordinateChoice == 'no',
-                onChanged: (val) => _set(() => form.coordinateChoice = 'no'),
-                activeColor: AppColors.textPrimary,
-                side: const BorderSide(
-                  color: AppColors.textPrimary,
-                  width: 1.5,
-                ),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(2),
-                ),
-                materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-              ),
-            ),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Text(
-                'No, but I can refer you to witnesses who can assist.',
-                style: GoogleFonts.zain(
-                  fontSize: 14,
-                  color: AppColors.textPrimary,
-                ),
-              ),
-            ),
-          ],
+        RescueRadioOption(
+          'No, but I can refer you to witnesses who can assist.',
+          form.coordinateChoice,
+          (v) => _set(() => form.coordinateChoice = v),
+          value: 'no',
         ),
         if (form.coordinateChoice == 'no') ...[
           const SizedBox(height: 6),
@@ -312,95 +217,26 @@ class StrayReportFields extends StatelessWidget {
           const SizedBox(height: 20),
         ],
 
-        // Willing to adopt
-        const SizedBox(height: 20),
-        Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Expanded(
-              child: Text(
-                'Would you like to adopt the animal once rescued?',
-                style: GoogleFonts.zain(
-                  fontWeight: FontWeight.w600,
-                  fontSize: 16,
-                  color: AppColors.textPrimary,
-                ),
-              ),
-            ),
-            const SizedBox(width: 4),
-            const Text(
-              '*',
-              style: TextStyle(
-                color: AppColors.error,
-                fontSize: 14,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-          ],
-        ),
-
-        const SizedBox(height: 8),
-        Row(
-          children: [
-            SizedBox(
-              width: 20,
-              height: 20,
-              child: Checkbox(
-                value: form.adoptionChoice == 'yes',
-                onChanged: (val) => _set(() => form.adoptionChoice = 'yes'),
-                activeColor: AppColors.textPrimary,
-                side: const BorderSide(
-                  color: AppColors.textPrimary,
-                  width: 1.5,
-                ),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(2),
-                ),
-                materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-              ),
-            ),
-            const SizedBox(width: 8),
-            Text(
-              'Yes, I would.',
-              style: GoogleFonts.zain(
-                fontSize: 14,
-                color: AppColors.textPrimary,
-              ),
-            ),
-          ],
+        // Willing to adopt — one answer only, so radio tiles.
+        RescueFieldLabel(
+          'Would you like to adopt the animal once rescued?',
+          required: true,
         ),
         const SizedBox(height: 8),
-        Row(
-          children: [
-            SizedBox(
-              width: 20,
-              height: 20,
-              child: Checkbox(
-                value: form.adoptionChoice == 'no',
-                onChanged: (val) => _set(() {
-                  form.adoptionChoice = 'no';
-                  form.adoptionCommitmentAccepted = false;
-                }),
-                activeColor: AppColors.textPrimary,
-                side: const BorderSide(
-                  color: AppColors.textPrimary,
-                  width: 1.5,
-                ),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(2),
-                ),
-                materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-              ),
-            ),
-            const SizedBox(width: 8),
-            Text(
-              'No.',
-              style: GoogleFonts.zain(
-                fontSize: 14,
-                color: AppColors.textPrimary,
-              ),
-            ),
-          ],
+        RescueRadioOption(
+          'Yes, I would.',
+          form.adoptionChoice,
+          (v) => _set(() => form.adoptionChoice = v),
+          value: 'yes',
+        ),
+        RescueRadioOption(
+          'No.',
+          form.adoptionChoice,
+          (v) => _set(() {
+            form.adoptionChoice = v;
+            form.adoptionCommitmentAccepted = false;
+          }),
+          value: 'no',
         ),
 
         // Only shown once the reporter has expressed interest in

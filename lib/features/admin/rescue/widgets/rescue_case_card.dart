@@ -197,7 +197,12 @@ class RescueCaseCard extends StatelessWidget {
                         ),
                       ],
                       const SizedBox(width: 6),
-                      UrgencyChip(urgency: c.urgency),
+                      // In treatment the chip follows the latest treatment
+                      // log's condition; the reported urgency never changes.
+                      if (isTreatmentStage && (c.isDeceased || (c.currentCondition ?? '').isNotEmpty))
+                        TreatmentConditionChip(condition: c.isDeceased ? 'Deceased' : c.currentCondition!)
+                      else
+                        UrgencyChip(urgency: c.urgency),
                     ],
                   ),
                   const SizedBox(height: 2),
@@ -249,8 +254,13 @@ class RescueCaseCard extends StatelessWidget {
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
                       Expanded(
+                        // Align keeps the chip its own width; straight
+                        // inside Expanded it stretched across the card.
                         child: showStatusChip
-                            ? RescueStatusChip(status: c.status)
+                            ? Align(
+                                alignment: Alignment.centerLeft,
+                                child: RescueStatusChip(status: c.status),
+                              )
                             : Text(
                           c.status == RescueStatus.accepted
                               ? 'Accepted · Clinic selection required'

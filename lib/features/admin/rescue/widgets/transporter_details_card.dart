@@ -87,7 +87,9 @@ class TransporterDetailsCard extends ConsumerWidget {
     // once transport for this leg is done. Never a "Selected" chip and
     // never doubled up with a separate availability indicator.
     final isCompleted = assignment.status == TransportAssignmentStatus.completed;
-    final chipLabel = isCompleted ? 'Completed' : 'Busy';
+    // This chip is the assignment's status (on this trip / trip done), not
+    // the transporter's general availability.
+    final chipLabel = isCompleted ? 'Trip completed' : 'On this trip';
     final chipColor = isCompleted ? AppColors.slaterspwn : AppColors.yellowrspwn;
 
     // Full width of its parent, like the other case cards: callers pad it
@@ -115,8 +117,8 @@ class TransporterDetailsCard extends ConsumerWidget {
           Row(
             children: [
               Expanded(
-                child: Text('Transporter',
-                    style: GoogleFonts.zain(fontSize: 11, fontWeight: FontWeight.w700, color: AppColors.textSecondary)),
+                child: Text('Assigned transporter',
+                    style: GoogleFonts.zain(fontSize: 12, fontWeight: FontWeight.w700, color: AppColors.textSecondary)),
               ),
               if (menu.isNotEmpty)
                 SizedBox(
@@ -182,12 +184,14 @@ class TransporterDetailsCard extends ConsumerWidget {
                     ),
                     Text(profile.type, style: GoogleFonts.zain(fontSize: 11, color: AppColors.textSecondary)),
                     const SizedBox(height: 4),
-                    Text(
-                      '${profile.plate} · ${profile.vehicle}',
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary),
-                    ),
+                    // Leave out "Not provided" parts rather than showing them.
+                    if (_vehicleLine(profile).isNotEmpty)
+                      Text(
+                        _vehicleLine(profile),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary),
+                      ),
                     if (distanceKm != null)
                       Text(
                         '${distanceKm!.toStringAsFixed(1)} km away'
@@ -203,47 +207,44 @@ class TransporterDetailsCard extends ConsumerWidget {
           // Message removed — redundant with the shared case-level Messages
           // thread on this same Track Case page (the "Tracking Detail" tab);
           // only Call stays on the card itself.
-          SizedBox(
-            width: double.infinity,
-            child: Tooltip(
-              message: (profile.phone == null || profile.phone!.isEmpty)
-                  ? 'No phone number on file'
-                  : 'Call ${profile.name}',
-              child: OutlinedButton.icon(
-                onPressed: (profile.phone == null || profile.phone!.isEmpty)
-                    ? null
-                    : () => _launchCall(context, profile.phone),
-                icon: const Icon(Icons.phone_outlined, size: 16),
-                label: Text('Call', style: GoogleFonts.zain(fontSize: 12, fontWeight: FontWeight.w600)),
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: AppColors.textPrimary,
-                  disabledForegroundColor: AppColors.textSecondary,
-                  side: BorderSide(
-                      color: (profile.phone == null || profile.phone!.isEmpty)
-                          ? AppColors.slaterspwn
-                          : AppColors.textPrimary),
-                  padding: const EdgeInsets.symmetric(vertical: 8),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          Row(
+            children: [
+              Expanded(
+                child: Tooltip(
+                  message: (profile.phone == null || profile.phone!.isEmpty) ? 'No phone number on file' : 'Call ${profile.name}',
+                  child: OutlinedButton.icon(
+                    onPressed: (profile.phone == null || profile.phone!.isEmpty) ? null : () => _launchCall(context, profile.phone),
+                    icon: const Icon(Icons.phone_outlined, size: 16),
+                    label: Text((profile.phone == null || profile.phone!.isEmpty) ? 'No phone' : 'Call',
+                        style: GoogleFonts.zain(fontSize: 13, fontWeight: FontWeight.w600)),
+                    style: buttonStyle.copyWith(
+                      side: WidgetStatePropertyAll(BorderSide(
+                          color: (profile.phone == null || profile.phone!.isEmpty) ? AppColors.slaterspwn : AppColors.textPrimary)),
+                    ),
+                  ),
                 ),
               ),
-            ),
+              if (onTrack != null) ...[
+                const SizedBox(width: 8),
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: onTrack,
+                    icon: const Icon(Icons.map_outlined, size: 16),
+                    label: Text('Track', style: GoogleFonts.zain(fontSize: 13, fontWeight: FontWeight.w600)),
+                    style: buttonStyle,
+                  ),
+                ),
+              ],
+            ],
           ),
-          if (onTrack != null) ...[
-            const SizedBox(height: 8),
-            SizedBox(
-              width: double.infinity,
-              child: OutlinedButton.icon(
-                onPressed: onTrack,
-                icon: const Icon(Icons.map_outlined, size: 16),
-                label: Text('Transport Tracking', style: GoogleFonts.zain(fontSize: 12, fontWeight: FontWeight.w600)),
-                style: buttonStyle,
-              ),
-            ),
-          ],
         ],
       ),
     );
   }
+
+  static String _vehicleLine(TransporterProfile p) => [p.plate, p.vehicle]
+      .where((v) => v.trim().isNotEmpty && v != 'Not provided')
+      .join(' · ');
 
   String _formatEta(Duration d) {
     if (d.inMinutes < 1) return '<1 min';
@@ -265,8 +266,8 @@ class _Avatar extends StatelessWidget {
         borderRadius: BorderRadius.circular(10),
         child: Image.network(
           photoUrl!,
-          width: 48,
-          height: 48,
+          width: 56,
+          height: 56,
           fit: BoxFit.cover,
           errorBuilder: (_, _, _) => _placeholder(),
         ),
@@ -276,8 +277,8 @@ class _Avatar extends StatelessWidget {
   }
 
   Widget _placeholder() => Container(
-        width: 48,
-        height: 48,
+        width: 56,
+        height: 56,
         decoration: BoxDecoration(color: AppColors.tearspwn, borderRadius: BorderRadius.circular(10)),
         child: const Icon(Icons.directions_car, color: AppColors.textSecondary),
       );

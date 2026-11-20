@@ -9,12 +9,17 @@
 /// parsing layer.
 library;
 
+/// Added to every single-select health field, so a reporter who couldn't
+/// get close enough can say so instead of guessing a "normal" answer.
+const String kNotAssessedOption = 'Not sure / Not assessed';
+
 /// Single-select.
 const List<String> kBodyConditionOptions = [
   'Overweight',
   'Normal',
   'Underweight',
   'Extremely Underweight (prominent rib bones)',
+  kNotAssessedOption,
 ];
 
 /// Single-select.
@@ -22,6 +27,7 @@ const List<String> kMobilityOptions = [
   'Walks and runs normally',
   'Minor limp/stiffness',
   'Cannot walk/crawling only',
+  kNotAssessedOption,
 ];
 
 /// Single-select.
@@ -29,6 +35,7 @@ const List<String> kAlertnessOptions = [
   'Alert/responsive',
   'Lethargic/timid',
   'Unresponsive/collapsed/disoriented',
+  kNotAssessedOption,
 ];
 
 /// Multi-select. Kept as two genuinely separate options — a prior revision
@@ -67,6 +74,7 @@ const List<String> kEyesNoseMouthOptions = [
   'Clear and no discharge',
   'Small amount of discharge',
   'Thick and excessive discharge',
+  kNotAssessedOption,
 ];
 
 /// Single-select.
@@ -74,6 +82,7 @@ const List<String> kSkinAndCoatOptions = [
   'Clean; no visible skin disease (fleas/ticks, mange)',
   'Minor hairloss; presence of irritation/skin disease (fleas/ticks, mange)',
   'Large open wounds; severe skin disease (fleas/ticks, mange)',
+  kNotAssessedOption,
 ];
 
 /// Single-select.

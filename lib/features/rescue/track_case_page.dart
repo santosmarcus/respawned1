@@ -1,6 +1,8 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:respawnd1/core/utils/rescue_progress.dart';
+import 'package:respawnd1/core/widgets/progress_timeline.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
@@ -136,6 +138,7 @@ class TrackCasePage extends StatefulWidget {
 
 class _TrackCasePageState extends State<TrackCasePage> {
   late int _tabIndex = widget.initialTabIndex;
+  bool _mapExpanded = false;
   final _messageController = TextEditingController();
   final _routeLoader = _SharedRouteLoader();
   final _messageFocusNode = FocusNode();
@@ -258,14 +261,16 @@ class _TrackCasePageState extends State<TrackCasePage> {
             ),
             title: Text(
               'Track Case',
-              style: Theme.of(context).textTheme.displaySmall,
+              style: GoogleFonts.tiltWarp(fontSize: 20, color: AppColors.textPrimary),
             ),
             centerTitle: true,
           ),
           body: Column(
             children: [
-              SizedBox(
-                height: 232,
+              AnimatedContainer(
+                duration: const Duration(milliseconds: 220),
+                curve: Curves.easeOut,
+                height: _mapExpanded ? 412 : 232,
                 child: Stack(
                   clipBehavior: Clip.none,
                   children: [
@@ -273,11 +278,31 @@ class _TrackCasePageState extends State<TrackCasePage> {
                       top: 0,
                       left: 0,
                       right: 0,
-                      height: 200,
+                      bottom: 32,
                       child: _TrackCaseMap(
                         caseId: widget.caseId,
                         data: data ?? {},
                         routeLoader: _routeLoader,
+                      ),
+                    ),
+                    // Expand the map for a closer look; collapse to get the
+                    // case details back on screen.
+                    Positioned(
+                      top: 8,
+                      left: 8,
+                      child: Material(
+                        color: Colors.white,
+                        shape: const CircleBorder(),
+                        elevation: 2,
+                        child: IconButton(
+                          visualDensity: VisualDensity.compact,
+                          tooltip: _mapExpanded ? 'Collapse map' : 'Expand map',
+                          icon: Icon(
+                            _mapExpanded ? Icons.fullscreen_exit : Icons.fullscreen,
+                            color: AppColors.textPrimary,
+                          ),
+                          onPressed: () => setState(() => _mapExpanded = !_mapExpanded),
+                        ),
                       ),
                     ),
                     Positioned(
@@ -1186,6 +1211,23 @@ class _TrackingTabState extends State<_TrackingTab> {
       children: [
         // The rescue team is waiting on a fresh photo from the reporter.
         if (widget.isReporter) LiveProofRequestCard(caseId: widget.caseId, data: widget.data),
+        // Rescue progress: where the case is on its normal path, so the
+        // current stage is clear without reading the whole history.
+        if (rescueProgressFinished(widget.data['status'] as String?) case final finished?)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+            child: ProgressTimeline(
+              title: 'Rescue progress',
+              statusLabel: finished >= kRescueProgressSteps.length ? 'Completed' : 'In progress',
+              steps: [
+                for (final (i, step) in ProgressTimeline.sequence(kRescueProgressSteps, finished).indexed)
+                  i == finished && rescueProgressDetail(widget.data['status'] as String?) != null
+                      ? TimelineStep(step.title,
+                          subtitle: rescueProgressDetail(widget.data['status'] as String?), state: step.state)
+                      : step,
+              ],
+            ),
+          ),
         _collapsibleHeader(
           title: 'Tracking Progress',
           expanded: _trackingExpanded,
@@ -1620,6 +1662,11 @@ class _CaseDetailTabState extends State<_CaseDetailTab> {
           if ((data['status'] as String?) == 'rejected')
             _RejectionDetailsSection(caseId: widget.caseId, data: data),
 
+          // At a glance: photo, case number, urgency, animal, when and by
+          // whom it was reported.
+          _CaseSummaryCard(caseId: widget.caseId, data: data),
+          const SizedBox(height: 12),
+
           // Case media
           _buildMediaSection(
             context,
@@ -1627,10 +1674,9 @@ class _CaseDetailTabState extends State<_CaseDetailTab> {
             List<String>.from(data['photoUrls'] ?? []),
           ),
           const SizedBox(height: 16),
-          _DetailRow('Reporter Name', data['reporterName']),
-          _DetailRow('Address', data['address']),
-          // Every field from the rescue form, laid out for this report's
-          // rescue type (see CaseReportDetails).
+          // Every field from the rescue form, grouped into cards: rescue
+          // details, condition, animals, location, coordination (see
+          // CaseReportDetails). The address is in its Location card.
           CaseReportDetails(caseId: widget.caseId, data: data),
           const SizedBox(height: 12),
 
@@ -1760,7 +1806,7 @@ class _CaseDetailTabState extends State<_CaseDetailTab> {
           ] else if (_hasWillingAdopter)
             _DetailRow(
               'Willing adopter',
-              '${data['willingAdopterName'] ?? '-'}'
+              '${data['willingAdopterName'] ?? 'Not provided'}'
                   '${data['willingAdopterType'] != null ? ' (${data['willingAdopterType']})' : ''}',
             ),
 
@@ -1864,6 +1910,117 @@ class _RejectionDetailsSection extends StatelessWidget {
   }
 }
 
+/// Track Case's top card on the Case Detail tab.
+class _CaseSummaryCard extends StatelessWidget {
+  final String caseId;
+  final Map<String, dynamic> data;
+  const _CaseSummaryCard({required this.caseId, required this.data});
+
+  @override
+  Widget build(BuildContext context) {
+    final photos = List<String>.from(data['photoUrls'] ?? const []);
+    final animals = data['animals'] as List?;
+    final first = animals != null && animals.isNotEmpty && animals.first is Map
+        ? Map<String, dynamic>.from(animals.first as Map)
+        : <String, dynamic>{'species': data['animalType'], 'breed': data['breed'], 'size': data['size']};
+    final animalLine = [first['species'], first['breed'], first['size']]
+        .whereType<String>()
+        .where((s) => s.trim().isNotEmpty)
+        .join(' · ');
+    final count = animals?.length ?? 1;
+    final created = data['createdAt'];
+    final reportedAt = created is Timestamp ? created.toDate() : null;
+    final urgency = (data['urgency'] as String?)?.trim() ?? '';
+    final reporter = (data['reporterName'] as String?)?.trim() ?? '';
+
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: const Color(0xFFDAD7CC)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          ClipRRect(
+            borderRadius: BorderRadius.circular(12),
+            child: photos.isEmpty
+                ? Container(
+                    width: 72,
+                    height: 72,
+                    color: AppColors.tearspwn,
+                    child: const Icon(Icons.pets, color: AppColors.textSecondary),
+                  )
+                : Image.network(
+                    photos.first,
+                    width: 72,
+                    height: 72,
+                    fit: BoxFit.cover,
+                    errorBuilder: (_, _, _) => Container(
+                      width: 72,
+                      height: 72,
+                      color: AppColors.tearspwn,
+                      child: const Icon(Icons.pets, color: AppColors.textSecondary),
+                    ),
+                  ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        'Case #${caseId.length >= 7 ? caseId.substring(0, 7).toUpperCase() : caseId}',
+                        style: GoogleFonts.tiltWarp(fontSize: 15, color: AppColors.textPrimary),
+                      ),
+                    ),
+                    if (urgency.isNotEmpty)
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: urgency == 'Critical'
+                              ? AppColors.error
+                              : urgency == 'Medium'
+                                  ? AppColors.yellowrspwn
+                                  : AppColors.greenrspwn,
+                          borderRadius: BorderRadius.circular(20),
+                        ),
+                        child: Text(urgency,
+                            style: GoogleFonts.zain(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w800,
+                                color: urgency == 'Critical' ? Colors.white : AppColors.textPrimary)),
+                      ),
+                  ],
+                ),
+                if (animalLine.isNotEmpty)
+                  Text(
+                    count > 1 ? '$animalLine  +${count - 1} more' : animalLine,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: GoogleFonts.zain(fontSize: 14, fontWeight: FontWeight.w700, color: AppColors.textPrimary),
+                  ),
+                if (reportedAt != null)
+                  Text(formatDateTime(reportedAt),
+                      style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary)),
+                if (reporter.isNotEmpty)
+                  Text('Reported by $reporter',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary)),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _DetailRow extends StatelessWidget {
   final String label;
   final String? value;
@@ -1885,7 +2042,7 @@ class _DetailRow extends StatelessWidget {
             ),
           ),
           Text(
-            value ?? '-',
+            (value == null || value!.trim().isEmpty) ? 'Not provided' : value!,
             style: GoogleFonts.zain(
               fontSize: 13,
               color: AppColors.textSecondary,

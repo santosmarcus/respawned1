@@ -36,12 +36,13 @@ class RescueReportService {
         required MediaUploadProgress onProgress,
         String folder = 'cases',
       }) async {
-    final photoUrls = <String>[];
-    final videoUrls = <String>[];
-
-    for (int i = 0; i < mediaFiles.length; i++) {
+    // Every slot uploads at the same time (they used to go one after
+    // another, so a report with several photos and a video waited for each
+    // in turn). Results are collected per slot so the URL order still
+    // follows the slots.
+    Future<(bool, String)?> uploadSlot(int i) async {
       final item = mediaFiles[i];
-      if (item == null) continue;
+      if (item == null) return null;
 
       final ext = item.isVideo ? 'mp4' : 'jpg';
       final ref = FirebaseStorage.instance.ref().child(
@@ -56,22 +57,32 @@ class RescueReportService {
       );
 
       // Track upload progress for slot
-      task.snapshotEvents.listen((snap) {
+      final progressSub = task.snapshotEvents.listen((snap) {
         onProgress(
           i,
           snap.bytesTransferred / (snap.totalBytes == 0 ? 1 : snap.totalBytes),
         );
-      });
+      }, onError: (_) {});
 
-      await task;
-      final url = await ref.getDownloadURL();
-      if (item.isVideo) {
-        videoUrls.add(url);
-      } else {
-        photoUrls.add(url);
+      try {
+        await task;
+      } finally {
+        await progressSub.cancel();
       }
-
+      final url = await ref.getDownloadURL();
       onProgress(i, null);
+      return (item.isVideo, url);
+    }
+
+    final results = await Future.wait([
+      for (int i = 0; i < mediaFiles.length; i++) uploadSlot(i),
+    ]);
+
+    final photoUrls = <String>[];
+    final videoUrls = <String>[];
+    for (final r in results) {
+      if (r == null) continue;
+      (r.$1 ? videoUrls : photoUrls).add(r.$2);
     }
 
     return (photoUrls: photoUrls, videoUrls: videoUrls);
@@ -83,18 +94,20 @@ class RescueReportService {
       List<XFile> photos,
       String caseId,
       ) async {
-    final urls = <String>[];
-    for (var i = 0; i < photos.length; i++) {
-      final ref = FirebaseStorage.instance.ref().child(
-        'cases/$caseId/vet_record_$i.jpg',
-      );
-      await ref.putFile(
-        File(photos[i].path),
-        SettableMetadata(contentType: 'image/jpeg'),
-      );
-      urls.add(await ref.getDownloadURL());
-    }
-    return urls;
+    // In parallel, in order (Future.wait keeps the list order).
+    return Future.wait([
+      for (var i = 0; i < photos.length; i++)
+        () async {
+          final ref = FirebaseStorage.instance.ref().child(
+            'cases/$caseId/vet_record_$i.jpg',
+          );
+          await ref.putFile(
+            File(photos[i].path),
+            SettableMetadata(contentType: 'image/jpeg'),
+          );
+          return ref.getDownloadURL();
+        }(),
+    ]);
   }
 
   /// Creates the rescue / surrender case (one doc for every animal), then
@@ -275,14 +288,20 @@ class RescueReportService {
     });
 
     final primaryCaseId = docRef.id;
-    final media = await uploadMedia(
-    form.mediaFiles,
-    primaryCaseId,
-    onProgress: onProgress,
+    // Media and vet records upload side by side.
+    final mediaFuture = uploadMedia(
+      form.mediaFiles,
+      primaryCaseId,
+      onProgress: onProgress,
     );
-    final vetRecordUrls = form.isPetSurrenderType
-    ? await uploadVetRecords(form.vetRecordPhotos, primaryCaseId)
-        : const <String>[];
+    final vetFuture = form.isPetSurrenderType
+        ? uploadVetRecords(form.vetRecordPhotos, primaryCaseId)
+        : Future.value(const <String>[]);
+    // Future.wait listens to both at once, so a failure in either one
+    // surfaces here instead of as an unhandled error.
+    final uploaded = await Future.wait<Object>([mediaFuture, vetFuture]);
+    final media = uploaded[0] as ({List<String> photoUrls, List<String> videoUrls});
+    final vetRecordUrls = uploaded[1] as List<String>;
     if (media.photoUrls.isNotEmpty ||
     media.videoUrls.isNotEmpty ||
     vetRecordUrls.isNotEmpty) {
@@ -417,9 +436,10 @@ class RescueReportService {
         createdDocIds.add(docRef.id);
       }
       // Backfill groupId on every doc in the group (first doc included).
-      for (final id in createdDocIds) {
-        await alertsCollection.doc(id).update({'groupId': groupId});
-      }
+      await Future.wait([
+        for (final id in createdDocIds)
+          alertsCollection.doc(id).update({'groupId': groupId}),
+      ]);
     }
 
     // Media is shared across the whole group (same sighting/animal(s)),

@@ -118,16 +118,16 @@ class FoundAnimalCard extends StatelessWidget {
     return Container(
       key: entry.cardKey,
       margin: const EdgeInsets.only(bottom: 12),
-      padding: const EdgeInsets.all(12),
+      padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: const Color(0xFFFAF9F5),
         border: Border.all(
           color: entry.hasAssessmentError
               ? AppColors.error
-              : AppColors.slaterspwn,
+              : kRescueFieldBorder,
           width: entry.hasAssessmentError ? 1.5 : 1,
         ),
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(14),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -145,13 +145,25 @@ class FoundAnimalCard extends StatelessWidget {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(
-                        'Animal ${index + 1}',
-                        style: GoogleFonts.zain(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w700,
-                          color: AppColors.textPrimary,
-                        ),
+                      Row(
+                        children: [
+                          Text(
+                            'Animal ${index + 1}',
+                            style: GoogleFonts.tiltWarp(
+                              fontSize: 15,
+                              color: AppColors.textPrimary,
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Text(
+                            'Required',
+                            style: GoogleFonts.zain(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                              color: AppColors.textSecondary,
+                            ),
+                          ),
+                        ],
                       ),
                       if (canRemove && !entry.expanded && _summary.isNotEmpty)
                         Text(
@@ -171,12 +183,14 @@ class FoundAnimalCard extends StatelessWidget {
                         : Icons.keyboard_arrow_down,
                     color: AppColors.textPrimary,
                   ),
-                  const SizedBox(width: 8),
-                  GestureDetector(
-                    onTap: onRemove,
-                    child: const Icon(
-                      Icons.close,
-                      size: 18,
+                  const SizedBox(width: 4),
+                  IconButton(
+                    tooltip: 'Remove this animal',
+                    visualDensity: VisualDensity.compact,
+                    onPressed: onRemove,
+                    icon: const Icon(
+                      Icons.delete_outline,
+                      size: 20,
                       color: AppColors.textSecondary,
                     ),
                   ),
@@ -210,7 +224,9 @@ class FoundAnimalCard extends StatelessWidget {
 
   List<Widget> _body() {
     return [
-      const SizedBox(height: 8),
+      const SizedBox(height: 10),
+      const RescueSubsectionHeader('Basic details'),
+      const SizedBox(height: 6),
       Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -310,6 +326,8 @@ class FoundAnimalCard extends StatelessWidget {
           ],
         ),
       ],
+      const SizedBox(height: 16),
+      const Divider(height: 1, color: kRescueFieldBorder),
       const SizedBox(height: 14),
       HealthBehaviorAssessment(
         entry: entry,
@@ -317,14 +335,10 @@ class FoundAnimalCard extends StatelessWidget {
         isSurrender: isSurrender,
         rescueType: rescueType,
       ),
-      const SizedBox(height: 14),
-      Text(
-        'Risk Assessment',
-        style: GoogleFonts.zain(
-          fontSize: 13,
-          fontWeight: FontWeight.w700,
-          color: AppColors.textPrimary,
-        ),
+      const SizedBox(height: 16),
+      const RescueSubsectionHeader(
+        'Risk assessment',
+        subtitle: 'Choose Unknown if you could not tell — it is never assumed Low.',
       ),
       const SizedBox(height: 8),
       RiskFieldsRow(entry: entry, onChanged: onChanged),
