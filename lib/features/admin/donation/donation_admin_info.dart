@@ -13,6 +13,7 @@ import 'donation_admin_service.dart';
 import 'donation_admin_sheets.dart';
 import 'package:respawnd1/features/admin/widgets/donation_admin.dart';
 import 'package:respawnd1/core/widgets/app_dialogs.dart';
+import 'package:respawnd1/features/admin/facebook/facebook_record_post_page.dart';
 
 class DonationAdminInfoPage extends ConsumerWidget {
   final String campaignId;
@@ -363,6 +364,8 @@ class _InfoBodyState extends ConsumerState<_InfoBody> {
             : () => showAdminSheet(context, ResolveDeadlineSheet(campaign: c, mode: 'relaunch'))),
       if (!c.isDraft && !c.isArchived)
         _ActionChip('Post update', Icons.campaign_outlined, _busy ? null : () => showAdminSheet(context, PostUpdateSheet(campaign: c))),
+      if (!c.isDraft && !c.isArchived)
+        _ActionChip('Share to Facebook', Icons.facebook, _busy ? null : () => openCampaignFacebookShare(context, c)),
     ];
 
     return [

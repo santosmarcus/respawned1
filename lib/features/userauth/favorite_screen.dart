@@ -5,12 +5,16 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/features/adoption/animal_page.dart';
 import 'package:respawnd1/features/adoption/adoption_page.dart';
+import 'package:respawnd1/core/models/volunteer/volunteer_event.dart';
+import 'package:respawnd1/core/repos/volunteer_event_repository.dart';
+import 'package:respawnd1/core/widgets/event_cover_image.dart';
+import 'package:respawnd1/features/volunteerevent/event_detail_page.dart';
 
 /// Favorites — same header/tab shell as History, but for saved items.
 ///
-/// Only the Adoption tab has real data right now (favorited adoptable
-/// animals, same as before). Donation/Volunteer are placeholders until
-/// there's something to favorite in those categories. There's no Rescue
+/// Adoption lists favorited adoptable animals and Volunteer lists saved
+/// (hearted) volunteer events. Donation is a placeholder until there's
+/// something to favorite there. There's no Rescue
 /// tab here — you don't "favorite" a rescue case.
 class FavoritesScreen extends StatefulWidget {
   const FavoritesScreen({super.key});
@@ -106,7 +110,7 @@ class _FavoritesScreenState extends State<FavoritesScreen> {
               child: switch (_tabIndex) {
                 0 => _buildAdoptionTab(),
                 1 => const _ComingSoonTab(label: 'donations'),
-                _ => const _ComingSoonTab(label: 'volunteer events'),
+                _ => const _SavedEventsTab(),
               },
             ),
           ],
@@ -231,6 +235,148 @@ class _FavoriteCard extends StatelessWidget {
         decoration: BoxDecoration(color: AppColors.tearspwn, borderRadius: BorderRadius.circular(10)),
         child: const Icon(Icons.pets, size: 32, color: AppColors.textSecondary),
       );
+}
+
+/// The volunteer events the user saved, soonest first; tapping one opens it
+/// to view or join, and the heart removes it.
+class _SavedEventsTab extends StatefulWidget {
+  const _SavedEventsTab();
+
+  @override
+  State<_SavedEventsTab> createState() => _SavedEventsTabState();
+}
+
+class _SavedEventsTabState extends State<_SavedEventsTab> {
+  final _repo = VolunteerEventRepository();
+  List<VolunteerEvent>? _events;
+  bool _failed = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    try {
+      final events = await _repo.loadMyFavoriteEvents();
+      if (mounted) setState(() => _events = events);
+    } catch (_) {
+      if (mounted) setState(() => _failed = true);
+    }
+  }
+
+  Future<void> _toggle(VolunteerEvent event) async {
+    final next = !event.favorited;
+    setState(() => event.favorited = next);
+    await _repo.setFavorite(event, next);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final events = _events;
+    if (_failed) {
+      return Center(
+        child: Text('Could not load saved events.',
+            style: GoogleFonts.zain(fontSize: 14, color: AppColors.textSecondary)),
+      );
+    }
+    if (events == null) {
+      return const Center(child: CircularProgressIndicator(color: AppColors.greenrspwn));
+    }
+    final saved = events.where((e) => e.favorited).toList();
+    if (saved.isEmpty) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Text('Tap the heart on an event to save it here.',
+              textAlign: TextAlign.center,
+              style: GoogleFonts.zain(fontSize: 14, color: AppColors.textSecondary)),
+        ),
+      );
+    }
+    return ListView.separated(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      itemCount: saved.length,
+      separatorBuilder: (_, _) => const SizedBox(height: 12),
+      itemBuilder: (context, i) {
+        final event = saved[i];
+        final status = event.isCancelled
+            ? 'Cancelled'
+            : event.isPast
+                ? 'Ended'
+                : event.joined
+                    ? "You're going"
+                    : event.isFull
+                        ? 'Full'
+                        : null;
+        return GestureDetector(
+          onTap: () => Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (_) => VolunteerEventDetailPage(event: event, onFavorite: () => _toggle(event)),
+            ),
+          ).then((_) {
+            if (mounted) setState(() {});
+          }),
+          child: Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(16),
+              boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 6)],
+            ),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                EventCoverImage(
+                    imageUrl: event.imageUrl, width: 80, height: 80, borderRadius: 10, placeholderColor: AppColors.tearspwn),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Text(event.title,
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                                style: GoogleFonts.tiltWarp(fontSize: 15, color: AppColors.textPrimary)),
+                          ),
+                          GestureDetector(
+                            onTap: () => _toggle(event),
+                            behavior: HitTestBehavior.opaque,
+                            child: const Padding(
+                              padding: EdgeInsets.only(left: 6),
+                              child: Icon(Icons.favorite, size: 20, color: AppColors.error),
+                            ),
+                          ),
+                        ],
+                      ),
+                      Text(event.date, style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary)),
+                      Text(event.time, style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary)),
+                      if (event.location.isNotEmpty)
+                        Text(event.location,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary)),
+                      if (status != null)
+                        Text(status,
+                            style: GoogleFonts.zain(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w700,
+                                color: event.isCancelled ? AppColors.error : AppColors.textPrimary)),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
 }
 
 class _ComingSoonTab extends StatelessWidget {

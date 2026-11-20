@@ -1897,6 +1897,7 @@ exports.facebookConfirmPageSelection = facebook.facebookConfirmPageSelection;
 exports.facebookTestConnection = facebook.facebookTestConnection;
 exports.facebookDisconnectPage = facebook.facebookDisconnectPage;
 exports.facebookPublishAnimalRecords = facebook.facebookPublishAnimalRecords;
+exports.facebookPublishRecordPost = facebook.facebookPublishRecordPost;
 exports.facebookSetPublisher = facebook.facebookSetPublisher;
 
 // PayMongo donations & sponsorships — see functions/paymongo.js.

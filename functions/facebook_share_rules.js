@@ -58,4 +58,41 @@ function normalizePublishItems(data) {
   return out;
 }
 
-module.exports = {MAX_RECORDS, MAX_PHOTOS, MAX_CAPTION_LENGTH, MAX_MESSAGE_LENGTH, normalizePublishItems};
+/// Which records facebookPublishRecordPost can share, and the Firestore
+/// collection each lives in.
+const RECORD_KINDS = {campaign: 'campaigns', event: 'events'};
+
+/// Input for facebookPublishRecordPost: one campaign or event, the post
+/// text, and whether to attach the record's own cover photo. Throws Error
+/// with a user-facing message.
+function normalizeRecordPost(data) {
+  const {kind, recordId, message, includePhoto} = data || {};
+  if (!Object.prototype.hasOwnProperty.call(RECORD_KINDS, kind)) throw new Error('Pick a campaign or an event to share.');
+  if (typeof recordId !== 'string' || !ID_PATTERN.test(recordId)) throw new Error('Invalid record.');
+  if (typeof message !== 'string' || message.trim().length === 0) throw new Error('Write the post text first.');
+  if (message.length > MAX_MESSAGE_LENGTH) throw new Error(`The post text must be under ${MAX_MESSAGE_LENGTH} characters.`);
+  return {kind, collection: RECORD_KINDS[kind], recordId, message: message.trim(), includePhoto: includePhoto === true};
+}
+
+/// Why a record can't be posted right now, or null when it can. Drafts and
+/// archived campaigns aren't public; cancelled events would advertise
+/// something that isn't happening.
+function recordPostBlockedReason(kind, record) {
+  if (kind === 'campaign') {
+    if (record.status === 'draft') return 'Publish this campaign before sharing it.';
+    if (record.status === 'archived') return 'Archived campaigns can no longer be shared.';
+  }
+  if (kind === 'event' && record.status === 'cancelled') return 'Cancelled events can no longer be shared.';
+  return null;
+}
+
+module.exports = {
+  MAX_RECORDS,
+  MAX_PHOTOS,
+  MAX_CAPTION_LENGTH,
+  MAX_MESSAGE_LENGTH,
+  RECORD_KINDS,
+  normalizePublishItems,
+  normalizeRecordPost,
+  recordPostBlockedReason,
+};

@@ -1,6 +1,15 @@
 # Handoff
 
-_Latest: Facebook sharing and photo descriptions on `dev` (2026-11-20, deployed). Before that, feedback round (2026-11-18, Firestore rules deployed; app build pending). Before that, Admin + Staff permissions (2026-11-18, committed and deployed; app build pending). Then the system admin console, one-organization scope and referral links (2026-11-17, committed and deployed). The build-fix sections further down are from branch `marcus` (base `a899293`), 2026-11-04._
+_Latest: user Events page and Facebook sharing for campaigns and events on `dev` (2026-11-20, function deployed; app build pending). Before that, Facebook sharing and photo descriptions (2026-11-20, deployed). Before that, feedback round (2026-11-18, Firestore rules deployed; app build pending). Before that, Admin + Staff permissions (2026-11-18, committed and deployed; app build pending). Then the system admin console, one-organization scope and referral links (2026-11-17, committed and deployed). The build-fix sections further down are from branch `marcus` (base `a899293`), 2026-11-04._
+
+## User Events page, campaign and event Facebook sharing (2026-11-20, function deployed, not checked on a device)
+
+- **Events (Home → Events):** the event detail page now follows the live event (spots left, cancellation, removed) and checks the viewer's own sign-up when opened from anywhere (organization profile, Favorites), so it shows **View E-Ticket** instead of offering a second sign-up. The sign-up form fills name, email and mobile from the profile (`UserAutofill`), validates email and PH mobile, and names the event. The list's filter button works (Saved only, Hide full), has pull-to-refresh, a "You're going" label and a **Past events you joined** section. Favorites → Volunteer lists saved events (`VolunteerEventRepository.loadMyFavoriteEvents`).
+- **Share to Facebook for campaigns and events:** admin campaign detail → **Share to Facebook** chip (not drafts or archived); admin event detail → Facebook icon in the app bar (not cancelled). Both open `lib/features/admin/facebook/facebook_record_post_page.dart`: editable suggested text (`record_post_text.dart`), optional cover photo, **Post to <Page>** or **Share…** (share sheet, text copied).
+- **New callable `facebookPublishRecordPost`** (`functions/facebook.js`, checks in `facebook_share_rules.js`): `{organizationId, kind: 'campaign'|'event', recordId, message, includePhoto}`. Same publisher check as animals; the record must belong to the organization; refuses draft/archived campaigns and cancelled events; the photo is the record's own `imageUrl`. Logged to `facebookShares` (`recordKind`, `recordId`) and `auditLogs`. No rules change.
+- **Deployed 2026-11-20:** `firebase deploy --only functions:facebookPublishRecordPost` (the first try returned 409 while the function was still being created; the second updated it). App build not installed anywhere yet.
+
+**Checks:** `flutter analyze` (pre-existing issues only), new `test/features/admin/record_post_text_test.dart` (5 pass), functions `facebook_share.test.js` 10 pass.
 
 ## Facebook sharing and photo descriptions (2026-11-20, functions + hosting deployed, not checked on a device)
 

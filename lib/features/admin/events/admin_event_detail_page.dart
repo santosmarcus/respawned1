@@ -8,6 +8,7 @@ import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/core/models/volunteer/volunteer_event.dart';
 import 'package:respawnd1/core/widgets/event_cover_image.dart';
 import 'package:respawnd1/features/admin/events/admin_events_page.dart';
+import 'package:respawnd1/features/admin/facebook/facebook_record_post_page.dart';
 import 'package:respawnd1/features/admin/events/event_form_page.dart';
 import 'package:respawnd1/features/admin/events/state/event_providers.dart';
 import 'package:respawnd1/core/widgets/app_messages.dart';
@@ -63,6 +64,12 @@ class AdminEventDetailPage extends ConsumerWidget {
         iconTheme: const IconThemeData(color: AppColors.background),
         title: Text('Event', style: GoogleFonts.tiltWarp(fontSize: 18, color: AppColors.background)),
         actions: [
+          if (event != null && !event.isCancelled)
+            IconButton(
+              tooltip: 'Share to Facebook',
+              icon: const Icon(Icons.facebook, color: AppColors.background),
+              onPressed: () => openEventFacebookShare(context, event),
+            ),
           if (event != null && !event.isCancelled && !event.isPast)
             PopupMenuButton<String>(
               icon: const Icon(Icons.more_vert, color: AppColors.background),

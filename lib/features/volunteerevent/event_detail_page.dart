@@ -28,6 +28,31 @@ class VolunteerEventDetailPage extends StatefulWidget {
 
 class _VolunteerEventDetailPageState
     extends State<VolunteerEventDetailPage> {
+  final _repo = VolunteerEventRepository();
+
+  /// The event as it is now (spots taken, cancellation), so the page never
+  /// offers a sign-up the organizer already closed.
+  late final Stream<VolunteerEvent?> _live = _repo.streamEvent(widget.event.id);
+
+  @override
+  void initState() {
+    super.initState();
+    _checkJoined();
+  }
+
+  /// Pages that open an event without the viewer's sign-ups loaded (an
+  /// organization profile, Favorites) would otherwise offer "Join event"
+  /// to someone who already joined.
+  Future<void> _checkJoined() async {
+    if (widget.event.joined) return;
+    try {
+      final mine = await _repo.getMyRegistration(widget.event.id);
+      if (mine != null && mounted) setState(() => widget.event.joined = true);
+    } catch (_) {
+      // The sign-up itself refuses a second registration.
+    }
+  }
+
   /// Opens the event in Google Maps: the picked pin (and place) when the
   /// event has one, else a search for its text address (older events).
   Future<void> _openInMaps(BuildContext context, VolunteerEvent event) async {
@@ -47,7 +72,32 @@ class _VolunteerEventDetailPageState
 
   @override
   Widget build(BuildContext context) {
-    final event = widget.event;
+    return StreamBuilder<VolunteerEvent?>(
+      stream: _live,
+      builder: (context, snapshot) {
+        final live = snapshot.data;
+        if (snapshot.hasData && live == null) {
+          return _gone();
+        }
+        final event = live ?? widget.event;
+        event
+          ..joined = widget.event.joined
+          ..favorited = widget.event.favorited;
+        return _page(context, event);
+      },
+    );
+  }
+
+  Widget _gone() => Scaffold(
+        backgroundColor: AppColors.background,
+        appBar: AppBar(backgroundColor: AppColors.background, elevation: 0),
+        body: Center(
+          child: Text('This event is no longer available.',
+              style: GoogleFonts.zain(fontSize: 14, color: AppColors.textSecondary)),
+        ),
+      );
+
+  Widget _page(BuildContext context, VolunteerEvent event) {
 
     return Scaffold(
       backgroundColor: AppColors.background,
@@ -70,20 +120,18 @@ class _VolunteerEventDetailPageState
                   'Organized by ${event.organizerName}. Join on the ResPAWnd app.',
             )),
           ),
-          StatefulBuilder(
-            builder: (context, setIcon) => IconButton(
-              icon: Icon(
-                event.favorited ? Icons.favorite : Icons.favorite_border,
-                color: event.favorited
-                    ? AppColors.error
-                    : AppColors.textPrimary,
-                size: 22,
-              ),
-              onPressed: () {
-                widget.onFavorite();
-                setIcon(() {}); // redraw just the icon
-              },
+          IconButton(
+            icon: Icon(
+              event.favorited ? Icons.favorite : Icons.favorite_border,
+              color: event.favorited
+                  ? AppColors.error
+                  : AppColors.textPrimary,
+              size: 22,
             ),
+            onPressed: () {
+              widget.onFavorite();
+              setState(() {}); // pick up the toggled favorite
+            },
           ),
         ],
       ),
@@ -121,9 +169,11 @@ class _VolunteerEventDetailPageState
                   style: GoogleFonts.zain(
                       fontSize: 13, color: AppColors.textPrimary),
                 ),
-                const SizedBox(width: 85),
+                const Spacer(),
                 Text(
-                  '${event.goingCount} people are going',
+                  event.capacity == null
+                      ? '${event.goingCount} going'
+                      : '${event.goingCount} going · ${(event.capacity! - event.goingCount).clamp(0, event.capacity!)} spots left',
                   style: GoogleFonts.zain(
                       fontSize: 13, color: AppColors.textPrimary),
                 ),
@@ -272,7 +322,7 @@ class _VolunteerEventDetailPageState
               width: double.infinity,
               child: ElevatedButton(
                 onPressed: event.joined
-                    ? () => _openETicket(context)
+                    ? () => _openETicket(context, event)
                     : !event.isOpen
                     ? null
                     : () {
@@ -281,7 +331,10 @@ class _VolunteerEventDetailPageState
                     MaterialPageRoute(
                       builder: (_) => VolunteerSignUpPage(event: event),
                     ),
-                  ).then((_) => setState(() {}));
+                  ).then((_) {
+                    if (event.joined) widget.event.joined = true;
+                    if (mounted) setState(() {});
+                  });
                 },
                 style: AppButtons.primary,
                 child: Text(
@@ -308,8 +361,8 @@ class _VolunteerEventDetailPageState
   }
 
 
-  Future<void> _openETicket(BuildContext context) async {
-    final data = await VolunteerEventRepository().getMyRegistration(widget.event.id);
+  Future<void> _openETicket(BuildContext context, VolunteerEvent event) async {
+    final data = await _repo.getMyRegistration(widget.event.id);
 
     if (!context.mounted) return;
 
@@ -324,7 +377,7 @@ class _VolunteerEventDetailPageState
       context,
       MaterialPageRoute(
         builder: (_) => VolunteerETicketPage(
-          event: widget.event,
+          event: event,
           participantName: data['participantName'] ?? '',
           participantEmail: data['participantEmail'] ?? '',
           participantMobileNumber: data['participantMobileNumber'] ?? '',

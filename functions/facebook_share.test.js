@@ -91,3 +91,32 @@ test('animal page escapes record text and carries og tags', () => {
 test('not-found page has no record details', () => {
   assert.match(buildNotFoundHtml(), /Profile not available/);
 });
+
+const {normalizeRecordPost, recordPostBlockedReason} = require('./facebook_share_rules');
+
+test('campaign and event posts map to their collections', () => {
+  assert.deepStrictEqual(
+      normalizeRecordPost({kind: 'campaign', recordId: 'c1', message: '  Help Bantay  ', includePhoto: true}),
+      {kind: 'campaign', collection: 'campaigns', recordId: 'c1', message: 'Help Bantay', includePhoto: true},
+  );
+  const event = normalizeRecordPost({kind: 'event', recordId: 'e1', message: 'Join us'});
+  assert.strictEqual(event.collection, 'events');
+  assert.strictEqual(event.includePhoto, false);
+});
+
+test('record posts are refused when malformed', () => {
+  assert.throws(() => normalizeRecordPost({kind: 'animal', recordId: 'a', message: 'x'}), /campaign or an event/);
+  assert.throws(() => normalizeRecordPost({kind: 'toString', recordId: 'a', message: 'x'}), /campaign or an event/);
+  assert.throws(() => normalizeRecordPost({kind: 'event', recordId: '../x', message: 'x'}), /Invalid record/);
+  assert.throws(() => normalizeRecordPost({kind: 'event', recordId: 'e1', message: '   '}), /post text/);
+  assert.throws(() => normalizeRecordPost({kind: 'event', recordId: 'e1', message: 'x'.repeat(5001)}), /under/);
+});
+
+test('drafts, archived campaigns and cancelled events cannot be posted', () => {
+  assert.match(recordPostBlockedReason('campaign', {status: 'draft'}), /Publish/);
+  assert.match(recordPostBlockedReason('campaign', {status: 'archived'}), /Archived/);
+  assert.strictEqual(recordPostBlockedReason('campaign', {status: 'active'}), null);
+  assert.strictEqual(recordPostBlockedReason('campaign', {status: 'goal_met'}), null);
+  assert.match(recordPostBlockedReason('event', {status: 'cancelled'}), /Cancelled/);
+  assert.strictEqual(recordPostBlockedReason('event', {status: 'published'}), null);
+});

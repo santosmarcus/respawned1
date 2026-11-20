@@ -130,6 +130,25 @@ class FacebookIntegrationRepository {
     }, (data) => (postId: data['postId'] as String? ?? '', postUrl: data['postUrl'] as String? ?? ''));
   }
 
+  /// Posts one campaign or volunteer event to the organization's connected
+  /// Page: [message] as the post text, with the record's own cover photo
+  /// when [includePhoto] (the backend reads the photo from the record).
+  Future<({String postId, String postUrl})> publishRecordPost({
+    required String organizationId,
+    required FacebookRecordKind kind,
+    required String recordId,
+    required String message,
+    required bool includePhoto,
+  }) {
+    return _call('facebookPublishRecordPost', {
+      'organizationId': organizationId,
+      'kind': kind.name,
+      'recordId': recordId,
+      'message': message,
+      'includePhoto': includePhoto,
+    }, (data) => (postId: data['postId'] as String? ?? '', postUrl: data['postUrl'] as String? ?? ''));
+  }
+
   /// Owner/Admin only (enforced by the callable). Lets a Member publish to
   /// the Page without changing their app role.
   Future<void> setPublisher({
@@ -154,6 +173,10 @@ class FacebookIntegrationRepository {
     );
   }
 }
+
+/// Records facebookPublishRecordPost can share (functions/facebook_share_rules.js
+/// RECORD_KINDS); the name is sent as-is.
+enum FacebookRecordKind { campaign, event }
 
 /// One record in a Facebook post and the photos to attach for it, in order.
 class FacebookShareItem {

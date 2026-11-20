@@ -23,7 +23,7 @@ const admin = require('firebase-admin');
 const {SecretManagerServiceClient} = require('@google-cloud/secret-manager');
 const {loadOrgAccess, memberPermissions, presetFor} = require('./org_access');
 const {photosOf} = require('./public_animals');
-const {normalizePublishItems} = require('./facebook_share_rules');
+const {normalizePublishItems, normalizeRecordPost, recordPostBlockedReason} = require('./facebook_share_rules');
 
 const fbAppId = defineSecret('FB_APP_ID');
 const fbAppSecret = defineSecret('FB_APP_SECRET');
@@ -640,6 +640,90 @@ exports.facebookPublishAnimalRecords = onCall(async (request) => {
   }
 
   return {postId, postUrl, animalRecordIds: publishedAnimalIds};
+});
+
+// ---- 5b. Publish a campaign or volunteer event -------------------------------
+//
+// One post for a donation/sponsorship campaign (`campaigns/{id}`) or a
+// volunteer event (`events/{id}`): the text staff wrote, with the record's
+// own cover photo when asked. The photo is read from the record, never from
+// the request, so a client can't post an arbitrary image as the Page.
+exports.facebookPublishRecordPost = onCall(async (request) => {
+  if (!request.auth) throw new HttpsError('unauthenticated', 'Sign in required.');
+  const uid = request.auth.uid;
+  const {organizationId} = request.data || {};
+  if (!organizationId) throw new HttpsError('invalid-argument', 'organizationId is required.');
+  let post;
+  try {
+    post = normalizeRecordPost(request.data || {});
+  } catch (e) {
+    throw new HttpsError('invalid-argument', e.message);
+  }
+  await requireFacebookPublisher(uid, organizationId);
+
+  const recordSnap = await db().collection(post.collection).doc(post.recordId).get();
+  if (!recordSnap.exists) throw new HttpsError('not-found', `This ${post.kind} no longer exists.`);
+  const record = recordSnap.data();
+  if (record.organizationId !== organizationId) {
+    throw new HttpsError(
+        'permission-denied',
+        record.organizationId ?
+          `This ${post.kind} belongs to another organization.` :
+          `This ${post.kind} is not linked to an organization yet. Ask an admin to run the organization backfill.`,
+    );
+  }
+  const blocked = recordPostBlockedReason(post.kind, record);
+  if (blocked) throw new HttpsError('failed-precondition', blocked);
+
+  const integrationSnap = await db()
+      .collection('organizations').doc(organizationId).collection('integrations').doc('facebook').get();
+  if (!integrationSnap.exists || integrationSnap.data().connectionStatus !== 'connected') {
+    throw new HttpsError('failed-precondition', 'No Facebook Page is connected for this organization.');
+  }
+  const pageId = integrationSnap.data().pageId;
+  const token = await readDynamicSecret(pageTokenSecretId(organizationId));
+  if (!token) {
+    throw new HttpsError('failed-precondition', 'This Facebook connection needs attention. Reconnect the Page.');
+  }
+
+  const photoUrl = typeof record.imageUrl === 'string' && /^https:\/\//i.test(record.imageUrl) ? record.imageUrl : null;
+  const withPhoto = post.includePhoto && photoUrl != null;
+  // A published photo with the text as its caption is a normal photo post;
+  // without a photo, a plain text post.
+  const result = withPhoto ?
+    await graphFetch(`/${pageId}/photos`, {
+      method: 'POST',
+      params: {url: photoUrl, caption: post.message, published: 'true', access_token: token},
+    }) :
+    await graphFetch(`/${pageId}/feed`, {
+      method: 'POST',
+      params: {access_token: token},
+      body: {message: post.message},
+    });
+
+  const postId = result.post_id || result.id;
+  const postUrl = `https://www.facebook.com/${postId}`;
+
+  await db().collection('facebookShares').doc().set({
+    organizationId,
+    recordKind: post.kind,
+    recordId: post.recordId,
+    postId,
+    postUrl,
+    photoCount: withPhoto ? 1 : 0,
+    publishedBy: uid,
+    publishedByEmail: request.auth.token.email || null,
+    createdAt: admin.firestore.FieldValue.serverTimestamp(),
+  });
+  await writeOrgAuditLog({
+    action: post.kind === 'campaign' ? 'Shared campaign to Facebook Page' : 'Shared event to Facebook Page',
+    actorId: uid,
+    actorEmail: request.auth.token.email,
+    organizationId,
+    newValues: {recordKind: post.kind, recordId: post.recordId, title: record.title || null, postId, postUrl},
+  });
+
+  return {postId, postUrl};
 });
 
 // ---- 6. Grant / revoke Facebook publishing to a member ----------------------
