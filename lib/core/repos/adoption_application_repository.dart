@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
@@ -276,6 +278,20 @@ class AdoptionApplicationRepository {
   /// application's organization: the Audit page only lists entries of the
   /// staff member's own organization, so entries without it were never
   /// shown. Best effort, after the real write, never throws.
+  /// A plain update is applied to the local cache at once (every screen
+  /// shows it) and Firestore keeps it until the server takes it. Waits up to
+  /// [wait] for the server to confirm; past that it returns and lets the
+  /// write finish on its own instead of holding the screen. A rejection that
+  /// comes later is only logged.
+  Future<void> _localFirst(Future<void> write, String what, {Duration wait = const Duration(seconds: 8)}) async {
+    final tracked = write.then<bool>((_) => true);
+    try {
+      await tracked.timeout(wait);
+    } on TimeoutException {
+      unawaited(tracked.then((_) {}, onError: (Object e) => debugPrint('[AdoptionRepo] $what failed later: $e')));
+    }
+  }
+
   Future<void> _logStep({
     required String action,
     String? actorId,
@@ -289,7 +305,13 @@ class AdoptionApplicationRepository {
   }) async {
     String? organizationId;
     try {
-      organizationId = (await _adoptionDoc(targetId).get()).data()?['organizationId'] as String?;
+      // The cache has it whenever the page that called this is open; a
+      // server read here could sit waiting on a slow connection.
+      final doc = _adoptionDoc(targetId);
+      organizationId = ((await doc
+                  .get(const GetOptions(source: Source.cache))
+                  .catchError((_) => doc.get().timeout(const Duration(seconds: 8))))
+              .data())?['organizationId'] as String?;
     } catch (_) {
       // Logged without the organization rather than not at all.
     }
@@ -918,19 +940,20 @@ class AdoptionApplicationRepository {
     required String url,
     required String actorName,
   }) async {
-    await _adoptionDoc(applicationId).update({
+    await _localFirst(_adoptionDoc(applicationId).update({
       'signedAgreementUrl': url,
       'signedAgreementAt': FieldValue.serverTimestamp(),
       'signedAgreementBy': actorName,
       'statusHistory': FieldValue.arrayUnion([
         {'status': 'Signed adoption agreement attached by $actorName.', 'timestamp': Timestamp.now()}
       ]),
-    });
+    }), 'attach signed agreement');
     await _logStep(action: 'Signed agreement attached', actorName: actorName, targetId: applicationId);
   }
 
   Future<void> setScheduledReleaseDate({required String applicationId, required DateTime date}) async {
-    await _adoptionDoc(applicationId).update({'scheduledReleaseDate': Timestamp.fromDate(date)});
+    await _localFirst(
+        _adoptionDoc(applicationId).update({'scheduledReleaseDate': Timestamp.fromDate(date)}), 'set release date');
   }
 
   /// Persists the draft schedule-rule configuration so it survives closing
@@ -942,10 +965,10 @@ class AdoptionApplicationRepository {
     required List<FollowUpScheduleRule> rules,
     required bool noFollowUpsPlanned,
   }) async {
-    await _adoptionDoc(applicationId).update({
+    await _localFirst(_adoptionDoc(applicationId).update({
       'followUpSchedules': rules.map((r) => r.toMap()).toList(),
       'noFollowUpsPlanned': noFollowUpsPlanned,
-    });
+    }), 'save follow-up draft');
   }
 
   /// The real Release + follow-up-generation transaction. Validates the

@@ -53,6 +53,7 @@ Future<String> uploadSignedAgreement(
     if (s.totalBytes > 0) onProgress?.call(s.bytesTransferred / s.totalBytes);
   }, onError: (_) {});
   final watchdog = Timer.periodic(const Duration(seconds: 5), (_) {
+    if (task.snapshot.state != TaskState.running) return;
     if (DateTime.now().difference(lastMove) > stallAfter) {
       stalled = true;
       task.cancel();

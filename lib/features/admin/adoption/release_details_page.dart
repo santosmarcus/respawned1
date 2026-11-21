@@ -245,7 +245,8 @@ class _ReleaseDetailsPageState extends ConsumerState<ReleaseDetailsPage> {
     } on TimeoutException {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(appSnackBar(
-            'The photo uploaded, but saving it is taking too long. Check your connection and try again.',
+            'The photo uploaded, but the app is not getting answers from the server. Close and reopen the app, '
+            'then check that the agreement shows as attached.',
             kind: AppMessageKind.error));
       }
     } catch (e) {
