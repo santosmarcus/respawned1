@@ -1,10 +1,6 @@
 import 'dart:async';
-import 'dart:io';
 
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:firebase_storage/firebase_storage.dart';
-import 'package:image_picker/image_picker.dart';
-import 'package:respawnd1/core/widgets/image_source_sheet.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -18,6 +14,8 @@ import 'package:respawnd1/core/services/adoption_agreement_service.dart';
 import 'package:respawnd1/features/admin/adoption/post_adoption_details_page.dart';
 import 'package:respawnd1/features/admin/adoption/state/adoption_providers.dart';
 import 'package:respawnd1/features/admin/adoption/widgets/schedule_rule_editor.dart';
+import 'package:respawnd1/features/admin/adoption/widgets/signed_agreement_tile.dart'
+    show agreementUploadError, pickSignedAgreementPhoto, uploadSignedAgreement;
 import 'package:respawnd1/features/admin/animals/state/animal_records_providers.dart';
 import 'package:respawnd1/core/widgets/app_dialogs.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/section_card.dart';
@@ -46,6 +44,14 @@ class _ReleaseDetailsPageState extends ConsumerState<ReleaseDetailsPage> {
   /// Only the agreement button waits while the PDF is built; the rest of
   /// the page stays usable.
   bool _agreementBusy = false;
+
+  /// 0–1 while the signed agreement photo uploads; null otherwise. Only the
+  /// attach button shows it.
+  double? _attachProgress;
+
+  /// True only while Mark as Released is saving; the only time that button
+  /// shows a spinner.
+  bool _releasing = false;
   DateTime _releaseDate = DateTime.now();
   List<FollowUpScheduleRule> _rules = [];
   bool _noFollowUpsPlanned = false;
@@ -224,32 +230,30 @@ class _ReleaseDetailsPageState extends ConsumerState<ReleaseDetailsPage> {
   /// Adoption gap 6: photo or scan of the signed agreement, kept on the
   /// application.
   Future<void> _attachSignedAgreement(AdoptionApplication app) async {
-    final picked = await pickImageWithSource(context, ImagePicker(), imageQuality: 85);
+    final picked = await pickSignedAgreementPhoto(context);
     if (picked == null || !mounted) return;
-    setState(() => _busy = true);
+    setState(() => _attachProgress = 0);
     try {
-      final ref0 = FirebaseStorage.instance.ref('adoptions/${app.id}/signed_agreement_${DateTime.now().millisecondsSinceEpoch}.jpg');
-      // Storage retries for a long time when offline; don't keep every
-      // button on this page disabled while it does.
-      await ref0.putFile(File(picked.path)).timeout(const Duration(seconds: 90));
+      final url = await uploadSignedAgreement(app.id, picked,
+          onProgress: (p) => mounted ? setState(() => _attachProgress = p) : null);
       await ref.read(adoptionApplicationRepositoryProvider).attachSignedAgreement(
         applicationId: app.id,
-        url: await ref0.getDownloadURL(),
+        url: url,
         actorName: _actorName,
       ).timeout(_writeTimeout);
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(appSnackBar('Signed agreement attached.'));
     } on TimeoutException {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-            appSnackBar('Uploading the agreement is taking too long. Check your connection and try again.',
-                kind: AppMessageKind.error));
+        ScaffoldMessenger.of(context).showSnackBar(appSnackBar(
+            'The photo uploaded, but saving it is taking too long. Check your connection and try again.',
+            kind: AppMessageKind.error));
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(appSnackBar('Could not attach: $e', kind: AppMessageKind.error));
+        ScaffoldMessenger.of(context).showSnackBar(appSnackBar(agreementUploadError(e), kind: AppMessageKind.error));
       }
     } finally {
-      if (mounted) setState(() => _busy = false);
+      if (mounted) setState(() => _attachProgress = null);
     }
   }
 
@@ -285,7 +289,10 @@ class _ReleaseDetailsPageState extends ConsumerState<ReleaseDetailsPage> {
     );
     if (!confirmed) return;
 
-    setState(() => _busy = true);
+    setState(() {
+      _busy = true;
+      _releasing = true;
+    });
     try {
       await ref.read(adoptionApplicationRepositoryProvider).releaseWithFollowUps(
         applicationId: widget.applicationId,
@@ -314,7 +321,12 @@ class _ReleaseDetailsPageState extends ConsumerState<ReleaseDetailsPage> {
         ScaffoldMessenger.of(context).showSnackBar(appSnackBar('Could not release: $e', kind: AppMessageKind.error));
       }
     } finally {
-      if (mounted) setState(() => _busy = false);
+      if (mounted) {
+        setState(() {
+          _busy = false;
+          _releasing = false;
+        });
+      }
     }
   }
 
@@ -538,10 +550,20 @@ class _ReleaseDetailsPageState extends ConsumerState<ReleaseDetailsPage> {
               const SizedBox(height: 20),
 
               OutlinedButton.icon(
-                onPressed: _busy ? null : () => _attachSignedAgreement(app),
-                icon: Icon(app.raw['signedAgreementUrl'] == null ? Icons.upload_file : Icons.check_circle,
-                    color: app.raw['signedAgreementUrl'] == null ? AppColors.textPrimary : AppColors.success),
-                label: Text(app.raw['signedAgreementUrl'] == null ? 'Attach signed agreement' : 'Signed agreement attached · replace'),
+                onPressed: _busy || _attachProgress != null ? null : () => _attachSignedAgreement(app),
+                icon: _attachProgress != null
+                    ? SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2, value: _attachProgress! > 0 ? _attachProgress : null),
+                      )
+                    : Icon(app.raw['signedAgreementUrl'] == null ? Icons.upload_file : Icons.check_circle,
+                        color: app.raw['signedAgreementUrl'] == null ? AppColors.textPrimary : AppColors.success),
+                label: Text(_attachProgress != null
+                    ? 'Uploading ${(_attachProgress! * 100).round()}%'
+                    : app.raw['signedAgreementUrl'] == null
+                        ? 'Attach signed agreement'
+                        : 'Signed agreement attached · replace'),
               ),
               const SizedBox(height: 12),
               // Why Mark as Released is disabled, where it can't be missed.
@@ -579,9 +601,12 @@ class _ReleaseDetailsPageState extends ConsumerState<ReleaseDetailsPage> {
                   const SizedBox(width: 12),
                   Expanded(
                     child: ElevatedButton(
-                      onPressed: (_busy || !guard.canRelease) ? null : () => _markReleased(app),
+                      onPressed: (_busy || _attachProgress != null || !guard.canRelease) ? null : () => _markReleased(app),
                       style: AppButtons.primary,
-                      child: _busy || animalLoading
+                      // Spinner only while this release saves; other actions
+                      // (attaching the agreement, a delivery attempt) just
+                      // disable it.
+                      child: _releasing
                           ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
                           : Text('Mark as Released', style: GoogleFonts.tiltWarp(fontSize: 14, color: AppColors.textPrimary)),
                     ),
