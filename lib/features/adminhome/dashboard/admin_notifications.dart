@@ -216,7 +216,7 @@ class _AdminNotificationsPageState extends ConsumerState<AdminNotificationsPage>
     }
     Widget? page;
     try {
-      page = await NotificationService._pageFor(n.data);
+      page = await NotificationService.pageFor(n.data);
     } catch (e) {
       debugPrint('AdminNotificationsPage: could not open ${n.type}: $e');
     }

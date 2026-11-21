@@ -869,6 +869,8 @@ async function notifyStaff(uids, {title, body, data}) {
         isRead: false,
         type: data.type,
         caseId: data.caseId || null,
+        ...(data.organizationId ? {organizationId: data.organizationId} : {}),
+        ...(data.animalIds ? {animalIds: data.animalIds} : {}),
       });
     } catch (e) {
       console.warn('[notifyStaff] in-app notification failed', uid, e.message);
@@ -1892,6 +1894,8 @@ exports.facebookTestConnection = facebook.facebookTestConnection;
 exports.facebookDisconnectPage = facebook.facebookDisconnectPage;
 exports.facebookPublishAnimalRecords = facebook.facebookPublishAnimalRecords;
 exports.facebookSetPublisher = facebook.facebookSetPublisher;
+// Scheduled adoption posts (reminders to publish) — see functions/adoption_promotion.js.
+Object.assign(exports, require('./adoption_promotion')({db, orgStaffUids, notifyStaff}));
 
 // PayMongo donations & sponsorships — see functions/paymongo.js.
 Object.assign(exports, require('./paymongo'));

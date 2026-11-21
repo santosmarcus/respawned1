@@ -186,6 +186,9 @@ class NotificationService {
     }
   }
 
+  /// Public so in-app notification lists route the same way as a tapped push.
+  static Future<Widget?> pageFor(Map<String, dynamic> data) => _pageFor(data);
+
   static Future<Widget?> _pageFor(Map<String, dynamic> data) async {
     final type = data['type'] as String? ?? '';
     final db = FirebaseFirestore.instance;
@@ -208,6 +211,17 @@ class NotificationService {
       case 'quarantine_ended':
       // respondToReferralShare: someone answered a referral link.
       case 'referral_response':
+      // Staff pushes about one case (functions/dashboard_ops.js and
+      // functions/index.js): specialized handling needed, an unreviewed
+      // critical report, a rescue adoption request or a missed pickup.
+      case 'needs_specialized_assistance':
+      case 'critical_report_escalated':
+      case 'rescue_adoption_request':
+      case 'rescue_adoption_pickup_missed':
+      // The reporter is asked for a new photo; a rider is asked to check a
+      // reported location.
+      case 'case_live_proof_requested':
+      case 'verification_visit':
         final caseId = data['caseId'] as String?;
         if (caseId == null || caseId.isEmpty) return null;
         return _casePageFor(caseId);
