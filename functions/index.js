@@ -871,6 +871,7 @@ async function notifyStaff(uids, {title, body, data}) {
         caseId: data.caseId || null,
         ...(data.organizationId ? {organizationId: data.organizationId} : {}),
         ...(data.animalIds ? {animalIds: data.animalIds} : {}),
+        ...(data.cashOutId ? {cashOutId: data.cashOutId} : {}),
       });
     } catch (e) {
       console.warn('[notifyStaff] in-app notification failed', uid, e.message);
@@ -1894,6 +1895,27 @@ exports.facebookTestConnection = facebook.facebookTestConnection;
 exports.facebookDisconnectPage = facebook.facebookDisconnectPage;
 exports.facebookPublishAnimalRecords = facebook.facebookPublishAnimalRecords;
 exports.facebookSetPublisher = facebook.facebookSetPublisher;
+// Cash-outs (functions/campaigns.js, functions/paymongo.js): money taken out
+// of PayMongo, the bank or the cash box. Everyone who can see the
+// organization's money (financeView or financeManage; Admins included) is
+// told when one needs a fund and when someone assigns it, except the person
+// who just did it.
+const cashOutRules = require('./cash_out_rules');
+exports.notifyCashOut = onDocumentWritten('organizations/{orgId}/cashOuts/{cashOutId}', async (event) => {
+  const before = event.data.before.exists ? event.data.before.data() : null;
+  const after = event.data.after.exists ? event.data.after.data() : null;
+  const notice = cashOutRules.noticeFor(before, after);
+  if (!notice) return;
+  const {orgId, cashOutId} = event.params;
+  const uids = (await orgStaffUids(orgId, {anyOf: ['financeView', 'financeManage']}))
+    .filter((uid) => uid !== notice.actorUid);
+  await notifyStaff(uids, {
+    title: notice.title,
+    body: notice.body,
+    data: {type: notice.type, organizationId: orgId, cashOutId},
+  });
+});
+
 // Scheduled adoption posts (reminders to publish) — see functions/adoption_promotion.js.
 Object.assign(exports, require('./adoption_promotion')({db, orgStaffUids, notifyStaff}));
 

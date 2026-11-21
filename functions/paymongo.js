@@ -14,6 +14,7 @@ const logger = require('firebase-functions/logger');
 const {recountActiveSponsors, recountAllSponsorships} = require('./sponsor_counts');
 const admin = require('firebase-admin');
 const {requireOrgPermission} = require('./org_access');
+const cashOutRules = require('./cash_out_rules');
 const {completedCampaignFields, certificateBenefit, issueCertificate, formatPeso} = require('./donation_common');
 
 // index.js calls admin.initializeApp() before requiring this module.
@@ -787,7 +788,55 @@ async function handlePaymongoEvent(type, resource) {
     return (await finalizePaidDonation(ref, session)).outcome;
   }
   if (type === 'payment.failed') return recordFailedAttempt(resource);
+  if (type === 'payout.paid') return recordPayout(resource);
   return 'ignored_type';
+}
+
+// PayMongo paid money out of the account balance to the bank. Recorded as a
+// cash-out waiting for the organization to say which fund(s) it came from
+// (functions/campaigns.js assignCashOut). The webhook must be subscribed to
+// payout.paid in the PayMongo dashboard. One PayMongo account serves the
+// platform; while there is exactly one approved organization the payout is
+// theirs, otherwise it is only logged (staff can record it by hand).
+async function recordPayout(resource) {
+  const payout = cashOutRules.payoutFromPaymongo(resource);
+  if (!payout) return 'ignored_unreadable_payout';
+  const orgs = await db.collection('organizations').get();
+  const approved = orgs.docs.filter((o) => (o.get('verificationStatus') || 'approved') === 'approved');
+  if (approved.length !== 1) {
+    logger.warn('recordPayout: no single organization for this payout; record it by hand', {
+      payoutId: payout.payoutId, organizations: approved.length,
+    });
+    return 'unmatched_payout';
+  }
+  const orgId = approved[0].id;
+  const ref = db.collection('organizations').doc(orgId).collection('cashOuts').doc(payout.payoutId);
+  return db.runTransaction(async (tx) => {
+    if ((await tx.get(ref)).exists) return 'duplicate_payout';
+    const now = FieldValue.serverTimestamp();
+    tx.set(ref, {
+      organizationId: orgId,
+      source: 'paymongo',
+      amount: payout.amountC / 100,
+      assignedAmount: 0,
+      status: 'needs_assignment',
+      note: payout.destination ? `Paid out to ${payout.destination}` : null,
+      occurredAt: payout.occurredAtMs ? Timestamp.fromMillis(payout.occurredAtMs) : Timestamp.now(),
+      paymongo: {
+        payoutId: payout.payoutId,
+        status: payout.status,
+        grossAmount: payout.grossC == null ? null : payout.grossC / 100,
+        fee: payout.feeC == null ? null : payout.feeC / 100,
+      },
+      lines: [],
+      appliedRequestIds: [],
+      recordedBy: null,
+      recordedByName: 'PayMongo',
+      createdAt: now,
+      updatedAt: now,
+    });
+    return 'recorded_payout';
+  });
 }
 
 exports.paymongoWebhook = onRequest(

@@ -1,3 +1,4 @@
+import 'package:respawnd1/features/admin/donation/cash_out_sheets.dart';
 import 'package:respawnd1/features/admin/widgets/view_only.dart';
 import 'package:respawnd1/core/models/organization/org_permission.dart';
 import 'package:flutter/material.dart';
@@ -91,6 +92,9 @@ class _DonationAdminHomeScreenState extends ConsumerState<DonationAdminHomeScree
     final openRefunds = (ref.watch(allDonationsProvider).asData?.value ?? const [])
         .where((d) => d.refundRequest?.isOpen ?? false)
         .length;
+    // Money taken out with no fund yet: a pop-up once for people who manage
+    // money, and the banner above the tabs for everyone who sees money.
+    listenForUnassignedCashOuts(context, ref);
 
     return Scaffold(
       backgroundColor: AppColors.background,
@@ -105,6 +109,20 @@ class _DonationAdminHomeScreenState extends ConsumerState<DonationAdminHomeScree
               label: 'Record donation (General fund)',
               icon: Icons.add_card_outlined,
               onTap: () => showAdminSheet(context, const OfflineDonationSheet()),
+            ),
+          // Money leaving PayMongo, the bank, GCash or the cash box, and
+          // which fund it came from (cash_out_sheets.dart).
+          if (canFinance)
+            AdminMenuAction(
+              label: 'Record money taken out',
+              icon: Icons.outbox_outlined,
+              onTap: () => showRecordCashOutSheet(context),
+            ),
+          if (canViewFinance)
+            AdminMenuAction(
+              label: 'Money taken out',
+              icon: Icons.account_balance_wallet_outlined,
+              onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const CashOutsPage())),
             ),
           if (canFinance)
             AdminMenuAction(
@@ -142,16 +160,23 @@ class _DonationAdminHomeScreenState extends ConsumerState<DonationAdminHomeScree
         ),
       ),
       floatingActionButton: _fab(),
-      body: AdminTabSwipe(
-        index: _tab.index,
-        count: DonationAdminTab.values.length,
-        onSelected: _selectTab,
-        child: switch (_tab) {
-          DonationAdminTab.campaigns => const _CampaignsTab(),
-          DonationAdminTab.inKind => const StockTab(),
-          DonationAdminTab.refunds => const RefundRequestsTab(),
-          DonationAdminTab.caseCosts => const CaseCostsTab(),
-        },
+      body: Column(
+        children: [
+          const CashOutReminderBanner(),
+          Expanded(
+            child: AdminTabSwipe(
+              index: _tab.index,
+              count: DonationAdminTab.values.length,
+              onSelected: _selectTab,
+              child: switch (_tab) {
+                DonationAdminTab.campaigns => const _CampaignsTab(),
+                DonationAdminTab.inKind => const StockTab(),
+                DonationAdminTab.refunds => const RefundRequestsTab(),
+                DonationAdminTab.caseCosts => const CaseCostsTab(),
+              },
+            ),
+          ),
+        ],
       ),
     );
   }

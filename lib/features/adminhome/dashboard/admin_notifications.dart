@@ -70,6 +70,7 @@ class AdminNotice {
     'shelter_location_missing' => Icons.location_off,
     'follow_up_overdue_staff' => Icons.assignment_late,
     'adoption_promotion_due' => Icons.campaign,
+    'cash_out_needs_assignment' || 'cash_out_assigned' => Icons.account_balance_wallet_outlined,
     _ => Icons.notifications,
   };
 }

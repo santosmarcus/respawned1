@@ -8,6 +8,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:respawnd1/features/admin/animals/promote_adoptions_page.dart';
+import 'package:respawnd1/features/admin/donation/cash_out_sheets.dart';
 import 'package:respawnd1/core/models/rescue/rescue_status.dart';
 import 'package:respawnd1/core/utils/case_access.dart';
 import 'package:respawnd1/features/admin/adoption/post_adoption_details_page.dart';
@@ -226,6 +227,12 @@ class NotificationService {
         final caseId = data['caseId'] as String?;
         if (caseId == null || caseId.isEmpty) return null;
         return _casePageFor(caseId);
+
+      // notifyCashOut (functions/index.js): money taken out needs a fund,
+      // or someone assigned one.
+      case 'cash_out_needs_assignment':
+      case 'cash_out_assigned':
+        return CashOutsPage(openId: data['cashOutId'] as String?);
 
       // remindAdoptionPromotions (functions/adoption_promotion.js): time to
       // post animals open for adoption to the Facebook Page.

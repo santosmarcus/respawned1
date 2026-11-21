@@ -28,6 +28,7 @@ beforeEach(async () => {
     await db.doc('auditLogs/l1').set({ organizationId: 'orgA', category: 'adoptions', action: 'x', actorId: 'ownerA' });
     await db.doc('volunteerApplications/rider').set({ uid: 'rider', status: 'pending' });
     await db.doc('organizations/orgA/settings/shelter').set({ maxCapacity: 20 });
+    await db.doc('organizations/orgA/cashOuts/co1').set({ organizationId: 'orgA', amount: 500, status: 'needs_assignment' });
   });
 });
 
@@ -72,6 +73,19 @@ describe('money', () => {
     await assertSucceeds(as('fullA').doc('cases/ownedA/expenses/e1').get());
     await assertSucceeds(as('treasurerA').doc('cases/ownedA/expenses/e1').get());
     await assertFails(as('careA').doc('cases/ownedA/expenses/e1').get());
+  });
+
+  test('cash-outs: anyone who sees the money reads them, nobody writes from the app', async () => {
+    for (const uid of ['treasurerA', 'fullA', 'adminA', 'ownerA']) {
+      await assertSucceeds(as(uid).doc('organizations/orgA/cashOuts/co1').get());
+    }
+    for (const uid of ['rescueA', 'careA', 'adoptA', 'noPermsA', 'admin', 'staffB', 'adopter']) {
+      await assertFails(as(uid).doc('organizations/orgA/cashOuts/co1').get());
+    }
+    for (const uid of ['treasurerA', 'adminA']) {
+      await assertFails(as(uid).doc('organizations/orgA/cashOuts/co1').update({ status: 'assigned' }));
+      await assertFails(as(uid).collection('organizations/orgA/cashOuts').add({ amount: 1, status: 'needs_assignment' }));
+    }
   });
 
   test('the platform account gets money only through its membership', async () => {

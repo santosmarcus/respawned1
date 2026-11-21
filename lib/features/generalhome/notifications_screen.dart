@@ -74,6 +74,9 @@ const Map<String, String> _kDonationNotifLabels = {
   // functions/adoption_promotion.js: reminder to post animals open for
   // adoption to the Facebook Page; opens Promote Adoptions (pageFor).
   'adoption_promotion_due': 'Facebook Post',
+  // notifyCashOut (functions/index.js): opens Money taken out (pageFor).
+  'cash_out_needs_assignment': 'Funds',
+  'cash_out_assigned': 'Funds',
 };
 
 /// Notification types whose tap opens Profile → Certificates.

@@ -488,10 +488,20 @@ service cloud.firestore {
       allow update, delete: if false;
     }
 
+    // Cash-outs: money taken out of PayMongo, the bank or the cash box, and
+    // which fund(s) it came from (functions/campaigns.js recordCashOut /
+    // assignCashOut / settleCashOut, functions/paymongo.js payouts). The
+    // people who can see the organization's money read them; every write
+    // goes through those functions.
+    match /organizations/{orgId}/cashOuts/{cashOutId} {
+      allow read: if staffWith(orgId, ['financeView', 'financeManage']);
+      allow write: if false;
+    }
+
     // Every other organization subcollection (communityReports,
     // activityLogs, ...) keeps its current open access.
     match /organizations/{orgId}/{sub}/{document=**} {
-      allow read, write: if signedIn() && !(sub in ['members', 'integrations', 'settings', 'stock', 'stockMovements',
+      allow read, write: if signedIn() && !(sub in ['members', 'integrations', 'settings', 'stock', 'stockMovements', 'cashOuts',
         'careRounds', 'alertClaims', 'analyticsSummaries']);
     }
 

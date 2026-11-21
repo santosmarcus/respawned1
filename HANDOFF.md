@@ -1,6 +1,49 @@
 # Handoff
 
-_Latest: scheduled adoption posts to Facebook (2026-11-21, fixed up 2026-11-22; not deployed, not checked on a device). Before that, independent rescuers (2026-11-20, indexes, functions and rules deployed; app build pending, not checked on a device). Before that, animal QR tags fixed, with New Code and Remove (2026-11-20, app only, not checked on a device). Before that, one mobile number and one email per account (2026-11-20, not deployed, not checked on a device). Before that, one default Staff permission set, carers merged into Staff, volunteer naming (2026-11-20, functions and rules deployed; app build pending). Before that, user Events page and Facebook sharing for campaigns and events (2026-11-20, function deployed; app build pending). Before that, Facebook sharing and photo descriptions (2026-11-20, deployed). Before that, feedback round (2026-11-18, Firestore rules deployed; app build pending). Before that, Admin + Staff permissions (2026-11-18, committed and deployed; app build pending). Then the system admin console, one-organization scope and referral links (2026-11-17, committed and deployed). The build-fix sections further down are from branch `marcus` (base `a899293`), 2026-11-04._
+_Latest: money taken out / "Where did this money go?" (2026-11-22, not deployed, not checked on a device). Before that, scheduled adoption posts to Facebook (2026-11-21, fixed up 2026-11-22; not deployed, not checked on a device). Before that, independent rescuers (2026-11-20, indexes, functions and rules deployed; app build pending, not checked on a device). Before that, animal QR tags fixed, with New Code and Remove (2026-11-20, app only, not checked on a device). Before that, one mobile number and one email per account (2026-11-20, not deployed, not checked on a device). Before that, one default Staff permission set, carers merged into Staff, volunteer naming (2026-11-20, functions and rules deployed; app build pending). Before that, user Events page and Facebook sharing for campaigns and events (2026-11-20, function deployed; app build pending). Before that, Facebook sharing and photo descriptions (2026-11-20, deployed). Before that, feedback round (2026-11-18, Firestore rules deployed; app build pending). Before that, Admin + Staff permissions (2026-11-18, committed and deployed; app build pending). Then the system admin console, one-organization scope and referral links (2026-11-17, committed and deployed). The build-fix sections further down are from branch `marcus` (base `a899293`), 2026-11-04._
+
+## Money taken out: "Where did this money go?" (2026-11-22, not deployed, not checked on a device)
+
+When money leaves the organization (a **PayMongo payout** to the bank, or someone **taking money out** of the bank, GCash or the cash box), the app asks the people who manage money which fund it came from and what it was for, and tells the rest of the finance team.
+
+**What people see** (Donations, admin):
+- **Pop-up** the first time someone with *Manage money* opens Donations while a cash-out has no fund: "₱5,000 was paid out from PayMongo on Nov 20. Choose which fund it came from…" → *Choose fund* / *Later*.
+- **Yellow banner** above the Donations tabs until every cash-out is sorted out. Everyone who can see money sees it; those who can't manage money see "Someone who manages money needs to choose".
+- **Where did this money go?** sheet: the amount, then one or more parts, each with *Which fund did it come from?* (General fund first, each with its available balance), *What was it for?* (the allocation categories), a short description and an amount. *Split into another fund* adds a part; a live "Left without a fund / All of it has a fund ✓" line. Saving part of it is allowed (the rest stays on the banner). *It was already recorded somewhere else* closes it with a note, for spending already entered as a general expense or allocation, so nothing is counted twice.
+- Menu → **Record money taken out** (Manage money): amount, taken from (PayMongo payout / Bank / GCash / Cash on hand / Other), date, note, and the same fund parts, or *I'll decide later*.
+- Menu → **Money taken out** (View or Manage money): the history with status (Needs a fund, Partly assigned, Assigned, Already recorded) and who assigned what.
+
+**What it records.** Each part becomes an ordinary spending record on that fund (`campaigns/{id}/allocations`, kind `expense`, with `cashOutId`), so fund balances, Fund Tracking, reports and analytics include it. A fund can't go below zero; a cash-out can't be assigned more than its amount.
+
+**Notifications** (`notifyCashOut`, push + in-app, type `cash_out_needs_assignment` / `cash_out_assigned`): everyone with *View money* or *Manage money* (Admins included) when a cash-out needs a fund and when someone assigns it or marks it recorded, except the person who just did it. Tapping opens Money taken out with that cash-out's sheet.
+
+**Access** (same as the rest of the money): reading needs `financeView` or `financeManage`; recording, assigning and settling need `financeManage` (checked in the functions; the app hides the buttons). `organizations/{orgId}/cashOuts` has no client writes.
+
+**Backend**
+- `functions/campaigns.js`: `recordCashOut`, `assignCashOut`, `settleCashOut` (transactions; idempotent by request id; audit log entries, category `expenses`).
+- `functions/paymongo.js`: the webhook now handles **`payout.paid`** and records a cash-out (doc id = payout id, so repeats are ignored). Fields are read defensively (`net_amount` or `amount` in centavos, `paid_at`/`created_at`, destination bank if present) because PayMongo's payout docs couldn't be checked from here; check one real payout event against `cash_out_rules.js payoutFromPaymongo`. The payout is assigned to the only approved organization; with more than one, it's only logged and staff record it by hand.
+- `functions/cash_out_rules.js` (+ `cash_out_rules_test.js`): validation, the split plan, payout parsing, notification text.
+- `functions/index.js`: `notifyCashOut` trigger; `notifyStaff` also keeps `cashOutId`.
+- `firestore.rules`: `organizations/{orgId}/cashOuts` read for `financeView`/`financeManage`, no writes; added to the subcollection catch-all's exclusions.
+
+**App:** `lib/core/models/donation/cash_out.dart`, `lib/features/admin/donation/cash_out_sheets.dart`, providers `cashOutsProvider`/`openCashOutsProvider`, service calls, Donations home (banner, pop-up, menu), notification routing.
+
+### Deploy, in this order
+
+1. Rules: `firebase deploy --only firestore:rules` (adds read access only).
+2. Functions, by name: `FUNCTIONS_DISCOVERY_TIMEOUT=60 firebase deploy --only functions:recordCashOut,functions:assignCashOut,functions:settleCashOut,functions:notifyCashOut,functions:paymongoWebhook`.
+3. PayMongo dashboard → Developers → Webhooks: add **`payout.paid`** to the existing webhook's events (same URL and secret).
+4. App build.
+
+### Checks run
+
+- `functions/`: `npm test` 139 pass (6 new). `rules-tests`: 210 pass, including the new cash-out test (run with `firebase emulators:exec … "node --test --test-concurrency=1 tests/*.test.js"`; the package script's `tests/` folder argument fails on Node 22).
+- App (Flutter 3.50.1): `flutter analyze` 0 errors. `flutter test`: 309 pass; the same 4 Google Fonts widget-test failures as before. New: `test/core/models/cash_out_test.dart` (5 pass).
+- Not run: a real PayMongo payout event; the sheets on a device.
+
+### Check on a device
+
+As a Treasurer, Record money taken out ₱1,000 from Cash on hand, split ₱600 General fund (Food) + ₱400 a campaign (Transport): both funds' Fund Tracking show the spending, and an Admin gets "₱1,000 taken out and assigned". Record another with *I'll decide later*: the Admin gets "Where did this money go?", opening Donations shows the pop-up and banner, and assigning it clears both. A Full staff member (view only) sees the banner and history but no buttons; a Rescue-only member sees nothing.
 
 ## Scheduled adoption posts to Facebook (2026-11-21, fixed up 2026-11-22; not deployed, not checked on a device)
 

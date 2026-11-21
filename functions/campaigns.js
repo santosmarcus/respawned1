@@ -1588,3 +1588,248 @@ exports.evaluateCampaignDeadlines = onSchedule('every 60 minutes', async () => {
     }
   }
 });
+
+// ── Cash-outs: money taken out, and which fund it came from ─────────────────
+//
+// organizations/{orgId}/cashOuts/{id} (rules: finance members read, no
+// client writes). Created by recordCashOut (someone records money taken out
+// of PayMongo, the bank, GCash or the cash box) or by the PayMongo payout
+// webhook (functions/paymongo.js). Until every peso has a fund, the Donations
+// screen asks the people who manage money where it went; assigning creates
+// ordinary spending records on the chosen funds (allocations, kind
+// 'expense', with cashOutId), so Fund Tracking and reports include it.
+// notifyCashOut (functions/index.js) tells the organization's finance
+// members. Pure checks: functions/cash_out_rules.js.
+
+const cashOutRules = require('./cash_out_rules');
+
+const cashOutsCol = (orgId) => db.collection('organizations').doc(orgId).collection('cashOuts');
+
+function requireCashOutLines(raw) {
+  const checked = cashOutRules.validateLines(raw, {categories: ALLOCATION_CATEGORIES, idPattern: CAMPAIGN_ID_PATTERN});
+  if (checked.error) throw new HttpsError('invalid-argument', checked.error);
+  return checked.lines;
+}
+
+async function readFunds(tx, lines) {
+  const ids = [...new Set(lines.map((l) => l.campaignId))];
+  const snaps = await Promise.all(ids.map((id) => tx.get(campaignsCol().doc(id))));
+  const funds = new Map();
+  snaps.forEach((s, i) => {
+    if (!s.exists) return;
+    const c = s.data();
+    funds.set(ids[i], {
+      organizationId: c.organizationId || null,
+      availableC: moneyOf(c).available,
+      title: isGeneralFund(ids[i], c) ? 'General fund' : (c.title || 'Untitled fund'),
+    });
+  });
+  return funds;
+}
+
+// Writes the spending records for [lines] and returns the stored line
+// entries. Call after every transaction read.
+function writeCashOutAllocations(tx, actor, {cashOutId, organizationId, sourceLabel, requestId, lines, funds}) {
+  const nowTs = Timestamp.now();
+  const now = FieldValue.serverTimestamp();
+  const perFund = new Map();
+  const entries = lines.map((l, i) => {
+    const amount = pesos(l.amountC);
+    const campaignRef = campaignsCol().doc(l.campaignId);
+    const allocationId = `${requestId}_${i}`;
+    tx.set(campaignRef.collection('allocations').doc(allocationId), {
+      kind: 'expense',
+      label: l.label,
+      category: l.category,
+      amount,
+      date: formatManilaDate(new Date()),
+      notes: `From ${sourceLabel.toLowerCase()} (cash-out record)`,
+      receiptUrl: null,
+      linkedCaseId: null,
+      inKindDescription: null,
+      status: 'recorded',
+      organizationId,
+      cashOutId,
+      recordedBy: actor.uid,
+      recordedByName: actor.name,
+      createdAt: now,
+    });
+    historyEntry(tx, campaignRef, actor, 'allocation_recorded', {allocationId, amount, category: l.category, cashOutId});
+    perFund.set(l.campaignId, (perFund.get(l.campaignId) || 0) + l.amountC);
+    return {
+      campaignId: l.campaignId,
+      campaignTitle: funds.get(l.campaignId).title,
+      category: l.category,
+      label: l.label,
+      amount,
+      allocationId,
+      byUid: actor.uid,
+      byName: actor.name,
+      at: nowTs,
+    };
+  });
+  for (const [id, c] of perFund) {
+    tx.update(campaignsCol().doc(id), {allocatedAmount: FieldValue.increment(pesos(c)), updatedAt: now});
+  }
+  return entries;
+}
+
+function requireOrgActor(actor) {
+  if (!actor.organizationId) throw new HttpsError('failed-precondition', 'Your account is not linked to an organization.');
+  return actor.organizationId;
+}
+
+/// Someone took money out (PayMongo payout, bank, GCash, cash box). With
+/// `lines`, it is assigned to funds in the same step; otherwise (or for any
+/// part left over) it waits on the Donations screen.
+exports.recordCashOut = onCall(async (request) => {
+  const actor = await loadActor(request, {finance: true});
+  const orgId = requireOrgActor(actor);
+  const d = request.data || {};
+  const requestId = requireRequestId(d.requestId);
+  if (!Object.prototype.hasOwnProperty.call(cashOutRules.SOURCES, d.source)) {
+    throw new HttpsError('invalid-argument', 'Choose where the money was taken from.');
+  }
+  const amount = requireAmount(d.amount, 'Amount');
+  const note = requireString(d.note, 'Note', {max: 500, optional: true});
+  let occurredAt = Timestamp.now();
+  if (d.occurredAtMs !== undefined && d.occurredAtMs !== null) {
+    const ms = d.occurredAtMs;
+    if (typeof ms !== 'number' || !Number.isFinite(ms) || ms > Date.now() + 86400000 || ms < Date.now() - 366 * 86400000) {
+      throw new HttpsError('invalid-argument', 'Choose a date within the past year.');
+    }
+    occurredAt = Timestamp.fromMillis(ms);
+  }
+  const lines = Array.isArray(d.lines) && d.lines.length ? requireCashOutLines(d.lines) : [];
+  const ref = cashOutsCol(orgId).doc(requestId);
+  const sourceLabel = cashOutRules.SOURCES[d.source];
+
+  return db.runTransaction(async (tx) => {
+    const existing = await tx.get(ref);
+    if (existing.exists) return {cashOutId: requestId, duplicate: true};
+    const base = {amount, assignedAmount: 0, status: 'needs_assignment'};
+    let entries = [];
+    let plan = {assignedAfterC: 0, status: 'needs_assignment'};
+    if (lines.length) {
+      const funds = await readFunds(tx, lines);
+      plan = cashOutRules.planAssignment({cashOut: base, organizationId: orgId, lines, funds});
+      if (plan.error) throw new HttpsError('failed-precondition', plan.error);
+      entries = writeCashOutAllocations(tx, actor, {
+        cashOutId: requestId, organizationId: orgId, sourceLabel, requestId, lines, funds,
+      });
+    }
+    const now = FieldValue.serverTimestamp();
+    tx.set(ref, {
+      organizationId: orgId,
+      source: d.source,
+      amount,
+      assignedAmount: pesos(plan.assignedAfterC),
+      status: plan.status,
+      note,
+      occurredAt,
+      lines: entries,
+      appliedRequestIds: lines.length ? [requestId] : [],
+      recordedBy: actor.uid,
+      recordedByName: actor.name,
+      lastActionBy: actor.uid,
+      lastActionByName: actor.name,
+      createdAt: now,
+      updatedAt: now,
+    });
+    auditEntry(tx, actor, {
+      category: 'expenses',
+      action: 'Cash-out recorded',
+      organizationId: orgId,
+      targetType: 'CashOut',
+      targetId: requestId,
+      newValues: {amount, source: sourceLabel, assigned: pesos(plan.assignedAfterC), note},
+      metadata: entries.length ? {funds: entries.map((e) => `${e.campaignTitle}: ₱${e.amount}`)} : null,
+    });
+    return {cashOutId: requestId, duplicate: false, status: plan.status};
+  });
+});
+
+/// Chooses the fund(s) a waiting cash-out came from and what it was for.
+exports.assignCashOut = onCall(async (request) => {
+  const actor = await loadActor(request, {finance: true});
+  const orgId = requireOrgActor(actor);
+  const d = request.data || {};
+  const cashOutId = requireCampaignId(d.cashOutId, 'cash-out');
+  const requestId = requireRequestId(d.requestId);
+  const lines = requireCashOutLines(d.lines);
+  const ref = cashOutsCol(orgId).doc(cashOutId);
+
+  return db.runTransaction(async (tx) => {
+    const snap = await tx.get(ref);
+    if (!snap.exists) throw new HttpsError('not-found', 'This cash-out no longer exists.');
+    const c = snap.data();
+    if ((c.appliedRequestIds || []).includes(requestId)) return {cashOutId, duplicate: true, status: c.status};
+    const funds = await readFunds(tx, lines);
+    const plan = cashOutRules.planAssignment({cashOut: c, organizationId: orgId, lines, funds});
+    if (plan.error) throw new HttpsError('failed-precondition', plan.error);
+    const sourceLabel = cashOutRules.SOURCES[c.source] || 'Cash-out';
+    const entries = writeCashOutAllocations(tx, actor, {
+      cashOutId, organizationId: orgId, sourceLabel, requestId, lines, funds,
+    });
+    tx.update(ref, {
+      lines: [...(c.lines || []), ...entries],
+      assignedAmount: pesos(plan.assignedAfterC),
+      status: plan.status,
+      appliedRequestIds: FieldValue.arrayUnion(requestId),
+      lastActionBy: actor.uid,
+      lastActionByName: actor.name,
+      updatedAt: FieldValue.serverTimestamp(),
+    });
+    auditEntry(tx, actor, {
+      category: 'expenses',
+      action: 'Cash-out assigned to funds',
+      organizationId: orgId,
+      targetType: 'CashOut',
+      targetId: cashOutId,
+      oldValues: {status: c.status, assigned: num(c.assignedAmount)},
+      newValues: {status: plan.status, assigned: pesos(plan.assignedAfterC)},
+      metadata: {funds: entries.map((e) => `${e.campaignTitle}: ₱${e.amount} (${e.category})`)},
+    });
+    return {cashOutId, duplicate: false, status: plan.status};
+  });
+});
+
+/// The spending was already recorded some other way (for example as a
+/// general expense or a campaign allocation), so nothing more is assigned.
+/// Applies to whatever part is still unassigned.
+exports.settleCashOut = onCall(async (request) => {
+  const actor = await loadActor(request, {finance: true});
+  const orgId = requireOrgActor(actor);
+  const d = request.data || {};
+  const cashOutId = requireCampaignId(d.cashOutId, 'cash-out');
+  const note = requireString(d.note, 'Where it was recorded', {max: 500});
+  const ref = cashOutsCol(orgId).doc(cashOutId);
+
+  return db.runTransaction(async (tx) => {
+    const snap = await tx.get(ref);
+    if (!snap.exists) throw new HttpsError('not-found', 'This cash-out no longer exists.');
+    const c = snap.data();
+    if (c.status === 'already_recorded') return {cashOutId, duplicate: true};
+    if (!cashOutRules.OPEN_STATUSES.includes(c.status)) {
+      throw new HttpsError('failed-precondition', 'This cash-out has already been sorted out.');
+    }
+    tx.update(ref, {
+      status: 'already_recorded',
+      settleNote: note,
+      settledAmount: pesos(cashOutRules.remainingOf(c)),
+      lastActionBy: actor.uid,
+      lastActionByName: actor.name,
+      updatedAt: FieldValue.serverTimestamp(),
+    });
+    auditEntry(tx, actor, {
+      category: 'expenses',
+      action: 'Cash-out marked as already recorded',
+      organizationId: orgId,
+      targetType: 'CashOut',
+      targetId: cashOutId,
+      oldValues: {status: c.status},
+      newValues: {status: 'already_recorded', note, unassigned: pesos(cashOutRules.remainingOf(c))},
+    });
+    return {cashOutId, duplicate: false};
+  });
+});
