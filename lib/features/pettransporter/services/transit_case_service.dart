@@ -74,16 +74,7 @@ class TransitCaseService {
 
   // Location streaming — fire-and-forget, exactly like the original
   // listener (neither write was awaited).
-  DateTime? _lastPositionWrite;
-
-  /// Saves the rider's position at most every 10 seconds. Each write
-  /// updates the case document, which redraws every screen watching the
-  /// case, so writing on every GPS update made the transit page sluggish.
   void recordPosition(double lat, double lng) {
-    final now = DateTime.now();
-    final last = _lastPositionWrite;
-    if (last != null && now.difference(last) < const Duration(seconds: 10)) return;
-    _lastPositionWrite = now;
     unawaited(
       caseRef.collection('tracking').add({
         'lat': lat,
@@ -125,27 +116,8 @@ class TransitCaseService {
     return urls;
   }
 
-  /// Picked up. Staff chose either a clinic (on to treatment) or, with
-  /// `transportDestination: 'shelter'` (Assign Transport), straight to
-  /// the shelter, skipping the clinic leg. The shelter pin is refreshed
-  /// from the organization; without one the trip is held like the
-  /// post-treatment shelter leg ([ShelterLocationMissing]).
-  Future<void> submitPickupVerification(List<String> urls) async {
-    final data = await fetchCase();
-    if (data['transportDestination'] == 'shelter') {
-      final shelter = await _shelterPin(data);
-      if (shelter == null) {
-        await _flagMissingShelter(data);
-        throw const ShelterLocationMissing();
-      }
-      await _record('transit_picked_up', 'Animal rescued. On the way to the shelter.', {
-        'status': 'in_transit_shelter',
-        'pickupVerificationUrls': urls,
-        ..._shelterFields(shelter),
-      });
-      return;
-    }
-    await _record('transit_picked_up', 'Animal rescued. On the way to treatment.', {
+  Future<void> submitPickupVerification(List<String> urls) {
+    return _record('transit_picked_up', 'Animal rescued. On the way to treatment.', {
       'status': 'treatment',
       'pickupVerificationUrls': urls,
     });
@@ -442,45 +414,45 @@ class TransitCaseService {
   Future<void> applyEndReason(EndReasonOutcome outcome) async {
     final serviceType = outcome.serviceType;
     final extra = <String, dynamic>{
-    'endReason': outcome.reasonText,
-    if (outcome.notes.isNotEmpty) 'endReasonNotes': outcome.notes,
-    // The specific service type the animal needs — this is what
-    // assign_rider_page.dart reads to show the org what to arrange
-    // and to weight vehicle-compatibility ranking for the next
-    // transporter offered the case.
-    'endReasonServiceType': ?serviceType,
-    // Consumed by expireStaleReporterResponses; cleared automatically
-    // once the reporter replies (see TrackCasePage's reporter-response
-    // handling) or the case is manually resolved by staff.
-    if (outcome.awaitingReporter)
-    'awaitingReporterSince': FieldValue.serverTimestamp(),
-    // So a future reliability-score feature can exclude this pickup
-    // from counting against the transporter — verified here as an
-    // animal-safety/capability escalation, not a no-show or missed job.
-    if (outcome.excludeFromTransporterFault)
-    'transporterFaultVerified': false,
-    // Deceased / Vehicle breakdown / Other: notifyStaffOfTransitEnd
-    // (functions/index.js) alerts staff when transitEndedAt changes.
-    if (outcome.kind != null) 'endReasonKind': outcome.kind,
-    if (outcome.kind != null) 'transitEndedAt': FieldValue.serverTimestamp(),
-    // Vehicle breakdown hands the case back to Assign Transporter: this
-    // transporter no longer holds it (their trip stats and location
-    // pushes key on these), and the next accept sets them again.
-    if (outcome.kind == kEndKindBreakdown) ...{
-    'riderId': null,
-    'assignedVolunteerId': null,
-    },
+      'endReason': outcome.reasonText,
+      if (outcome.notes.isNotEmpty) 'endReasonNotes': outcome.notes,
+      // The specific service type the animal needs — this is what
+      // assign_rider_page.dart reads to show the org what to arrange
+      // and to weight vehicle-compatibility ranking for the next
+      // transporter offered the case.
+      'endReasonServiceType': ?serviceType,
+      // Consumed by expireStaleReporterResponses; cleared automatically
+      // once the reporter replies (see TrackCasePage's reporter-response
+      // handling) or the case is manually resolved by staff.
+      if (outcome.awaitingReporter)
+        'awaitingReporterSince': FieldValue.serverTimestamp(),
+      // So a future reliability-score feature can exclude this pickup
+      // from counting against the transporter — verified here as an
+      // animal-safety/capability escalation, not a no-show or missed job.
+      if (outcome.excludeFromTransporterFault)
+        'transporterFaultVerified': false,
+      // Deceased / Vehicle breakdown / Other: notifyStaffOfTransitEnd
+      // (functions/index.js) alerts staff when transitEndedAt changes.
+      if (outcome.kind != null) 'endReasonKind': outcome.kind,
+      if (outcome.kind != null) 'transitEndedAt': FieldValue.serverTimestamp(),
+      // Vehicle breakdown hands the case back to Assign Transporter: this
+      // transporter no longer holds it (their trip stats and location
+      // pushes key on these), and the next accept sets them again.
+      if (outcome.kind == kEndKindBreakdown) ...{
+        'riderId': null,
+        'assignedVolunteerId': null,
+      },
     };
 
     final data = outcome.isTerminal ? await fetchCase() : null;
     await _record('transit_ended_early', outcome.statusLabel, {
-    'status': outcome.status,
-    ...extra,
+      'status': outcome.status,
+      ...extra,
     });
     // The trip is over for this transporter: free them, and free the case
     // for a new offer (Vehicle breakdown goes straight back to Assign).
     if (data != null) {
-    await _closeOwnAssignment(data, status: 'cancelled', at: Timestamp.now());
+      await _closeOwnAssignment(data, status: 'cancelled', at: Timestamp.now());
     }
   }
 
@@ -528,26 +500,26 @@ class TransitCaseService {
         }
 
         tx.set(ref, {
-        'name': name,
-        'address': address,
-        'lat': ?lat,
-        'lng': ?lng,
-        'declineReasonTally': tally,
-        'totalDeclines':
-        ((data['totalDeclines'] as num?)?.toInt() ?? 0) +
-        (accepted ? 0 : 1),
-        'totalAccepted':
-        ((data['totalAccepted'] as num?)?.toInt() ?? 0) +
-        (accepted ? 1 : 0),
-        'declineLog': FieldValue.arrayUnion([
-        if (!accepted)
-        {
-        'reason': reason,
-        'caseId': caseId,
-        'timestamp': Timestamp.now(),
-        },
-        ]),
-        'lastUpdated': Timestamp.now(),
+          'name': name,
+          'address': address,
+          'lat': ?lat,
+          'lng': ?lng,
+          'declineReasonTally': tally,
+          'totalDeclines':
+          ((data['totalDeclines'] as num?)?.toInt() ?? 0) +
+              (accepted ? 0 : 1),
+          'totalAccepted':
+          ((data['totalAccepted'] as num?)?.toInt() ?? 0) +
+              (accepted ? 1 : 0),
+          'declineLog': FieldValue.arrayUnion([
+            if (!accepted)
+              {
+                'reason': reason,
+                'caseId': caseId,
+                'timestamp': Timestamp.now(),
+              },
+          ]),
+          'lastUpdated': Timestamp.now(),
         }, SetOptions(merge: true));
       });
     } catch (_) {}

@@ -19,7 +19,6 @@ import 'package:respawnd1/features/organization/signup/organization_verification
 import 'package:respawnd1/features/pettransporter/rescue_request.dart';
 import 'package:respawnd1/features/pettransporter/transit_progress_page.dart';
 import 'package:respawnd1/features/rescue/lost_found_track_case.dart';
-import 'package:respawnd1/features/rescue/pet_alert_chat.dart';
 import 'package:respawnd1/features/rescue/track_case_page.dart';
 
 /// Shows push notifications while the app is open, and opens the right
@@ -187,11 +186,6 @@ class NotificationService {
     }
   }
 
-  /// The screen a notification's data opens, or null if it opens nothing.
-  /// Public so in-app notification lists (e.g. the admin's) route the same
-  /// way as a tapped push.
-  static Future<Widget?> pageFor(Map<String, dynamic> data) => _pageFor(data);
-
   static Future<Widget?> _pageFor(Map<String, dynamic> data) async {
     final type = data['type'] as String? ?? '';
     final db = FirebaseFirestore.instance;
@@ -249,78 +243,29 @@ class NotificationService {
         if (caseId == null || caseId.isEmpty) return null;
         return TransitProgressPage(caseId: caseId);
 
-    // Community Adoption post-adoption (sendCommunityAdoptionCheckIns and
-    // notifyCommunityPostAdoptionUpdate in functions/index.js): the
-    // adopter's 2-week check-in is due, or the reporter who rehomed the
-    // animal got an update — both open the post-adoption page.
-      case 'community_adoption_checkin':
-      case 'community_post_adoption_update':
-        var adoptionId =
-        (data['checkInId'] ?? data['communityAdoptionId']) as String?;
-        if (adoptionId == null || adoptionId.isEmpty) {
-          // In-app notifications from before they carried the id.
-          final caseId = data['caseId'] as String?;
-          if (caseId == null || caseId.isEmpty) return null;
-          final found = await db
-              .collection('communityAdoptionCheckIns')
-              .where('adopterId',
-              isEqualTo: FirebaseAuth.instance.currentUser!.uid)
-              .where('caseId', isEqualTo: caseId)
-              .limit(1)
-              .get();
-          if (found.docs.isEmpty) return null;
-          adoptionId = found.docs.first.id;
-        }
-        return CommunityPostAdoptionPage(adoptionId: adoptionId);
-
-    // functions/pet_alerts.js: a private chat message about a lost/found
-    // report, or the match decision in it — open that chat.
-      case 'pet_alert_chat':
-        final chatId = data['chatId'] as String?;
-        if (chatId != null && chatId.isNotEmpty) {
-          return PetAlertChatPage(chatId: chatId);
-        }
-        final chatAlertId = data['alertId'] as String?;
-        if (chatAlertId == null || chatAlertId.isEmpty) return null;
-        return LostFoundTrackCasePage(alertId: chatAlertId);
-
       case 'pet_alert_nearby':
-      // scorePetAlertMatches (functions/pet_matching.js): a strong match for
-      // the owner's lost pet — open their report's Possible Matches.
-      case 'pet_match':
-      // functions/pet_alerts.js: a new message on a lost/found report's
-      // thread, or the report was marked reunited with its owner.
-      case 'pet_alert_message':
-      case 'pet_alert_reunited':
         final alertId = data['alertId'] as String?;
         if (alertId == null || alertId.isEmpty) return null;
         return LostFoundTrackCasePage(alertId: alertId);
 
-    // Collar tag scan chats (functions/index.js): the owner hears about a
-    // scan, the finder that the owner opened the chat, and either side
-    // about a new message. Each opens that chat, as owner or finder.
       case 'tag_scanned':
-      case 'tag_chat_enabled':
-      case 'tag_chat_message':
         final tagId = data['tagId'] as String?;
         final sessionId = data['sessionId'] as String?;
         if (tagId == null || sessionId == null) return null;
         final tag = await db.collection('collarTags').doc(tagId).get();
-        final ownerId = tag.data()?['ownerId'] as String?;
         return PetFoundChatScreen(
           tagId: tagId,
           sessionId: sessionId,
           petName: tag.data()?['name'] as String? ?? 'Your pet',
-          isOwner: ownerId != null &&
-              ownerId == FirebaseAuth.instance.currentUser?.uid,
+          isOwner: true,
         );
 
-    // sendFollowUpReminders (functions/index.js): staff always get the
-    // admin Post-Adoption Details page, the adopter their own check-ins.
+    // sendFollowUpReminders (functions/index.js): the adopter's
+    // post-adoption check-ins, or staff's post-adoption details.
       case 'follow_up_reminder':
         final adoptionId = data['adoptionId'] as String?;
         if (adoptionId == null || adoptionId.isEmpty) return null;
-        return postAdoptionPageForAdoption(adoptionId);
+        return PostAdoptionMonitoringPage(adoptionId: adoptionId);
       case 'follow_up_overdue_staff':
         final adoptionId = data['adoptionId'] as String?;
         if (adoptionId == null || adoptionId.isEmpty) return null;
