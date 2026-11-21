@@ -7,6 +7,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/core/models/organization/facebook_integration.dart';
+import 'package:respawnd1/core/models/rescue/rescue_case.dart';
 import 'package:respawnd1/core/models/volunteer/volunteer_event.dart';
 import 'package:respawnd1/core/repos/facebook_integration_repository.dart';
 import 'package:respawnd1/core/widgets/app_dialogs.dart';
@@ -31,6 +32,25 @@ Future<bool> openCampaignFacebookShare(BuildContext context, DonationListing cam
         heading: campaign.title,
         imageUrl: campaign.imageUrl,
         suggestedText: composeCampaignPost(campaign),
+      ),
+    ),
+  );
+  return shared == true;
+}
+
+/// Opens the Facebook composer for a case referred by shared link: the
+/// report's first photo and the link, never the reporter.
+Future<bool> openReferralFacebookShare(BuildContext context, RescueCase c, String url) async {
+  final shared = await Navigator.push<bool>(
+    context,
+    MaterialPageRoute(
+      builder: (_) => FacebookRecordPostPage(
+        kind: FacebookRecordKind.referral,
+        recordId: c.id,
+        recordOrganizationId: c.raw['organizationId'] as String?,
+        heading: 'Rescue referral ${c.shortCaseId}',
+        imageUrl: c.photoUrls.isEmpty ? null : c.photoUrls.first,
+        suggestedText: composeReferralPost(c, url),
       ),
     ),
   );
@@ -90,7 +110,11 @@ class _FacebookRecordPostPageState extends ConsumerState<FacebookRecordPostPage>
   bool _busy = false;
 
   bool get _hasPhoto => (widget.imageUrl ?? '').startsWith('https://');
-  String get _kindLabel => widget.kind == FacebookRecordKind.campaign ? 'campaign' : 'event';
+  String get _kindLabel => switch (widget.kind) {
+        FacebookRecordKind.campaign => 'campaign',
+        FacebookRecordKind.event => 'event',
+        FacebookRecordKind.referral => 'referral',
+      };
 
   @override
   void dispose() {
@@ -206,7 +230,7 @@ class _FacebookRecordPostPageState extends ConsumerState<FacebookRecordPostPage>
         foregroundColor: AppColors.textPrimary,
         elevation: 0,
         title: Text(
-          widget.kind == FacebookRecordKind.campaign ? 'Share campaign' : 'Share event',
+          'Share $_kindLabel',
           style: GoogleFonts.tiltWarp(fontSize: 18, color: AppColors.textPrimary),
         ),
       ),
@@ -272,7 +296,12 @@ class _FacebookRecordPostPageState extends ConsumerState<FacebookRecordPostPage>
                 border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
               ),
             ),
-            Text('People can find the $_kindLabel in the ResPAWnd app. Edit anything before posting.', style: _hint),
+            Text(
+                widget.kind == FacebookRecordKind.referral
+                    ? 'Whoever opens the link can see the report and answer it. Reporter details are never included. '
+                        'Edit anything before posting.'
+                    : 'People can find the $_kindLabel in the ResPAWnd app. Edit anything before posting.',
+                style: _hint),
           ],
         ),
       ),

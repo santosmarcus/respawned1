@@ -359,9 +359,26 @@ enum RescuePipelineTab {
 /// exactly [casesByStatusesProvider]'s own result. De-duplicates by case
 /// id so a case matching both queries (e.g. status already flipped to
 /// 'intake' AND still carrying the stage tag) is never listed twice.
+/// Const so casesByStatusesProvider keeps one listener (see
+/// RescuePipelineTab.statuses).
+const List<RescueStatus> _referredOnly = [RescueStatus.referred];
+
 final casesForTabProvider =
     Provider.autoDispose.family<AsyncValue<List<RescueCase>>, RescuePipelineTab>((ref, tab) {
   final byStatus = ref.watch(casesByStatusesProvider(tab.statuses));
+  // A case referred by shared link stays pending under Review until
+  // someone takes it (RescueCase.isPendingLinkReferral), then shows under
+  // Closed like any other referral.
+  if (tab == RescuePipelineTab.closed) {
+    return byStatus.whenData((list) => list.where((c) => !c.isPendingLinkReferral).toList());
+  }
+  if (tab == RescuePipelineTab.review) {
+    final referred = ref.watch(casesByStatusesProvider(_referredOnly));
+    if (byStatus.hasError) return byStatus;
+    if (!byStatus.hasValue) return const AsyncValue.loading();
+    final pending = (referred.asData?.value ?? const <RescueCase>[]).where((c) => c.isPendingLinkReferral);
+    return AsyncValue.data([...byStatus.value!, ...pending]);
+  }
   if (tab != RescuePipelineTab.intake) return byStatus;
 
   final byStage = ref.watch(casesByActiveStageProvider('intake'));

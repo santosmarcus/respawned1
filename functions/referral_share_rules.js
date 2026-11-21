@@ -200,6 +200,26 @@ function validateResponse(data) {
   return {value: compact({response: d.response, name, contact, note})};
 }
 
+/// Refer → shared link (app: CaseReferralRepository.referByLink): the case's
+/// `linkReferral` after someone answers on the page, or null when this
+/// answer isn't for the case's current shared-link referral. "Will handle
+/// it" closes the case's wait (it leaves Review for Closed in the app);
+/// "Can't take it" and "Needs more information" keep it pending.
+function linkReferralUpdate(linkReferral, referralId, answer, at) {
+  if (!linkReferral || typeof linkReferral !== 'object' || linkReferral.referralId !== referralId) return null;
+  const state = {will_handle: 'accepted', cannot_handle: 'declined', need_info: 'needs_info'}[answer.response];
+  // Once someone has taken it, later answers from others don't reopen it.
+  if (!state || linkReferral.state === 'accepted') return null;
+  return {
+    ...linkReferral,
+    state,
+    answeredByName: answer.name,
+    answeredByContact: answer.contact || null,
+    answeredNote: answer.note || null,
+    answeredAt: at,
+  };
+}
+
 module.exports = {
   TOKEN_PATTERN,
   SHARE_TTL_DAYS,
@@ -211,4 +231,5 @@ module.exports = {
   publicStatusLabel,
   buildReferralSnapshot,
   validateResponse,
+  linkReferralUpdate,
 };

@@ -23,7 +23,7 @@ const admin = require('firebase-admin');
 const {SecretManagerServiceClient} = require('@google-cloud/secret-manager');
 const {loadOrgAccess, memberPermissions, presetFor} = require('./org_access');
 const {photosOf} = require('./public_animals');
-const {normalizePublishItems, normalizeRecordPost, recordPostBlockedReason} = require('./facebook_share_rules');
+const {normalizePublishItems, normalizeRecordPost, recordPostBlockedReason, recordPhotoUrl} = require('./facebook_share_rules');
 
 const fbAppId = defineSecret('FB_APP_ID');
 const fbAppSecret = defineSecret('FB_APP_SECRET');
@@ -686,7 +686,7 @@ exports.facebookPublishRecordPost = onCall(async (request) => {
     throw new HttpsError('failed-precondition', 'This Facebook connection needs attention. Reconnect the Page.');
   }
 
-  const photoUrl = typeof record.imageUrl === 'string' && /^https:\/\//i.test(record.imageUrl) ? record.imageUrl : null;
+  const photoUrl = recordPhotoUrl(post.kind, record);
   const withPhoto = post.includePhoto && photoUrl != null;
   // A published photo with the text as its caption is a normal photo post;
   // without a photo, a plain text post.
@@ -716,11 +716,15 @@ exports.facebookPublishRecordPost = onCall(async (request) => {
     createdAt: admin.firestore.FieldValue.serverTimestamp(),
   });
   await writeOrgAuditLog({
-    action: post.kind === 'campaign' ? 'Shared campaign to Facebook Page' : 'Shared event to Facebook Page',
+    action: {
+      campaign: 'Shared campaign to Facebook Page',
+      event: 'Shared event to Facebook Page',
+      referral: 'Shared referral to Facebook Page',
+    }[post.kind],
     actorId: uid,
     actorEmail: request.auth.token.email,
     organizationId,
-    newValues: {recordKind: post.kind, recordId: post.recordId, title: record.title || null, postId, postUrl},
+    newValues: {recordKind: post.kind, recordId: post.recordId, title: record.title || (post.kind === 'referral' ? `Case ${post.recordId.slice(0, 6)}` : null), postId, postUrl},
   });
 
   return {postId, postUrl};

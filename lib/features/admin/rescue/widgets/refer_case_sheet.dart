@@ -1,25 +1,18 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
-import 'package:respawnd1/core/constants/feature_flags.dart';
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/core/models/rescue/referral_type.dart';
 import 'package:respawnd1/core/models/rescue/rescue_case.dart';
 import 'package:respawnd1/core/repos/organization_directory_repository.dart';
 import 'package:respawnd1/core/repos/rescue_case_repository.dart';
-import 'package:respawnd1/core/utils/current_org_kind.dart';
-import 'package:respawnd1/features/admin/rescue/widgets/refer_to_lgu_sheet.dart';
-import 'package:respawnd1/features/admin/rescue/widgets/refer_to_organization_sheet.dart';
-import 'package:respawnd1/features/admin/rescue/widgets/refer_to_volunteer_sheet.dart';
+import 'package:respawnd1/features/admin/rescue/widgets/share_referral_sheet.dart';
 
-/// Refer Case selection modal — the entry point for the Refer action. Picks
-/// a referral type, then opens the matching type-specific modal. Returns
-/// true if a referral was actually sent.
+/// Refer Case selection modal — the entry point for the Refer action.
 ///
-/// Another Organization shows while multiOrganizationEnabled is on, and
-/// always for an independent rescuer (their way to hand a case to a shelter)
-/// while independentRescuersEnabled is on, which also shows Rescue
-/// Volunteer (independent rescuers covering the case).
+/// Refer: a shared link anyone outside the app can open and take
+/// (showShareReferralSheet). Rescue Volunteer is listed but not available
+/// yet. Returns true if a referral was actually created.
 Future<bool> showReferCaseSheet(
   BuildContext context, {
   required RescueCase rescueCase,
@@ -28,10 +21,6 @@ Future<bool> showReferCaseSheet(
   required String actorUid,
   required String actorName,
 }) async {
-  final fromIndependent = await currentOrgIsIndependent(uid: actorUid.isEmpty ? null : actorUid);
-  if (!context.mounted) return false;
-  final showOrganization = FeatureFlags.multiOrganizationEnabled ||
-      (FeatureFlags.independentRescuersEnabled && fromIndependent);
   final type = await showModalBottomSheet<ReferralType>(
     context: context,
     backgroundColor: AppColors.background,
@@ -58,22 +47,17 @@ Future<bool> showReferCaseSheet(
           Text('Refer Case',
               style: GoogleFonts.tiltWarp(fontSize: 18, color: AppColors.textPrimary)),
           const SizedBox(height: 12),
-          if (showOrganization)
-            _TypeOption(
-              icon: Icons.apartment_outlined,
-              label: fromIndependent ? 'Shelter or Rescue Group' : ReferralType.anotherOrganization.label,
-              onTap: () => Navigator.pop(context, ReferralType.anotherOrganization),
-            ),
-          if (FeatureFlags.independentRescuersEnabled)
-            _TypeOption(
-              icon: Icons.volunteer_activism_outlined,
-              label: ReferralType.rescueVolunteer.label,
-              onTap: () => Navigator.pop(context, ReferralType.rescueVolunteer),
-            ),
           _TypeOption(
-            icon: Icons.account_balance_outlined,
-            label: ReferralType.localGovernmentUnit.label,
+            icon: Icons.ios_share,
+            label: 'Refer',
+            subtitle: 'Share a link; whoever takes it fills in their contact',
             onTap: () => Navigator.pop(context, ReferralType.localGovernmentUnit),
+          ),
+          _TypeOption(
+            icon: Icons.volunteer_activism_outlined,
+            label: ReferralType.rescueVolunteer.label,
+            subtitle: 'Not available yet',
+            enabled: false,
           ),
         ],
       ),
@@ -81,51 +65,36 @@ Future<bool> showReferCaseSheet(
   );
 
   if (type == null || !context.mounted) return false;
-
-  switch (type) {
-    case ReferralType.anotherOrganization:
-      return showReferToOrganizationSheet(
-        context,
-        rescueCase: rescueCase,
-        directory: organizationDirectory,
-        caseRepository: caseRepository,
-        actorUid: actorUid,
-        actorName: actorName,
-      );
-    case ReferralType.rescueVolunteer:
-      return showReferToVolunteerSheet(
-        context,
-        rescueCase: rescueCase,
-        directory: organizationDirectory,
-        caseRepository: caseRepository,
-        actorUid: actorUid,
-        actorName: actorName,
-      );
-    case ReferralType.localGovernmentUnit:
-      return showReferToLguSheet(
-        context,
-        rescueCase: rescueCase,
-        caseRepository: caseRepository,
-        actorUid: actorUid,
-        actorName: actorName,
-      );
-  }
+  return showShareReferralSheet(
+    context,
+    rescueCase: rescueCase,
+    caseRepository: caseRepository,
+    actorUid: actorUid,
+    actorName: actorName,
+  );
 }
 
 class _TypeOption extends StatelessWidget {
   final IconData icon;
   final String label;
-  final VoidCallback onTap;
-  const _TypeOption({required this.icon, required this.label, required this.onTap});
+  final String? subtitle;
+  final bool enabled;
+  final VoidCallback? onTap;
+  const _TypeOption({required this.icon, required this.label, this.subtitle, this.enabled = true, this.onTap});
 
   @override
   Widget build(BuildContext context) {
+    final color = enabled ? AppColors.textPrimary : AppColors.textSecondary.withValues(alpha: 0.6);
     return ListTile(
       contentPadding: EdgeInsets.zero,
-      leading: Icon(icon, color: AppColors.textPrimary),
-      title: Text(label, style: GoogleFonts.zain(fontSize: 15, color: AppColors.textPrimary)),
-      trailing: const Icon(Icons.chevron_right, color: AppColors.textSecondary),
-      onTap: onTap,
+      enabled: enabled,
+      leading: Icon(icon, color: color),
+      title: Text(label, style: GoogleFonts.zain(fontSize: 15, fontWeight: FontWeight.w700, color: color)),
+      subtitle: subtitle == null
+          ? null
+          : Text(subtitle!, style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary.withValues(alpha: enabled ? 1 : 0.6))),
+      trailing: enabled ? const Icon(Icons.chevron_right, color: AppColors.textSecondary) : null,
+      onTap: enabled ? onTap : null,
     );
   }
 }

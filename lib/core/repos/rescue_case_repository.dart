@@ -5,7 +5,6 @@ import 'package:respawnd1/core/models/rescue/closure_reason.dart';
 import 'package:respawnd1/core/models/rescue/community_report.dart';
 import 'package:respawnd1/core/models/rescue/expense.dart';
 import 'package:respawnd1/core/models/rescue/referral.dart';
-import 'package:respawnd1/core/models/rescue/referral_type.dart';
 import 'package:respawnd1/core/models/rescue/rejection_reason.dart';
 import 'package:respawnd1/core/models/rescue/pet_transporter.dart';
 import 'package:respawnd1/core/models/rescue/rescue_case.dart';
@@ -441,24 +440,13 @@ class RescueCaseRepository {
     required String actorName,
   }) => referrals.withdraw(caseId: caseId, reason: reason, actorUid: actorUid, actorName: actorName);
 
-  /// Delegates to [CaseReferralRepository.referToLgu].
-  Future<String> referToLgu({
+  /// Delegates to [CaseReferralRepository.referByLink].
+  Future<String> referByLink({
     required String caseId,
-    required String barangay,
-    required LguReferralReason reason,
-    required String explanation,
-    bool attachReportMedia = true,
+    String note = '',
     required String actorUid,
     required String actorName,
-  }) => referrals.referToLgu(
-    caseId: caseId,
-    barangay: barangay,
-    reason: reason,
-    explanation: explanation,
-    attachReportMedia: attachReportMedia,
-    actorUid: actorUid,
-    actorName: actorName,
-  );
+  }) => referrals.referByLink(caseId: caseId, note: note, actorUid: actorUid, actorName: actorName);
 
   /// Delegates to [CaseReferralRepository.referToVolunteer].
   Future<String> referToVolunteer({

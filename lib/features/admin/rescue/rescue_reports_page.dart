@@ -41,9 +41,21 @@ String closedCaseOutcomeNote(RescueCase c, {String? myOrgId, DateTime? now}) {
   }
   final referral = c.raw['referral'] is Map ? c.raw['referral'] as Map : const {};
   final targetOrgId = c.raw['referredToOrgId'] as String? ?? '';
+  final link = c.linkReferral;
+  if (targetOrgId.isEmpty && link != null) {
+    final name = (link['answeredByName'] as String?)?.trim() ?? '';
+    final at = link['at'];
+    final age = at is Timestamp ? caseAgeLabel(at.toDate(), now: now) : null;
+    return switch (link['state']) {
+      'accepted' => 'Referred by link · taken by ${name.isEmpty ? 'the receiver' : name}',
+      'declined' => "Referred by link · ${name.isEmpty ? 'they' : name} can't take it",
+      'needs_info' => 'Referred by link · more information asked',
+      _ => 'Referred by link · ${age == null ? 'waiting' : 'waiting $age'}',
+    };
+  }
   if (targetOrgId.isEmpty) {
     // LGU referrals keep nothing on the case but the status line
-    // CaseReferralRepository.referToLgu writes.
+    // the old LGU referral form wrote.
     for (final h in c.statusHistory.reversed) {
       final m = RegExp(r'^Referred to the (.+) LGU/barangay').firstMatch(h.status);
       if (m == null) continue;

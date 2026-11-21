@@ -105,8 +105,8 @@ test('campaign and event posts map to their collections', () => {
 });
 
 test('record posts are refused when malformed', () => {
-  assert.throws(() => normalizeRecordPost({kind: 'animal', recordId: 'a', message: 'x'}), /campaign or an event/);
-  assert.throws(() => normalizeRecordPost({kind: 'toString', recordId: 'a', message: 'x'}), /campaign or an event/);
+  assert.throws(() => normalizeRecordPost({kind: 'animal', recordId: 'a', message: 'x'}), /campaign, an event or a referral/);
+  assert.throws(() => normalizeRecordPost({kind: 'toString', recordId: 'a', message: 'x'}), /campaign, an event or a referral/);
   assert.throws(() => normalizeRecordPost({kind: 'event', recordId: '../x', message: 'x'}), /Invalid record/);
   assert.throws(() => normalizeRecordPost({kind: 'event', recordId: 'e1', message: '   '}), /post text/);
   assert.throws(() => normalizeRecordPost({kind: 'event', recordId: 'e1', message: 'x'.repeat(5001)}), /under/);
@@ -119,4 +119,16 @@ test('drafts, archived campaigns and cancelled events cannot be posted', () => {
   assert.strictEqual(recordPostBlockedReason('campaign', {status: 'goal_met'}), null);
   assert.match(recordPostBlockedReason('event', {status: 'cancelled'}), /Cancelled/);
   assert.strictEqual(recordPostBlockedReason('event', {status: 'published'}), null);
+});
+
+test('referral posts: only referred cases, photo from the report', () => {
+  const {normalizeRecordPost, recordPostBlockedReason, recordPhotoUrl} = require('./facebook_share_rules');
+  const post = normalizeRecordPost({kind: 'referral', recordId: 'case123', message: 'Help needed', includePhoto: true});
+  assert.strictEqual(post.collection, 'cases');
+  assert.strictEqual(recordPostBlockedReason('referral', {status: 'referred'}), null);
+  assert.match(recordPostBlockedReason('referral', {status: 'pending_review'}), /Refer this case/);
+  assert.strictEqual(recordPhotoUrl('referral', {photoUrls: ['https://x/a.jpg', 'https://x/b.jpg']}), 'https://x/a.jpg');
+  assert.strictEqual(recordPhotoUrl('referral', {photoUrls: [], imageUrl: 'https://x/c.jpg'}), null);
+  assert.strictEqual(recordPhotoUrl('campaign', {imageUrl: 'https://x/c.jpg'}), 'https://x/c.jpg');
+  assert.strictEqual(recordPhotoUrl('campaign', {imageUrl: 'http://x/c.jpg'}), null);
 });

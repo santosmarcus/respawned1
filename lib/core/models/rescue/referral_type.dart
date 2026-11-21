@@ -7,7 +7,7 @@ enum ReferralType {
   String get label => switch (this) {
         ReferralType.anotherOrganization => 'Another Organization',
         ReferralType.rescueVolunteer => 'Rescue Volunteer',
-        ReferralType.localGovernmentUnit => 'LGU / Barangay',
+        ReferralType.localGovernmentUnit => 'Shared link',
       };
 
   static ReferralType fromName(String? value) => ReferralType.values

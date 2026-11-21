@@ -833,6 +833,38 @@ class _RescueDetailPageState extends ConsumerState<RescueDetailPage> {
         final target = c.raw['referredToOrgId'] as String? ?? '';
         final at = referral['referredAt'] is Timestamp ? (referral['referredAt'] as Timestamp).toDate() : null;
         final note = (referral['note'] as String?)?.trim() ?? '';
+        final link = c.linkReferral;
+        if (target.isEmpty && link != null) {
+          // Refer → shared link: the answer comes from the web page
+          // (functions/referral_shares.js respondToReferralShare).
+          final state = link['state'] as String? ?? 'waiting';
+          final name = (link['answeredByName'] as String?)?.trim() ?? '';
+          final contact = (link['answeredByContact'] as String?)?.trim() ?? '';
+          final answerNote = (link['answeredNote'] as String?)?.trim() ?? '';
+          final linkAt = link['at'] is Timestamp ? (link['at'] as Timestamp).toDate() : null;
+          final who = [if (name.isNotEmpty) name, if (contact.isNotEmpty) contact].join(' · ');
+          return CaseOutcomeBanner(
+            tone: state == 'accepted' ? CaseBannerTone.success : CaseBannerTone.warning,
+            icon: Icons.ios_share,
+            title: switch (state) {
+              'accepted' => 'Referred · taken by ${name.isEmpty ? 'the receiver' : name}',
+              'declined' => "Referred by shared link · ${name.isEmpty ? 'they' : name} can't take it",
+              'needs_info' => 'Referred by shared link · more information asked',
+              _ => 'Referred by shared link · waiting${linkAt == null ? '' : ' ${caseAgeLabel(linkAt)}'}',
+            },
+            message: switch (state) {
+              'accepted' => 'They said they will handle it. The case is closed here.',
+              'declined' || 'needs_info' =>
+                'Share the link again from Referral History, or withdraw the referral to take the case back.',
+              _ => 'Waiting for someone to answer on the link. It stays in Review until someone takes it; '
+                  'withdraw it to take the case back.',
+            },
+            facts: [
+              if (who.isNotEmpty) ('Contact', who),
+              if (answerNote.isNotEmpty) ('Their note', answerNote),
+            ],
+          );
+        }
         if (target.isEmpty) {
           // LGU referrals keep only their status line on the case.
           String? lguLine;
@@ -1228,7 +1260,7 @@ class _RescueDetailPageState extends ConsumerState<RescueDetailPage> {
                 children: [
                   MergeHistorySection(rescueCase: c, onOpenCase: _openCase),
                   const SizedBox(height: 8),
-                  ReferralHistorySection(caseId: c.id),
+                  ReferralHistorySection(caseId: c.id, rescueCase: c),
                 ],
               ),
             ),
@@ -1576,7 +1608,7 @@ class _OwnershipSection extends StatelessWidget {
                 ),
                 OutlinedButton(
                   onPressed: busy ? null : onReferToLgu,
-                  child: const Text('Refer to LGU'),
+                  child: const Text('Refer'),
                 ),
                 OutlinedButton(
                   onPressed: busy ? null : onCloseHasOwner,
@@ -1782,7 +1814,7 @@ class _ServiceAreaGeofenceNote extends StatelessWidget {
     if (!outside && orgIds.isEmpty) return const SizedBox.shrink();
 
     final text = outside
-        ? 'Outside every organization service area. Consider referring this case to the LGU.'
+        ? 'Outside every organization service area. Consider referring this case.'
         : orgIds.length == 1
         ? 'Inside 1 organization service area.'
         : 'Inside ${orgIds.length} organization service areas.';

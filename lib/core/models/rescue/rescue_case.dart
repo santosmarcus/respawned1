@@ -323,6 +323,16 @@ class RescueCase {
 
   bool get hasSavedClinic => vetClinicName != null && vetClinicName!.isNotEmpty;
 
+  /// Refer → shared link (CaseReferralRepository.referByLink): who answered
+  /// and how. State is 'waiting', 'declined', 'needs_info' or 'accepted'.
+  Map<String, dynamic>? get linkReferral =>
+      raw['linkReferral'] is Map ? Map<String, dynamic>.from(raw['linkReferral'] as Map) : null;
+
+  /// Referred by shared link and nobody has taken it yet: listed under
+  /// Review, not Closed.
+  bool get isPendingLinkReferral =>
+      status == RescueStatus.referred && linkReferral != null && linkReferral!['state'] != 'accepted';
+
   /// Staff chose "Straight to shelter" on Assign Transport: the animal
   /// goes from pickup to the organization's shelter with no clinic stop.
   bool get goesToShelter => raw['transportDestination'] == 'shelter';

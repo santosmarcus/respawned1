@@ -1,6 +1,8 @@
 import 'package:intl/intl.dart';
 
+import 'package:respawnd1/core/models/rescue/rescue_case.dart';
 import 'package:respawnd1/core/models/volunteer/volunteer_event.dart';
+import 'package:respawnd1/core/utils/species_summary.dart';
 import 'package:respawnd1/core/utils/currency.dart';
 import 'package:respawnd1/features/donation/models.dart';
 
@@ -70,5 +72,25 @@ String composeEventPost(VolunteerEvent e) {
         ? 'Thank you to everyone who came! 💛'
         : 'Sign up on the ResPAWnd app (Home → Events) to get your e-ticket. See you there! 🐾',
   );
+  return lines.join('\n\n');
+}
+
+/// Suggested Facebook post text for a case referred by shared link: what
+/// the animal is, how urgent, where, and the link to take it. Never the
+/// reporter. Staff edit it in FacebookRecordPostPage before posting.
+String composeReferralPost(RescueCase c, String url) {
+  final species = summarizeSpecies(
+    animals: c.raw['animals'] as List?,
+    legacyAnimalType: c.raw['animalType'] as String?,
+  );
+  final lines = <String>['🆘 Rescue help needed: $species'];
+  final facts = <String>[
+    if ((c.urgency ?? '').trim().isNotEmpty) '⚠️ Urgency: ${c.urgency!.trim()}',
+    if ((c.address ?? '').trim().isNotEmpty) '📍 ${c.address!.trim()}',
+  ];
+  if (facts.isNotEmpty) lines.add(facts.join('\n'));
+  final condition = (c.condition ?? '').trim();
+  if (condition.isNotEmpty) lines.add(condition);
+  lines.add('Can you help? See the report and reply here: $url');
   return lines.join('\n\n');
 }

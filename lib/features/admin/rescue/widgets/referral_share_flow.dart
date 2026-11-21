@@ -116,14 +116,20 @@ Future<void> shareReferralLink(
       referralId: referralId,
       includeReporter: includeReporter,
     );
-    final to = recipientLabel == null || recipientLabel.isEmpty ? '' : ' for $recipientLabel';
-    await SharePlus.instance.share(ShareParams(
-      subject: 'Rescue referral ${shortCaseId(caseId)}',
-      text: 'Rescue referral$to (case ${shortCaseId(caseId)}). See the report and reply here: $url',
-    ));
+    await shareReferralUrl(caseId: caseId, url: url, recipientLabel: recipientLabel);
   } catch (e) {
     messenger.showSnackBar(appSnackBar(ReferralShareService.errorMessage(e), kind: AppMessageKind.error));
   }
+}
+
+/// Opens the phone's share sheet (Facebook, Messenger, SMS…) with a
+/// referral link.
+Future<void> shareReferralUrl({required String caseId, required String url, String? recipientLabel}) {
+  final to = recipientLabel == null || recipientLabel.isEmpty ? '' : ' for $recipientLabel';
+  return SharePlus.instance.share(ShareParams(
+    subject: 'Rescue referral ${shortCaseId(caseId)}',
+    text: 'Rescue referral$to (case ${shortCaseId(caseId)}). Can you help? See the report and reply here: $url',
+  ));
 }
 
 /// Confirms, then closes the referral's link.

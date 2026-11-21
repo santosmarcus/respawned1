@@ -248,13 +248,20 @@ class CaseReferralRepository {
           }
         }
       }
-      final previous = targetOrgId.isNotEmpty ? referral['previousStatus'] as String? : null;
+      // A shared-link referral keeps its id and the status it left on the case.
+      final link = c['linkReferral'] is Map ? Map<String, dynamic>.from(c['linkReferral'] as Map) : null;
+      if (link != null && referralId == null) referralId = link['referralId'] as String?;
+      final previous = targetOrgId.isNotEmpty
+          ? referral['previousStatus'] as String?
+          : link?['previousStatus'] as String?;
       final backTo = (previous == null || previous.isEmpty || previous == RescueStatus.referred.firestoreValue)
           ? RescueStatus.pendingReview.firestoreValue
           : previous;
       final targetName = targetOrgId.isNotEmpty
           ? (referral['targetOrgName'] as String? ?? 'the receiving organization')
-          : (barangay == null || barangay.isEmpty ? 'the LGU/barangay' : 'the $barangay LGU/barangay');
+          : link != null
+              ? 'the shared link'
+              : (barangay == null || barangay.isEmpty ? 'the LGU/barangay' : 'the $barangay LGU/barangay');
       if (referralId != null) {
         tx.update(_store.referralsOf(caseId).doc(referralId), {
           'status': ReferralStatus.withdrawn.name,
@@ -271,6 +278,7 @@ class CaseReferralRepository {
         fields: {
           'status': backTo,
           'referredToOrgId': FieldValue.delete(),
+          'linkReferral': FieldValue.delete(),
           'referralOutcome': {
             'status': 'withdrawn',
             'referralId': referralId,
@@ -298,20 +306,26 @@ class CaseReferralRepository {
     });
   }
 
-  Future<String> referToLgu({
+  /// Refer → shared link: a referral anyone outside the app can take
+  /// through its web link (functions/referral_shares.js), filling in their
+  /// own name and contact there. The case is Referred but stays pending in
+  /// Review (`linkReferral.state` 'waiting') until someone answers "Will
+  /// handle it" (functions/referral_share_rules.js linkReferralUpdate),
+  /// which moves it to Closed. Stored as the `localGovernmentUnit` type so
+  /// the existing link callables accept it; the report's photos go with it.
+  Future<String> referByLink({
     required String caseId,
-    required String barangay,
-    required LguReferralReason reason,
-    required String explanation,
-    bool attachReportMedia = true,
+    String note = '',
     required String actorUid,
     required String actorName,
   }) async {
     final caseSnap = await _store.caseDoc(caseId).get();
-    final mediaUrls = attachReportMedia
-        ? List<String>.from(caseSnap.data()?['photoUrls'] ?? const [])
-        : <String>[];
-
+    final data = caseSnap.data() ?? const <String, dynamic>{};
+    final current = data['status'] as String?;
+    if (current == RescueStatus.referred.firestoreValue) {
+      throw StateError('This case is already referred.');
+    }
+    final trimmed = note.trim();
     final referralRef = _store.referralsOf(caseId).doc();
     await referralRef.set({
       'type': ReferralType.localGovernmentUnit.name,
@@ -319,19 +333,26 @@ class CaseReferralRepository {
       'createdAt': FieldValue.serverTimestamp(),
       'createdByUid': actorUid,
       'createdByName': actorName,
-      'barangay': barangay,
-      'lguReason': reason.name,
-      'lguExplanation': explanation,
-      'attachedMediaUrls': mediaUrls,
+      'byLink': true,
+      if (trimmed.isNotEmpty) 'lguExplanation': trimmed,
+      'attachedMediaUrls': List<String>.from(data['photoUrls'] ?? const []),
     });
     await _store.recordAction(
       caseId: caseId,
-      statusLine: 'Referred to the $barangay LGU/barangay: ${reason.label}.',
-      fields: {'status': RescueStatus.referred.firestoreValue},
-      action: 'referred_to_lgu',
+      statusLine: 'Referred by shared link. Waiting for someone to take it.',
+      fields: {
+        'status': RescueStatus.referred.firestoreValue,
+        'linkReferral': {
+          'referralId': referralRef.id,
+          'state': 'waiting',
+          'at': Timestamp.now(),
+          'previousStatus': current,
+        },
+      },
+      action: 'referred_by_link',
       actorUid: actorUid,
       actorName: actorName,
-      details: {'barangay': barangay, 'reason': reason.name},
+      details: {'referralId': referralRef.id},
     );
     return referralRef.id;
   }

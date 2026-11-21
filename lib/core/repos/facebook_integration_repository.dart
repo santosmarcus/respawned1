@@ -176,7 +176,8 @@ class FacebookIntegrationRepository {
 
 /// Records facebookPublishRecordPost can share (functions/facebook_share_rules.js
 /// RECORD_KINDS); the name is sent as-is.
-enum FacebookRecordKind { campaign, event }
+/// `referral`: a case referred by shared link (functions/facebook_share_rules.js RECORD_KINDS).
+enum FacebookRecordKind { campaign, event, referral }
 
 /// One record in a Facebook post and the photos to attach for it, in order.
 class FacebookShareItem {

@@ -441,7 +441,7 @@ class _AssignRiderPageState extends ConsumerState<AssignRiderPage> {
                 onPressed: () => Navigator.pop(ctx, _FallbackChoice.refer),
                 style: AppButtons.primary,
                 icon: const Icon(Icons.forward_outlined, size: 18),
-                label: Text('Refer Case (Organization / LGU)', style: GoogleFonts.zain(fontWeight: FontWeight.w700)),
+                label: Text('Refer Case', style: GoogleFonts.zain(fontWeight: FontWeight.w700)),
               ),
               const SizedBox(height: 8),
               OutlinedButton.icon(

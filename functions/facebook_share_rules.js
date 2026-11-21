@@ -60,14 +60,16 @@ function normalizePublishItems(data) {
 
 /// Which records facebookPublishRecordPost can share, and the Firestore
 /// collection each lives in.
-const RECORD_KINDS = {campaign: 'campaigns', event: 'events'};
+/// `referral` is a rescue case referred by shared link (the app's Refer →
+/// Post to Facebook Page); its post links to the referral web page.
+const RECORD_KINDS = {campaign: 'campaigns', event: 'events', referral: 'cases'};
 
 /// Input for facebookPublishRecordPost: one campaign or event, the post
 /// text, and whether to attach the record's own cover photo. Throws Error
 /// with a user-facing message.
 function normalizeRecordPost(data) {
   const {kind, recordId, message, includePhoto} = data || {};
-  if (!Object.prototype.hasOwnProperty.call(RECORD_KINDS, kind)) throw new Error('Pick a campaign or an event to share.');
+  if (!Object.prototype.hasOwnProperty.call(RECORD_KINDS, kind)) throw new Error('Pick a campaign, an event or a referral to share.');
   if (typeof recordId !== 'string' || !ID_PATTERN.test(recordId)) throw new Error('Invalid record.');
   if (typeof message !== 'string' || message.trim().length === 0) throw new Error('Write the post text first.');
   if (message.length > MAX_MESSAGE_LENGTH) throw new Error(`The post text must be under ${MAX_MESSAGE_LENGTH} characters.`);
@@ -83,7 +85,17 @@ function recordPostBlockedReason(kind, record) {
     if (record.status === 'archived') return 'Archived campaigns can no longer be shared.';
   }
   if (kind === 'event' && record.status === 'cancelled') return 'Cancelled events can no longer be shared.';
+  if (kind === 'referral' && record.status !== 'referred') return 'Refer this case before sharing it.';
   return null;
+}
+
+/// The photo a record post may carry, always read from the record itself:
+/// a campaign or event's cover, or a referred case's first report photo.
+function recordPhotoUrl(kind, record) {
+  const url = kind === 'referral' ?
+    (Array.isArray(record.photoUrls) ? record.photoUrls[0] : null) :
+    record.imageUrl;
+  return typeof url === 'string' && /^https:\/\//i.test(url) ? url : null;
 }
 
 module.exports = {
@@ -95,4 +107,5 @@ module.exports = {
   normalizePublishItems,
   normalizeRecordPost,
   recordPostBlockedReason,
+  recordPhotoUrl,
 };
