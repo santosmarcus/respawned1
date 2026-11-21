@@ -233,7 +233,7 @@ class ActionRequiredSection extends ConsumerWidget {
     // filtered to urgency=='Critical'.
     final reviewList = reviewCases.value;
     if (reviewList != null) {
-      final critical = reviewList.where((c) => c.urgency == 'Critical').length;
+      final critical = reviewList.where((c) => c.urgency == 'Critical' && c.countsAsOrgWorkload).length;
       if (critical > 0) {
         rows.add(_AlertRow(
           icon: Icons.priority_high,
@@ -578,7 +578,7 @@ class CurrentOperationsSection extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final review = ref.watch(casesForTabProvider(RescuePipelineTab.review));
+    final reviewAll = ref.watch(casesForTabProvider(RescuePipelineTab.review));
     final assign = ref.watch(casesForTabProvider(RescuePipelineTab.assign));
     final ongoing = ref.watch(casesForTabProvider(RescuePipelineTab.ongoing));
     final treatment = ref.watch(casesForTabProvider(RescuePipelineTab.treatment));
@@ -593,6 +593,11 @@ class CurrentOperationsSection extends ConsumerWidget {
     final transporters = ref.watch(petTransportersProvider);
 
     int? lenOf(AsyncValue<List<dynamic>> a) => a.value?.length;
+
+    // Reporter-led neglect/abuse reports and surrenders waiting in review
+    // are counted apart: visible for awareness, not organization workload.
+    final review = reviewAll.whenData((l) => l.where((c) => c.countsAsOrgWorkload).toList());
+    final awarenessOnly = reviewAll.value?.where((c) => !c.countsAsOrgWorkload).length;
 
     final activeRescueCases = [review, assign, ongoing, treatment, intake]
         .map(lenOf)
@@ -637,6 +642,11 @@ class CurrentOperationsSection extends ConsumerWidget {
         _KpiCard(
           value: v(review.value?.where((c) => c.urgency == 'Critical').length),
           label: 'Critical rescue reports',
+          onTap: () => _pushRescue(context, ref, RescuePipelineTab.review),
+        ),
+        _KpiCard(
+          value: v(awarenessOnly),
+          label: 'Reporter-led / surrender reports (awareness)',
           onTap: () => _pushRescue(context, ref, RescuePipelineTab.review),
         ),
         _KpiCard(

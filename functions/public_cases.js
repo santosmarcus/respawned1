@@ -32,10 +32,17 @@ const PUBLIC_FIELDS = [
   // The reporter's Community Adoption profile for each animal, shown on
   // the adoption page's Community Adoption section (community_profile.dart).
   'communityListing',
+  // Whether the organization is expected to act (org_involvement.js).
+  'orgInvolvement',
 ];
 
+// The report form saves 'Pet Surrender'; 'surrender' is kept for older or
+// hand-written documents. (Before this matched both, the form's surrender
+// reports were published with the owner's full address.)
+const SURRENDER_TYPES = ['surrender', 'pet surrender'];
+
 function isSurrender(data) {
-  return String(data.rescueType || '').trim().toLowerCase() === 'surrender';
+  return SURRENDER_TYPES.includes(String(data.rescueType || '').trim().toLowerCase());
 }
 
 const round3 = (v) => (typeof v === 'number' ? Math.round(v * 1000) / 1000 : v);
@@ -58,6 +65,7 @@ function publicCaseOf(data) {
 }
 
 exports.publicCaseOf = publicCaseOf;
+exports.isSurrender = isSurrender;
 
 exports.syncPublicCase = onDocumentWritten('cases/{caseId}', async (event) => {
   const after = event.data && event.data.after.exists ? event.data.after.data() : null;

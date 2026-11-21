@@ -259,6 +259,39 @@ describe('cases', () => {
     await assertFails(as('reporter').collection('cases').add({ reporterId: 'stranger', status: 'pending' }));
   });
 
+  test('reporters cannot re-rate the assessed urgency of their report', async () => {
+    await env.withSecurityRulesDisabled((ctx) => ctx.firestore().doc('cases/rated').set({
+      reporterId: 'reporter', organizationId: '', status: 'pending', urgency: 'Low',
+      urgencyAssessment: { level: 'Low' }, orgInvolvement: 'org_assist',
+    }));
+    await assertFails(as('reporter').doc('cases/rated').update({ urgency: 'Critical' }));
+    await assertFails(as('reporter').doc('cases/rated').update({ urgencyAssessment: { level: 'Critical' } }));
+    await assertSucceeds(as('reporter').doc('cases/rated').update({ condition: 'More detail' }));
+  });
+
+  test('a reporter-led abuse report can only become a request for organization help', async () => {
+    await env.withSecurityRulesDisabled((ctx) => ctx.firestore().doc('cases/selfReported').set({
+      reporterId: 'reporter', organizationId: '', status: 'pending', rescueType: 'Neglect or Abuse',
+      orgInvolvement: 'independent_report', abuseReportPath: 'independent',
+    }));
+    // Updating what they filed with the authorities is fine.
+    await assertSucceeds(as('reporter').doc('cases/selfReported').update({
+      independentReport: { alreadyReported: true, reportedTo: 'Barangay hall' },
+    }));
+    // Any other involvement change is refused.
+    await assertFails(as('reporter').doc('cases/selfReported').update({ orgInvolvement: 'not_org_facilitated' }));
+    await assertFails(as('stranger').doc('cases/selfReported').update({
+      orgInvolvement: 'org_assist', abuseReportPath: 'org_assistance',
+    }));
+    await assertSucceeds(as('reporter').doc('cases/selfReported').update({
+      orgInvolvement: 'org_assist', abuseReportPath: 'org_assistance',
+    }));
+    // ...and it can't be turned back once the organization is asked.
+    await assertFails(as('reporter').doc('cases/selfReported').update({
+      orgInvolvement: 'independent_report', abuseReportPath: 'independent',
+    }));
+  });
+
   test('reporters cannot stamp a new report with an organization', async () => {
     await assertFails(as('reporter').collection('cases').add({ reporterId: 'reporter', organizationId: 'orgA', status: 'pending' }));
     await assertFails(as('reporter').collection('cases').add({ reporterId: 'reporter', organizationId: 'orgB', status: 'pending' }));

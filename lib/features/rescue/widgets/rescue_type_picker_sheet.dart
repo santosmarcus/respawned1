@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 import 'package:respawnd1/app_theme.dart';
+import 'package:respawnd1/core/models/rescue/org_involvement.dart';
 import 'package:respawnd1/features/rescue/rescue_form_options.dart';
 
 /// Rescue Type picker; resolves to the chosen label, or null if dismissed.
@@ -58,7 +59,7 @@ Future<String?> showRescueTypePickerSheet(
                 itemBuilder: (context, index) {
                   final option = kRescueTypeOptions[index];
                   final isSelected = option['label'] == selectedType;
-                  final urgency = option['urgency'];
+                  final community = isNonOrgFacilitatedRescueType(option['label']);
                   return ListTile(
                     contentPadding: EdgeInsets.zero,
                     title: Row(
@@ -73,7 +74,7 @@ Future<String?> showRescueTypePickerSheet(
                             ),
                           ),
                         ),
-                        if (urgency != null) ...[
+                        if (community) ...[
                           const SizedBox(width: 8),
                           Container(
                             padding: const EdgeInsets.symmetric(
@@ -81,17 +82,15 @@ Future<String?> showRescueTypePickerSheet(
                               vertical: 2,
                             ),
                             decoration: BoxDecoration(
-                              color: urgencyColorFor(
-                                urgency,
-                              ).withValues(alpha: 0.15),
+                              color: AppColors.slaterspwn.withValues(alpha: 0.15),
                               borderRadius: BorderRadius.circular(20),
                               border: Border.all(
-                                color: urgencyColorFor(urgency),
+                                color: AppColors.slaterspwn,
                                 width: 1,
                               ),
                             ),
                             child: Text(
-                              urgency,
+                              'Community report',
                               style: GoogleFonts.zain(
                                 fontSize: 10,
                                 fontWeight: FontWeight.w700,

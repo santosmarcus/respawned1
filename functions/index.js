@@ -6,6 +6,7 @@ const admin = require('firebase-admin');
 
 admin.initializeApp();
 const {orgMemberUids, requireOrgPermission} = require('./org_access');
+const orgInvolvement = require('./org_involvement');
 const db = admin.firestore();
 
 exports.getOrCreateRescueSession = onCall(async (request) => {
@@ -347,6 +348,30 @@ function orgCoversPoint(org, lat, lng) {
     haversineKm(lat, lng, a.lat, a.lng) <= a.radiusKm);
 }
 
+/// Staff push for a new case in their coverage area. Wording depends on
+/// whether the organization is asked to act (org_involvement.js): a
+/// surrender or a reporter-led neglect/abuse report is for awareness only.
+function serviceAreaMessage(c, isCritical) {
+  switch (orgInvolvement.involvementOf(c)) {
+    case orgInvolvement.INDEPENDENT_REPORT:
+      return {
+        title: 'Neglect/abuse report in your service area (reporter-led)',
+        body: 'The reporter is taking this to the authorities themselves. ' +
+          'Review it and assist only if your capacity allows.',
+      };
+    case orgInvolvement.NOT_ORG_FACILITATED:
+      return {
+        title: 'Surrender report in your service area',
+        body: 'For awareness: your organization is not asked to facilitate it.',
+      };
+    default:
+      return {
+        title: isCritical ? 'URGENT: Critical case in your service area' : 'New case in your service area',
+        body: 'A rescue report was filed inside your organization\'s coverage area. Tap to review it.',
+      };
+  }
+}
+
 async function assignCaseToServiceAreas({caseRef, caseId, c, isCritical}) {
   const orgsSnap = await db
     .collection('organizations')
@@ -397,10 +422,7 @@ async function assignCaseToServiceAreas({caseRef, caseId, c, isCritical}) {
   for (let i = 0; i < list.length; i += FCM_MULTICAST_LIMIT) {
     await admin.messaging().sendEachForMulticast({
       tokens: list.slice(i, i + FCM_MULTICAST_LIMIT),
-      notification: {
-        title: isCritical ? 'URGENT: Critical case in your service area' : 'New case in your service area',
-        body: 'A rescue report was filed inside your organization\'s coverage area. Tap to review it.',
-      },
+      notification: serviceAreaMessage(c, isCritical),
       data: toFcmData({type: 'new_case_service_area', caseId}),
     });
   }
@@ -424,6 +446,10 @@ exports.notifyNewCaseReported = onDocumentCreated(
 
     // Which organizations' coverage geofences contain this case?
     await assignCaseToServiceAreas({caseRef: snap.ref, caseId, c, isCritical});
+
+    // Surrenders and reporter-led neglect/abuse reports are not calls for
+    // help: no responder or public broadcast (org_involvement.js).
+    if (!orgInvolvement.broadcastsForHelp(c)) return;
 
     // Responders: wider geofence + "view and accept" wording.
     await notifyNearbyUsers({
@@ -475,6 +501,8 @@ exports.notifyUnconfirmedReports = onSchedule('every 5 minutes', async () => {
     if (DISMISSED_STATUSES.includes(status)) continue;
     if (isFinalStatus(status)) continue;
     if (c.lat == null || c.lng == null) continue;
+    // Not a call for help (surrender, reporter-led report): no nudges.
+    if (!orgInvolvement.broadcastsForHelp(c)) continue;
 
     const reportsSnap = await caseDoc.ref
       .collection('communityReports')
@@ -2293,6 +2321,32 @@ exports.followUpAdopterPickups = onSchedule('every 30 minutes', async () => {
       console.error('[followUpAdopterPickups] failed for', doc.ref.path, e);
     }
   }
+});
+
+// ---- Reporter-led report turned into a request for help -----------------
+//
+// A Neglect or Abuse reporter who first chose to report to the authorities
+// themselves can ask the organization for help from Track Case
+// (independent_report_section.dart), which flips orgInvolvement to
+// org_assist. Tell the rescue staff of the organizations covering it.
+exports.notifyOrgAssistanceRequested = onDocumentUpdated('cases/{caseId}', async (event) => {
+  const before = event.data.before.data();
+  const after = event.data.after.data();
+  if (!before || !after) return;
+  if (orgInvolvement.involvementOf(before) !== orgInvolvement.INDEPENDENT_REPORT) return;
+  if (orgInvolvement.involvementOf(after) !== orgInvolvement.ORG_ASSIST) return;
+  const orgIds = criticalEscalation.escalationOrgIds(after);
+  if (!orgIds.length) return;
+  const uids = new Set();
+  for (const orgId of orgIds) {
+    for (const uid of await orgMemberUids(db, orgId, {anyOf: ['rescue']})) uids.add(uid);
+  }
+  uids.delete(after.reporterId);
+  await notifyStaff([...uids], {
+    title: after.urgency === 'Critical' ? 'URGENT: reporter asks for help with an abuse case' : 'Reporter asks for help with a neglect/abuse case',
+    body: 'A reporter who was handling this with the authorities now asks your organization for assistance. Tap to review it.',
+    data: {type: 'org_assistance_requested', caseId: event.params.caseId},
+  });
 });
 
 // ---- Critical reports left unreviewed ---------------------

@@ -7,12 +7,16 @@ import 'package:respawnd1/features/rescue/rescue_form_controller.dart';
 import 'package:respawnd1/features/rescue/widgets/abandonment_fields.dart';
 import 'package:respawnd1/features/rescue/widgets/found_animal_card.dart';
 import 'package:respawnd1/features/rescue/widgets/neglect_abuse_fields.dart';
+import 'package:respawnd1/features/rescue/widgets/neglect_abuse_path_section.dart';
+import 'package:respawnd1/features/rescue/widgets/urgency_assessment_card.dart';
 import 'package:respawnd1/features/rescue/widgets/rescue_form_fields.dart';
 import 'package:respawnd1/core/utils/validators.dart';
 
 /// Details for every rescue type other than Pet Surrender and Lost Pet:
-/// urgency, condition, animals, on-site/access, shelter coordination,
-/// witnesses, adoption interest and anonymity.
+/// the Neglect or Abuse path choice, condition, animals with the live
+/// urgency assessment, on-site/access, and (when the organization is asked
+/// to act) shelter coordination, witnesses and adoption interest, then
+/// anonymity.
 class StrayReportFields extends StatelessWidget {
   const StrayReportFields({
     super.key,
@@ -36,17 +40,14 @@ class StrayReportFields extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       mainAxisSize: MainAxisSize.min,
       children: [
-        if (form.selectedRescueType != null) ...[
-          RescueUrgencyCard(
-            rescueType: form.selectedRescueType!,
-            urgency: form.selectedUrgency,
-          ),
-          const SizedBox(height: 20),
-        ],
         // Neglect or Abuse opens with its guidance note and "What are you
-        // seeing?" before the condition and the animals.
+        // seeing?" before the condition and the animals, then the choice
+        // between asking the organization for help and reporting it
+        // yourself with the guide.
         if (form.isNeglectAbuseType) ...[
           NeglectAbuseIntro(form: form, onChanged: onChanged),
+          const SizedBox(height: 20),
+          NeglectAbusePathSection(form: form, onChanged: onChanged),
           const SizedBox(height: 20),
         ],
 
@@ -89,6 +90,12 @@ class StrayReportFields extends StatelessWidget {
           rescueType: form.selectedRescueType,
         ),
 
+        // Urgency is assessed from the answers above, never picked by hand.
+        if (form.urgencyAssessment case final assessment?) ...[
+          const SizedBox(height: 8),
+          UrgencyAssessmentCard(assessment: assessment, isEstimate: true),
+        ],
+
         const SizedBox(height: 20),
 
         if (form.isNeglectAbuseType) ...[
@@ -130,6 +137,9 @@ class StrayReportFields extends StatelessWidget {
 
         const SizedBox(height: 20),
 
+        // Organization coordination, witnesses and adoption interest only
+        // apply when the reporter asks the organization to act.
+        if (form.asksOrgCoordination) ...[
         // Coordinate with shelter — one answer only, so radio tiles.
         RescueFieldLabel(
           'Would you be willing to coordinate with the shelter to assist in the rescue?',
@@ -329,7 +339,9 @@ class StrayReportFields extends StatelessWidget {
           ),
         ],
 
-        if (form.selectedRescueType == 'Neglect or Abuse') ...[
+        ],
+
+        if (form.isNeglectAbuseType) ...[
           const SizedBox(height: 20),
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,

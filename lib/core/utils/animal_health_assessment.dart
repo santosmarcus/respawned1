@@ -156,3 +156,40 @@ const List<String> kEnvironmentSafetyOptions = [
   'Around busy roads',
   'In dirty cages',
 ];
+
+/// Single-select. The reporter's own description of the worst visible
+/// injury — the urgency assessment (core/utils/urgency_assessment.dart)
+/// weighs it together with every other answer, never on its own.
+const String kInjuryNone = 'No visible injury';
+const String kInjuryMinor = 'Minor (small cut, scratch or scab)';
+const String kInjuryModerate = 'Moderate (open wound, swelling, injured limb)';
+const String kInjurySevere = 'Severe (deep wound, exposed bone, suspected fracture)';
+const String kInjuryLifeThreatening = 'Life-threatening (heavy or uncontrolled bleeding)';
+
+const List<String> kInjuryOptions = [
+  kInjuryNone,
+  kInjuryMinor,
+  kInjuryModerate,
+  kInjurySevere,
+  kInjuryLifeThreatening,
+  kNotAssessedOption,
+];
+
+/// Single-select, asked only when an injury is reported. The app does not
+/// analyze photos itself: this records what the reporter says the photos
+/// show, so staff know whether they can check the injury from them.
+const List<String> kInjuryPhotoOptions = [
+  'Yes, the injury is visible in my photos',
+  'No, the photos do not show it',
+];
+
+/// Female-only, single-select. Reporter observations, never a diagnosis:
+/// only a veterinarian can confirm a pregnancy (see
+/// PregnancyStatus / `vetConfirmedPregnancy` on the animal record side).
+const List<String> kLitterOptions = ['Yes', 'No', 'Not sure'];
+const List<String> kSuspectedPregnancyOptions = ['Yes, suspected', 'No', 'Not sure'];
+
+/// Clears answers that only apply to a female animal. Call whenever the
+/// sex changes away from Female, so a report never carries a litter or
+/// pregnancy answer for a male or unsexed animal.
+bool sexAllowsPregnancyQuestions(String? sex) => sex == 'Female';

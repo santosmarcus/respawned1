@@ -3,7 +3,9 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 import 'package:respawnd1/app_theme.dart';
+import 'package:respawnd1/core/utils/animal_health_assessment.dart';
 import 'package:respawnd1/features/rescue/rescue_form_controller.dart';
+import 'package:respawnd1/features/rescue/widgets/female_animal_questions.dart';
 import 'package:respawnd1/features/rescue/widgets/health_behavior_assessment.dart';
 import 'package:respawnd1/features/rescue/widgets/rescue_form_fields.dart';
 import 'package:respawnd1/features/rescue/widgets/risk_fields_row.dart';
@@ -132,13 +134,12 @@ class FoundAnimalCard extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // With two or more animals (canRemove) the header opens and
-          // closes the card; a single animal is always open.
+          // The header opens and closes every card, a single animal's too.
+          // The answers live on the entry, so closing a card never resets
+          // them; a failed submit reopens the card with the error.
           GestureDetector(
             behavior: HitTestBehavior.opaque,
-            onTap: canRemove
-                ? () => _set(() => entry.expanded = !entry.expanded)
-                : null,
+            onTap: () => _set(() => entry.expanded = !entry.expanded),
             child: Row(
               children: [
                 Expanded(
@@ -165,7 +166,7 @@ class FoundAnimalCard extends StatelessWidget {
                           ),
                         ],
                       ),
-                      if (canRemove && !entry.expanded && _summary.isNotEmpty)
+                      if (!entry.expanded && _summary.isNotEmpty)
                         Text(
                           _summary,
                           style: GoogleFonts.zain(
@@ -176,13 +177,16 @@ class FoundAnimalCard extends StatelessWidget {
                     ],
                   ),
                 ),
+                Icon(
+                  entry.expanded
+                      ? Icons.keyboard_arrow_up
+                      : Icons.keyboard_arrow_down,
+                  color: AppColors.textPrimary,
+                  semanticLabel: entry.expanded
+                      ? 'Collapse animal ${index + 1}'
+                      : 'Expand animal ${index + 1}',
+                ),
                 if (canRemove) ...[
-                  Icon(
-                    entry.expanded
-                        ? Icons.keyboard_arrow_up
-                        : Icons.keyboard_arrow_down,
-                    color: AppColors.textPrimary,
-                  ),
                   const SizedBox(width: 4),
                   IconButton(
                     tooltip: 'Remove this animal',
@@ -198,8 +202,8 @@ class FoundAnimalCard extends StatelessWidget {
               ],
             ),
           ),
-          if (!canRemove || entry.expanded) ..._body(),
-          if (canRemove && !entry.expanded && entry.hasAssessmentError) ...[
+          if (entry.expanded) ..._body(),
+          if (!entry.expanded && entry.hasAssessmentError) ...[
             const SizedBox(height: 6),
             Text(
               'Incomplete — tap to finish this animal.',
@@ -273,6 +277,8 @@ class FoundAnimalCard extends StatelessWidget {
                 DropdownMenuItem(value: 'Female', child: Text('Female')),
                 DropdownMenuItem(value: 'Unsure', child: Text('Unsure')),
               ],
+              // The setter clears the litter/pregnancy answers when the
+              // animal is no longer Female.
               onChanged: (v) => _set(() => entry.sex = v),
             ),
           ),
@@ -311,6 +317,10 @@ class FoundAnimalCard extends StatelessWidget {
       ],
       const SizedBox(height: 10),
       RescueTextField(entry.colorController, 'Color / Distinguishing markings'),
+      if (sexAllowsPregnancyQuestions(entry.sex)) ...[
+        const SizedBox(height: 14),
+        FemaleAnimalQuestions(entry: entry, onChanged: onChanged),
+      ],
       if (entry.hasAssessmentError) ...[
         const SizedBox(height: 10),
         Row(

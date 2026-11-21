@@ -213,6 +213,9 @@ class NotificationService {
       case 'quarantine_ended':
       // respondToReferralShare: someone answered a referral link.
       case 'referral_response':
+      // notifyOrgAssistanceRequested: a reporter-led neglect/abuse report
+      // now asks the organization for help.
+      case 'org_assistance_requested':
       // Staff pushes about one case (functions/dashboard_ops.js and
       // functions/index.js): specialized handling needed, an unreviewed
       // critical report, a rescue adoption request or a missed pickup.

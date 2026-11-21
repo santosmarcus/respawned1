@@ -2,6 +2,8 @@
 // alert claims (Dashboard gap 7). Used by functions/dashboard_ops.js; no
 // Firebase here, so `node --test` checks them.
 
+const {countsAsOrgWorkload} = require('./org_involvement');
+
 /// Keep equal to kAlertClaimTtl in
 /// lib/features/adminhome/dashboard/alert_claims.dart.
 const ALERT_CLAIM_TTL_HOURS = 24;
@@ -49,6 +51,9 @@ function digestCounts({cases = [], adoptions = [], followUps = [], payments = []
   };
   for (const k of cases) {
     const s = k.status;
+    // Surrenders and reporter-led neglect/abuse reports waiting in review
+    // are not organization workload (org_involvement.js).
+    if (!countsAsOrgWorkload(k)) continue;
     if (REVIEW.includes(s)) {
       if (k.urgency === CRITICAL) c.criticalReview++; else c.review++;
     } else if (NEEDS_CLINIC.includes(s)) c.needsClinic++;

@@ -7,6 +7,8 @@ import 'package:firebase_storage/firebase_storage.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:image_picker/image_picker.dart';
 
+import 'package:respawnd1/core/utils/animal_health_assessment.dart';
+import 'package:respawnd1/core/models/rescue/org_involvement.dart';
 import 'package:respawnd1/core/models/rescue/report_verification.dart';
 import 'package:respawnd1/features/collartag/collar_tag_data_model.dart';
 import 'package:respawnd1/features/rescue/rescue_form_controller.dart';
@@ -146,6 +148,10 @@ class RescueReportService {
       for (final animal in validAnimals) animalDetailsMap(form, animal),
     ];
 
+    final involvement = form.orgInvolvement;
+    final assessment = form.urgencyAssessment;
+    final asksOrg = form.asksOrgCoordination;
+
     final surrenderReasonValue =
     form.surrenderReason == 'Other (please specify)'
         ? 'Other: ${form.surrenderReasonOtherController.text.trim()}'
@@ -171,7 +177,25 @@ class RescueReportService {
     'escapeRisk': animalsArray.first['escapeRisk'],
     'rescueType': form.selectedRescueType,
     'condition': condition,
-    'urgency': form.selectedUrgency,
+    // Assessed from the animals' answers (urgency_assessment.dart); none
+    // for report types the organization does not triage.
+    'urgency': assessment?.level,
+    if (assessment != null)
+    'urgencyAssessment': {
+    ...assessment.toMap(),
+    'assessedAt': FieldValue.serverTimestamp(),
+    },
+    'orgInvolvement': involvement.firestoreValue,
+    if (form.isNeglectAbuseType) 'abuseReportPath': form.abuseReportPath,
+    // Reporter-led path: what they have filed so far, from the "Reporting
+    // to Authorities" answers; updated later from Track Case.
+    if (form.isIndependentAbuseReport)
+    'independentReport': {
+    'alreadyReported': form.neglectReportedToAuthorities == 'Yes',
+    if (form.neglectReportedToAuthorities == 'Yes')
+    'referenceNumber': form.neglectReportReferenceController.text.trim(),
+    'updatedAt': Timestamp.now(),
+    },
     if (!form.isPetSurrenderType) 'onSite': form.onSiteChoice,
     if (!form.isPetSurrenderType)
     'accessInstructions': form.accessInstructionsController.text.trim(),
@@ -186,13 +210,13 @@ class RescueReportService {
         : form.addressController.text.trim(),
     'lat': location.latitude,
     'lng': location.longitude,
-    if (!form.isPetSurrenderType)
-    'coordinateWithShelter': form.coordinateChoice,
-    if (!form.isPetSurrenderType)
-    'witnessName': form.witnessNameController.text.trim(),
-    if (!form.isPetSurrenderType)
-    'witnessPhone': form.witnessNumberController.text.trim(),
-    if (!form.isPetSurrenderType) 'interestedToAdopt': form.adoptionChoice,
+    // Organization coordination answers: only asked when the reporter
+    // wants the organization to act (not on surrenders or reporter-led
+    // neglect/abuse reports).
+    if (asksOrg) 'coordinateWithShelter': form.coordinateChoice,
+    if (asksOrg) 'witnessName': form.witnessNameController.text.trim(),
+    if (asksOrg) 'witnessPhone': form.witnessNumberController.text.trim(),
+    if (asksOrg) 'interestedToAdopt': form.adoptionChoice,
     // Pet Surrender's own question set — see SurrenderFields.
     if (form.isPetSurrenderType) 'surrenderReason': surrenderReasonValue,
     if (form.isPetSurrenderType && form.surrenderNeedsExplanation)
@@ -241,7 +265,17 @@ class RescueReportService {
     'status': 'pending',
     'statusHistory': [
     {
-    'status': 'Rescue case is being reviewed.',
+    'status': switch (involvement) {
+    OrgInvolvement.orgAssist => 'Rescue case is being reviewed.',
+    OrgInvolvement.independentReport =>
+    'Report recorded. You chose to report this to the authorities '
+    'yourself; the organization can see it and may assist if its '
+    'capacity and coverage allow.',
+    OrgInvolvement.notFacilitated =>
+    'Surrender report recorded. The organization does not facilitate '
+    'surrenders; nearby organizations may reach out if they are able '
+    'to help.',
+    },
     'timestamp': Timestamp.now(),
     },
     ],
@@ -280,8 +314,8 @@ class RescueReportService {
     return primaryCaseId;
   }
 
-  /// Creates the lost/found pet alert(s), optional linked rescue case,
-  /// and uploads media. Creating a petAlerts doc triggers
+  /// Creates the lost/found pet alert(s) and uploads media. (No rescue
+  /// case: the organization does not handle lost-pet reports.) Creating a petAlerts doc triggers
   /// scorePetAlertMatches (functions/pet_matching.js), which scores it
   /// against open reports and writes `possibleMatches`.
   Future<void> submitLostPetReport({
@@ -300,7 +334,6 @@ class RescueReportService {
     final alertsCollection = _db.collection('petAlerts');
     String? groupId;
     final createdDocIds = <String>[];
-    String? linkedCaseId;
 
     if (form.isOwner == true) {
       final docRef = await alertsCollection.add({
@@ -358,41 +391,6 @@ class RescueReportService {
       createdDocIds.add(docRef.id);
       await docRef.update({'groupId': groupId});
     } else {
-      // Optional linked rescue case if the finder needs pickup/medical help.
-      if (form.finderNeedsRescue) {
-        final caseRef = await _db.collection('cases').add({
-          'organizationId': '',
-          'reporterId': uid,
-          'reporterName': reporterName,
-          'reporterPhone': form.finderContactController.text.trim(),
-          'animalType': form.foundAnimals.first.speciesText,
-          'rescueType': 'Lost Pet',
-          // The finder form has no free-text condition: staff get the
-          // first animal's Health & Behavior Assessment as a summary, and
-          // every animal's full answers on the linked petAlerts docs.
-          'condition': animalHealthSummary(form.foundAnimals.first),
-          'urgency': form.selectedUrgency,
-          'address': form.addressController.text.trim().isEmpty
-              ? pinnedAddress
-              : form.addressController.text.trim(),
-          'lat': location.latitude,
-          'lng': location.longitude,
-          'scannedTagId': form.scannedTagId,
-          'status': 'pending',
-          'statusHistory': [
-            {
-              'status':
-              'Suspected lost pet reported — awaiting pickup assignment.',
-              'timestamp': Timestamp.now(),
-            },
-          ],
-          'photoUrls': [],
-          'createdAt': Timestamp.now(),
-          'serverCreatedAt': FieldValue.serverTimestamp(),
-        });
-        linkedCaseId = caseRef.id;
-      }
-
       for (int i = 0; i < form.foundAnimals.length; i++) {
         final a = form.foundAnimals[i];
         final docRef = await alertsCollection.add({
@@ -406,9 +404,12 @@ class RescueReportService {
           // page and to staff of the linked case).
           ...animalDetailsMap(form, a),
           'animalStatus': form.animalStatus,
-          'needsRescue': form.finderNeedsRescue,
-          'urgency': form.finderNeedsRescue ? form.selectedUrgency : null,
-          'linkedCaseId': linkedCaseId,
+          // The organization does not handle lost-pet reports; an animal
+          // needing help is filed as a rescue report instead (see
+          // FinderFields). Kept for readers of older alerts.
+          'needsRescue': false,
+          'urgency': null,
+          'linkedCaseId': null,
           'address': form.addressController.text.trim().isEmpty
               ? pinnedAddress
               : form.addressController.text.trim(),
@@ -443,15 +444,6 @@ class RescueReportService {
     if (media.photoUrls.isNotEmpty || media.videoUrls.isNotEmpty) {
       for (final id in createdDocIds) {
         await alertsCollection.doc(id).update({
-          'photoUrls': media.photoUrls,
-          'videoUrls': media.videoUrls,
-        });
-      }
-      // The linked rescue case (finder needs pickup) is what the pet
-      // transporter reviews — give it the same photos/videos, otherwise
-      // the transporter only sees empty media boxes.
-      if (linkedCaseId != null) {
-        await _db.collection('cases').doc(linkedCaseId).update({
           'photoUrls': media.photoUrls,
           'videoUrls': media.videoUrls,
         });
@@ -505,6 +497,17 @@ Map<String, dynamic> animalDetailsMap(
       : animal.environmentSafety.toList(),
   'biteRisk': animal.biteRisk,
   'escapeRisk': animal.escapeRisk,
+  // Visible injury (reporter's description) and whether their photos show
+  // it — the app does not analyze photos itself. Not asked on surrenders.
+  if (!form.isPetSurrenderType) 'injury': animal.injury,
+  if (!form.isPetSurrenderType && animal.asksInjuryPhotos)
+    'injuryVisibleInPhotos': animal.injuryVisibleInPhotos,
+  // Female only, and only the reporter's observation: never a confirmed
+  // pregnancy.
+  if (sexAllowsPregnancyQuestions(animal.sex)) ...{
+    'hasLitter': animal.hasLitter,
+    'suspectedPregnancy': animal.suspectedPregnancy,
+  },
   // Injury, Illness, Neglect or Abuse — asked per animal.
   if (form.asksVisibleSigns) ...{
     'visibleSigns': animal.visibleSigns.toList(),

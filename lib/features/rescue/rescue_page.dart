@@ -15,7 +15,6 @@ import 'package:respawnd1/features/collartag/scan_tag_flow.dart';
 import 'package:respawnd1/features/collartag/pet_found_chat.dart';
 import 'package:respawnd1/core/models/rescue/report_verification.dart';
 import 'package:respawnd1/features/rescue/rescue_form_controller.dart';
-import 'package:respawnd1/features/rescue/rescue_form_options.dart';
 import 'package:respawnd1/features/rescue/services/rescue_geocoding_service.dart';
 import 'package:respawnd1/features/rescue/services/rescue_report_service.dart';
 import 'package:respawnd1/features/rescue/widgets/lost_pet_fields.dart';
@@ -281,10 +280,8 @@ class _RescuePageState extends State<RescuePage> {
     );
 
     if (selected != null) {
-      setState(() {
-        _form.selectedRescueType = selected;
-        _form.selectedUrgency = urgencyForRescueType(selected);
-      });
+      // Urgency is assessed from the animals' answers, not the type.
+      setState(() => _form.selectedRescueType = selected);
     }
   }
 
@@ -671,6 +668,12 @@ class _RescuePageState extends State<RescuePage> {
                       form: _form,
                       pinnedAddress: _pinnedAddress,
                       onChanged: _onFormChanged,
+                      // A found animal that needs pickup or medical care is
+                      // a rescue report, not a lost-pet listing: switch the
+                      // form over, keeping the animals already entered.
+                      onSwitchToRescue: () => setState(
+                        () => _form.selectedRescueType = 'Injury',
+                      ),
                     ),
                   ],
                 ],

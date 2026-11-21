@@ -396,7 +396,8 @@ class CaseSummaryPage extends StatelessWidget {
             _DetailRow('Type of Rescue', caseData['rescueType']),
             _DetailRow('Description', caseData['condition']),
             _AnimalGroupSection(caseId: caseId, data: caseData),
-            _DetailRow('Urgency', caseData['urgency']),
+            // Surrender reports carry no urgency.
+            if (caseData['urgency'] != null) _DetailRow('Urgency', caseData['urgency']),
             _DetailRow('Containment Status', caseData['containmentStatus']),
             if ((caseData['strayTemperament'] as String?)?.isNotEmpty ?? false)
               _DetailRow('Approachability / Bite Risk',

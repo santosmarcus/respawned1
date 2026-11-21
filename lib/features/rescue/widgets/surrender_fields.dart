@@ -51,6 +51,35 @@ class SurrenderFields extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       mainAxisSize: MainAxisSize.min,
       children: [
+        // The organization does not facilitate surrenders: say so before
+        // the owner fills anything in, so the report never reads as a
+        // request the organization has agreed to handle.
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: AppColors.slaterspwn.withValues(alpha: 0.15),
+            borderRadius: BorderRadius.circular(10),
+          ),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Icon(Icons.info_outline, size: 18, color: AppColors.textPrimary),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  'The organization does not facilitate pet surrenders, and '
+                  'submitting this does not mean it will take in your pet. '
+                  'Your report is recorded, and nearby organizations may reach '
+                  'out if they are able to help with rehoming.',
+                  style: GoogleFonts.zain(fontSize: 13, color: AppColors.textPrimary),
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 20),
+
         // Describe Condition — still relevant (helps staff prep for intake).
         RescueFieldLabel('Describe Condition', required: true),
         const SizedBox(height: 6),

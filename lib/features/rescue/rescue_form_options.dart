@@ -1,6 +1,7 @@
 // Extracted from rescue_page.dart (behavior-preserving refactor).
 import 'package:flutter/material.dart';
 
+import 'package:respawnd1/core/models/rescue/org_involvement.dart';
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/core/models/rescue/animal_characteristics.dart';
 
@@ -291,57 +292,45 @@ String medicalQuestionFor(String? rescueType) => switch (rescueType) {
   _ => 'Does the animal need immediate medical attention?',
 };
 
-// Rescue Type options — each type carries its own inherent urgency level,
-// so reporters are no longer asked to separately self-assess urgency.
+// Rescue Type options. Urgency is no longer tied to the type: it is
+// assessed from the reporter's answers for each animal
+// (core/utils/urgency_assessment.dart). Pet Surrender and Lost Pet are
+// community reports the organization does not facilitate
+// (OrgInvolvement.notFacilitated), so they carry no urgency at all.
 const List<Map<String, String>> kRescueTypeOptions = [
   {
-    'label': 'Pet Surrender',
-    'description': 'Voluntary ownership surrender',
-    'urgency': 'Low',
+    'label': kRescueTypePetSurrender,
+    'description': 'Rehoming your own pet. The organization does not '
+        'facilitate surrenders; nearby organizations may reach out if they can help.',
   },
   {
-    'label': 'Lost Pet',
-    'description': 'Owner reporting a missing pet for reunification',
-    'urgency': 'Low',
+    'label': kRescueTypeLostPet,
+    'description': 'Owner or finder of a missing pet. Posted to the community '
+        'lost-and-found board for matching.',
   },
   {
     'label': 'Abandonment',
     'description': 'Animal left without care',
-    'urgency': 'Medium',
   },
   {
     'label': 'Illness',
     'description':
     'Appears weak, vomiting, coughing, skin disease; suspected illness',
-    'urgency': 'Critical',
   },
   {
     'label': 'Injury',
     'description': 'Visible wounds, fractures, bleeding',
-    'urgency': 'Critical',
   },
-
   {
     'label': 'Neglect or Abuse',
-    'description': 'Suspected animal cruelty, starvation, chaining, hoarding',
-    'urgency': 'Critical',
+    'description': 'Suspected animal cruelty, starvation, chaining, hoarding. '
+        'Ask the organization for help, or report it yourself with our guide.',
   },
-
   {
     'label': 'Aggressive Animal',
     'description': 'Displaying aggressive behavior and posing a safety concern',
-    'urgency': 'Critical',
   },
 ];
-
-// Looks up the inherent urgency level for a given rescue type label.
-String? urgencyForRescueType(String? label) {
-  if (label == null) return null;
-  for (final option in kRescueTypeOptions) {
-    if (option['label'] == label) return option['urgency'];
-  }
-  return null;
-}
 
 // Small color cue per urgency level, reusing existing app palette.
 Color urgencyColorFor(String? urgency) {

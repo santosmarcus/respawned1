@@ -95,6 +95,26 @@ class HealthBehaviorAssessment extends StatelessWidget {
               : 'Select what you observed. Choose "Not sure / Not assessed" if you could not check.',
         ),
         const SizedBox(height: 8),
+        // Visible injury feeds the urgency assessment. Not asked on a
+        // surrender (no urgency) or on the lost-pet owner's form.
+        if (!isSurrender && !isOwnedPet) ...[
+          AssessmentDropdown(
+            hintText: 'Visible injury (how serious?)',
+            value: entry.injury,
+            options: kInjuryOptions,
+            onChanged: (v) => _set(() => entry.injury = v),
+          ),
+          if (entry.asksInjuryPhotos) ...[
+            const SizedBox(height: 10),
+            AssessmentDropdown(
+              hintText: 'Is the injury visible in your photos?',
+              value: entry.injuryVisibleInPhotos,
+              options: kInjuryPhotoOptions,
+              onChanged: (v) => _set(() => entry.injuryVisibleInPhotos = v),
+            ),
+          ],
+          const SizedBox(height: 10),
+        ],
         AssessmentDropdown(
           hintText: 'Body (thin or heavy?)',
           value: entry.bodyCondition,

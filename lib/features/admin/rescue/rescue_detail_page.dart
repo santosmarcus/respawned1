@@ -17,6 +17,8 @@ import 'package:respawnd1/core/models/rescue/referral_type.dart';
 import 'package:respawnd1/core/models/rescue/rejection_reason.dart';
 import 'package:respawnd1/core/models/rescue/rescue_case.dart';
 import 'package:respawnd1/core/models/rescue/rescue_status.dart';
+import 'package:respawnd1/core/models/rescue/org_involvement.dart';
+import 'package:respawnd1/features/admin/rescue/widgets/org_involvement_banner.dart';
 import 'package:respawnd1/core/utils/community_adoption_eligibility.dart';
 import 'package:respawnd1/core/widgets/rescue_risk_banner.dart';
 import 'package:respawnd1/features/admin/rescue/admin_track_case_page.dart';
@@ -1131,8 +1133,17 @@ class _RescueDetailPageState extends ConsumerState<RescueDetailPage> {
                 if (verification?.isConfirmed ?? false)
                   const CaseBadge(label: 'Verified', icon: Icons.verified, color: AppColors.success),
                 if (c.animalCount > 1) CaseBadge(label: '${c.animalCount} animals', icon: Icons.pets),
+                if (c.orgInvolvement != OrgInvolvement.orgAssist)
+                  CaseBadge(label: c.orgInvolvement.label, icon: Icons.info_outline),
               ],
             ),
+            // Reporter-led neglect/abuse report or surrender: what the
+            // organization is (not) expected to do, and what the reporter
+            // says they filed with the authorities.
+            if (c.orgInvolvement != OrgInvolvement.orgAssist) ...[
+              gap,
+              OrgInvolvementBanner(rescueCase: c),
+            ],
             if (c.highRiskAnimals.isNotEmpty) ...[
               gap,
               RescueRiskBanner(highRiskAnimals: c.highRiskAnimals),

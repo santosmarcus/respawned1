@@ -318,53 +318,6 @@ class RescueSubsectionHeader extends StatelessWidget {
   }
 }
 
-/// The rescue type's urgency, set automatically, with the reason — so a
-/// reporter (and later staff) can see why a case is Critical/Medium/Low.
-class RescueUrgencyCard extends StatelessWidget {
-  const RescueUrgencyCard({super.key, required this.rescueType, required this.urgency});
-
-  final String rescueType;
-  final String? urgency;
-
-  @override
-  Widget build(BuildContext context) {
-    final color = urgencyColorFor(urgency);
-    String? description;
-    for (final o in kRescueTypeOptions) {
-      if (o['label'] == rescueType) description = o['description'];
-    }
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.1),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: color.withValues(alpha: 0.5)),
-      ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
-            decoration: BoxDecoration(color: color, borderRadius: BorderRadius.circular(20)),
-            child: Text('${urgency ?? 'N/A'} urgency',
-                style: GoogleFonts.zain(fontSize: 12, fontWeight: FontWeight.w800, color: AppColors.textPrimary)),
-          ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Text(
-              'Based on the rescue type you picked'
-                  '${description == null ? '' : ' — $rescueType: ${description[0].toLowerCase()}${description.substring(1)}'}.'
-                  ' Rescuers may change it after they see the animal.',
-              style: GoogleFonts.zain(fontSize: 12, color: AppColors.textPrimary),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
 /// Underlined tappable field that opens a date/time picker.
 class RescuePickerField extends StatelessWidget {
   const RescuePickerField({

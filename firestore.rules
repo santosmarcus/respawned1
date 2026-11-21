@@ -1119,8 +1119,23 @@ service cloud.firestore {
             'verification', 'liveProofRequest', 'reportEvidence',
             // Rescue gaps 6/10: the adoption request mirror and the pickup
             // window belong to staff and the backend.
-            'adoptionRequest', 'adopterPickup']) &&
-          (!changedAny(['currentAssignmentId']) || !('currentAssignmentId' in request.resource.data));
+            'adoptionRequest', 'adopterPickup',
+            // The urgency is assessed from the report when it is filed
+            // (urgency_assessment.dart); the reporter can't re-rate it.
+            'urgency', 'urgencyAssessment']) &&
+          (!changedAny(['currentAssignmentId']) || !('currentAssignmentId' in request.resource.data)) &&
+          reporterInvolvementChangeOk();
+      }
+
+      // A reporter-led Neglect or Abuse report may be turned into a request
+      // for the organization's help (independent_report_section.dart); no
+      // other change to orgInvolvement / abuseReportPath by the reporter.
+      function reporterInvolvementChangeOk() {
+        return !changedAny(['orgInvolvement', 'abuseReportPath']) || (
+          resource.data.get('orgInvolvement', '') == 'independent_report' &&
+          request.resource.data.get('orgInvolvement', '') == 'org_assist' &&
+          request.resource.data.get('abuseReportPath', '') == 'org_assistance'
+        );
       }
 
       // track_case_page.dart: register interest, then report arrival.

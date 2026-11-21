@@ -23,9 +23,13 @@ class LostPetFields extends StatelessWidget {
     required this.form,
     required this.pinnedAddress,
     required this.onChanged,
+    required this.onSwitchToRescue,
   });
 
   final RescueFormController form;
+
+  /// Turns this into a rescue report (finder side, animal needs help).
+  final VoidCallback onSwitchToRescue;
 
   /// The map pin's resolved address (shown as last-seen / found location).
   final String pinnedAddress;
@@ -126,6 +130,7 @@ class LostPetFields extends StatelessWidget {
             form: form,
             pinnedAddress: pinnedAddress,
             onChanged: onChanged,
+            onSwitchToRescue: onSwitchToRescue,
           ),
       ],
     );
@@ -443,9 +448,11 @@ class FinderFields extends StatelessWidget {
     required this.form,
     required this.pinnedAddress,
     required this.onChanged,
+    required this.onSwitchToRescue,
   });
 
   final RescueFormController form;
+  final VoidCallback onSwitchToRescue;
 
   /// The map pin's resolved address (shown as last-seen / found location).
   final String pinnedAddress;
@@ -502,6 +509,9 @@ class FinderFields extends StatelessWidget {
               (val) => _set(() => form.animalStatus = val),
         ),
         const SizedBox(height: 16),
+        // Lost Pet reports are community lost-and-found listings: the
+        // organization does not coordinate them. An animal that needs
+        // pickup or medical care is reported as a rescue instead.
         Container(
           width: double.infinity,
           padding: const EdgeInsets.all(12),
@@ -509,45 +519,45 @@ class FinderFields extends StatelessWidget {
             color: AppColors.pinkrspwn.withValues(alpha: 0.4),
             borderRadius: BorderRadius.circular(10),
           ),
-          child: Row(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Expanded(
-                child: Text(
-                  'This animal needs pickup or medical help',
+              Text(
+                'Does this animal need pickup or medical help?',
+                style: GoogleFonts.zain(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                  color: AppColors.textPrimary,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                'Lost pet reports go to the community lost-and-found board and '
+                'are not handled by the organization. If the animal is hurt, '
+                'sick or in danger, file a rescue report instead. The animals '
+                'you entered are kept.',
+                style: GoogleFonts.zain(
+                  fontSize: 12,
+                  color: AppColors.textPrimary,
+                ),
+              ),
+              const SizedBox(height: 6),
+              TextButton.icon(
+                onPressed: onSwitchToRescue,
+                icon: const Icon(Icons.medical_services_outlined, size: 18, color: AppColors.textPrimary),
+                label: Text(
+                  'Switch to a rescue report',
                   style: GoogleFonts.zain(
                     fontSize: 13,
+                    fontWeight: FontWeight.w700,
                     color: AppColors.textPrimary,
                   ),
                 ),
-              ),
-              Switch(
-                value: form.finderNeedsRescue,
-                activeThumbColor: AppColors.textPrimary,
-                onChanged: (v) => _set(() => form.finderNeedsRescue = v),
+                style: TextButton.styleFrom(padding: EdgeInsets.zero),
               ),
             ],
           ),
         ),
-        if (form.finderNeedsRescue) ...[
-          const SizedBox(height: 16),
-          RescueFieldLabel('Select Urgency', required: true),
-          const SizedBox(height: 8),
-          RescueRadioOption(
-            'Low',
-            form.selectedUrgency,
-                (val) => _set(() => form.selectedUrgency = val),
-          ),
-          RescueRadioOption(
-            'Medium',
-            form.selectedUrgency,
-                (val) => _set(() => form.selectedUrgency = val),
-          ),
-          RescueRadioOption(
-            'Critical',
-            form.selectedUrgency,
-                (val) => _set(() => form.selectedUrgency = val),
-          ),
-        ],
         const SizedBox(height: 20),
         RescueFieldLabel('Contact Number', required: true),
         const SizedBox(height: 6),

@@ -6,6 +6,7 @@ import 'package:respawnd1/core/models/organization/adoption_promotion_schedule.d
 import 'package:respawnd1/core/models/organization/organization_capabilities.dart';
 import 'package:respawnd1/core/models/rescue/activity_log_entry.dart';
 import 'package:respawnd1/core/models/rescue/community_report.dart';
+import 'package:respawnd1/core/models/rescue/org_involvement.dart';
 import 'package:respawnd1/core/models/rescue/expense.dart';
 import 'package:respawnd1/core/models/rescue/pet_transporter.dart';
 import 'package:respawnd1/core/models/rescue/referral.dart';
@@ -428,6 +429,9 @@ class RescueFilters {
   /// cases that the pipeline tabs don't cover.
   final RescueStatus? statusOverride;
 
+  /// Organization assistance / reporter-led / not org-facilitated.
+  final OrgInvolvement? involvement;
+
   const RescueFilters({
     this.searchText = '',
     this.urgency,
@@ -436,6 +440,7 @@ class RescueFilters {
     this.toDate,
     this.locationQuery,
     this.statusOverride,
+    this.involvement,
   });
 
   bool get isEmpty =>
@@ -445,7 +450,8 @@ class RescueFilters {
       fromDate == null &&
       toDate == null &&
       (locationQuery == null || locationQuery!.isEmpty) &&
-      statusOverride == null;
+      statusOverride == null &&
+      involvement == null;
 
   RescueFilters copyWith({
     String? searchText,
@@ -460,6 +466,8 @@ class RescueFilters {
     bool clearLocationQuery = false,
     RescueStatus? statusOverride,
     bool clearStatusOverride = false,
+    OrgInvolvement? involvement,
+    bool clearInvolvement = false,
   }) {
     return RescueFilters(
       searchText: searchText ?? this.searchText,
@@ -469,6 +477,7 @@ class RescueFilters {
       toDate: clearDateRange ? null : (toDate ?? this.toDate),
       locationQuery: clearLocationQuery ? null : (locationQuery ?? this.locationQuery),
       statusOverride: clearStatusOverride ? null : (statusOverride ?? this.statusOverride),
+      involvement: clearInvolvement ? null : (involvement ?? this.involvement),
     );
   }
 
@@ -476,6 +485,7 @@ class RescueFilters {
   /// already handled server-side by the query the list screen issues).
   bool matches(RescueCase c) {
     if (urgency != null && UrgencyLevel.fromFirestoreValue(c.urgency) != urgency) return false;
+    if (involvement != null && c.orgInvolvement != involvement) return false;
     if (species != null && species!.isNotEmpty) {
       // Matches if ANY of the case's animals are that species — not just
       // the first/legacy one — so a "Dog ×2, Cat" case is found by both a

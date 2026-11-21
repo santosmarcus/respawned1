@@ -1,4 +1,6 @@
 
+const {countsAsOrgWorkload} = require('./org_involvement');
+
 /// Pending the organization's confirmation. An organization can set its
 /// own: organizations/{orgId}/settings/shelter.criticalEscalationMinutes.
 const DEFAULT_ESCALATION_MINUTES = 30;
@@ -15,6 +17,9 @@ function escalationMinutes(setting) {
 /// smallest threshold among the organizations covering it.
 function escalationDue(c, {createdAtMs, nowMs, thresholdMinutes}) {
   if (!c || c.urgency !== 'Critical') return false;
+  // A reporter-led neglect/abuse report is not organization workload while
+  // it waits in review, so it is never escalated (org_involvement.js).
+  if (!countsAsOrgWorkload(c)) return false;
   if (!REVIEW_STATUSES.includes(c.status)) return false;
   if (c.criticalEscalatedAt) return false;
   if (typeof createdAtMs !== 'number' || createdAtMs <= 0) return false;

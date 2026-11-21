@@ -3,7 +3,10 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 import 'package:respawnd1/app_theme.dart';
+import 'package:respawnd1/core/models/rescue/org_involvement.dart';
+import 'package:respawnd1/core/utils/urgency_assessment.dart';
 import 'package:respawnd1/features/rescue/rescue_form_options.dart';
+import 'package:respawnd1/features/rescue/widgets/urgency_assessment_card.dart';
 
 /// Everything the reporter entered on the rescue form, grouped into cards
 /// so each kind of information has one place (shared by the reporter's
@@ -37,6 +40,8 @@ class CaseReportDetails extends StatelessWidget {
   String? get _type => data['rescueType'] as String?;
   bool get _isSurrender => _type == 'Pet Surrender';
   bool get _isLostPet => _type == 'Lost Pet';
+  OrgInvolvement get _involvement => OrgInvolvement.fromFirestoreValue(data['orgInvolvement']);
+  UrgencyAssessment? get _assessment => UrgencyAssessment.fromMap(data['urgencyAssessment']);
 
   @override
   Widget build(BuildContext context) {
@@ -50,7 +55,21 @@ class CaseReportDetails extends StatelessWidget {
           icon: Icons.assignment_outlined,
           children: [
             CaseDetailRow('Rescue Type', _type),
-            _UrgencyRow(rescueType: _type, urgency: data['urgency'] as String?),
+            // The assessed urgency with its reasons; reports filed before the
+            // assessment only have a level set from the type. Surrenders
+            // carry no urgency.
+            if (_assessment case final assessment?)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 12),
+                child: UrgencyAssessmentCard(assessment: assessment),
+              )
+            else if (_involvement.ratesUrgency && !_isSurrender)
+              _UrgencyRow(rescueType: _type, urgency: data['urgency'] as String?),
+            if (_involvement != OrgInvolvement.orgAssist)
+              CaseDetailRow(
+                'Organization Involvement',
+                '${_involvement.label}. ${_involvement.description}',
+              ),
             if (_isSurrender) ..._surrenderRows(context) else if (!_isLostPet) ..._typeRows(),
             if (data['communityCat'] == true) const CaseDetailRow('Community Cat', 'Yes'),
             CaseDetailRow.optional('Scanned Tag ID', data['scannedTagId']),
@@ -85,7 +104,8 @@ class CaseReportDetails extends StatelessWidget {
             icon: Icons.place_outlined,
             children: location,
           ),
-        if (!_isSurrender && !_isLostPet)
+        // Only asked when the reporter wanted the organization to act.
+        if (!_isSurrender && !_isLostPet && _involvement == OrgInvolvement.orgAssist)
           CaseDetailGroup(
             title: 'Coordination',
             icon: Icons.handshake_outlined,
@@ -243,7 +263,8 @@ class CaseDetailGroup extends StatelessWidget {
   }
 }
 
-/// Urgency with the reason it was set — it comes from the rescue type.
+/// Urgency of a report filed before the urgency assessment: it came from
+/// the rescue type.
 class _UrgencyRow extends StatelessWidget {
   const _UrgencyRow({required this.rescueType, required this.urgency});
 
@@ -277,7 +298,9 @@ class _UrgencyRow extends StatelessWidget {
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
-                    rescueType == null ? 'Set from the rescue type' : 'Set from the rescue type ($rescueType)',
+                    rescueType == null
+                        ? 'Set from the rescue type (older report)'
+                        : 'Set from the rescue type ($rescueType; older report)',
                     style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary),
                   ),
                 ),
@@ -411,6 +434,17 @@ List<Widget> _animalRows(Map<String, dynamic> a, bool isSurrender) {
     CaseDetailRow('Size', a['size']),
     if (isSurrender) CaseDetailRow.optional('Age', a['age']),
     CaseDetailRow('Color / Distinguishing Markings', a['colorMarkings']),
+    // Female-only observations, never a diagnosis; ignored for another sex.
+    if (a['sex'] == 'Female') ...[
+      CaseDetailRow.optional('Has a Litter (reported)', a['hasLitter']),
+      if (a['suspectedPregnancy'] != null)
+        CaseDetailRow(
+          'Suspected Pregnancy',
+          '${a['suspectedPregnancy']} (reporter observation, not vet-confirmed)',
+        ),
+    ],
+    CaseDetailRow.optional('Visible Injury', a['injury']),
+    CaseDetailRow.optional('Injury in Photos (reporter)', a['injuryVisibleInPhotos']),
     if (hasAssessment) ...[
       const _SectionHeading('Health & Behavior Assessment', small: true),
       CaseDetailRow('Body Condition', a['bodyCondition']),

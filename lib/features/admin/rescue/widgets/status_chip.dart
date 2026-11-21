@@ -3,6 +3,7 @@ import 'package:google_fonts/google_fonts.dart';
 
 import 'package:respawnd1/app_theme.dart';
 
+import 'package:respawnd1/core/models/rescue/org_involvement.dart';
 import 'package:respawnd1/core/models/rescue/rescue_status.dart';
 
 /// Small rounded chip showing a [RescueStatus]. Reused on the rescue list,
@@ -99,6 +100,46 @@ class TreatmentConditionChip extends StatelessWidget {
             fontWeight: FontWeight.bold,
             color: Colors.white,
           ),
+        ),
+      ),
+    );
+  }
+}
+/// Marks a report the organization is not expected to act on by default:
+/// reporter-led neglect/abuse reports and surrenders (org_involvement.dart).
+class OrgInvolvementChip extends StatelessWidget {
+  final OrgInvolvement involvement;
+  const OrgInvolvementChip({super.key, required this.involvement});
+
+  @override
+  Widget build(BuildContext context) {
+    final icon = switch (involvement) {
+      OrgInvolvement.orgAssist => Icons.volunteer_activism_outlined,
+      OrgInvolvement.independentReport => Icons.assignment_ind_outlined,
+      OrgInvolvement.notFacilitated => Icons.visibility_outlined,
+    };
+    return Tooltip(
+      message: involvement.description,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+        decoration: BoxDecoration(
+          color: const Color(0xFFEDEDED),
+          border: Border.all(color: const Color(0xFF9E9E9E)),
+          borderRadius: BorderRadius.circular(20),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, size: 12, color: const Color(0xFF424242)),
+            const SizedBox(width: 4),
+            Flexible(
+              child: Text(
+                involvement.label,
+                overflow: TextOverflow.ellipsis,
+                style: GoogleFonts.zain(fontSize: 11, fontWeight: FontWeight.w700, color: const Color(0xFF424242)),
+              ),
+            ),
+          ],
         ),
       ),
     );

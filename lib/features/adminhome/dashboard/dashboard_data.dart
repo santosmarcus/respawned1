@@ -86,7 +86,9 @@ final dashboardRescueSnapshotProvider = Provider.autoDispose<AsyncValue<RescueSn
     if (p.hasError) return AsyncValue.error(p.error!, p.stackTrace ?? StackTrace.current);
   }
   if (parts.any((p) => !p.hasValue)) return const AsyncValue.loading();
-  final reviewCases = review.requireValue;
+  // Reporter-led neglect/abuse reports and surrenders are shown in Rescue
+  // Reports for awareness, but are not workload until staff take them on.
+  final reviewCases = review.requireValue.where((c) => c.countsAsOrgWorkload).toList();
   return AsyncValue.data(
     RescueSnapshot({
       RescueStage.review: reviewCases.where((c) => c.status == RescueStatus.pendingReview).toList(),

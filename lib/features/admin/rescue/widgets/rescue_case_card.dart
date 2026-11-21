@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 import 'package:respawnd1/app_theme.dart';
+import 'package:respawnd1/core/models/rescue/org_involvement.dart';
 import 'package:respawnd1/core/models/rescue/rescue_case.dart';
 import 'package:respawnd1/core/models/rescue/rescue_status.dart';
 import 'package:respawnd1/core/utils/animal_treatment_state.dart';
@@ -201,7 +202,8 @@ class RescueCaseCard extends StatelessWidget {
                       // log's condition; the reported urgency never changes.
                       if (isTreatmentStage && (c.isDeceased || (c.currentCondition ?? '').isNotEmpty))
                         TreatmentConditionChip(condition: c.isDeceased ? 'Deceased' : c.currentCondition!)
-                      else
+                      // Surrenders carry no urgency: no "Unrated" chip.
+                      else if (c.orgInvolvement.ratesUrgency)
                         UrgencyChip(urgency: c.urgency),
                     ],
                   ),
@@ -219,6 +221,10 @@ class RescueCaseCard extends StatelessWidget {
                     overflow: TextOverflow.ellipsis,
                   ),
                   const SizedBox(height: 3),
+                  if (c.orgInvolvement != OrgInvolvement.orgAssist) ...[
+                    OrgInvolvementChip(involvement: c.orgInvolvement),
+                    const SizedBox(height: 3),
+                  ],
                   if (pendingOfferNote != null)
                     Text(
                       pendingOfferNote!,

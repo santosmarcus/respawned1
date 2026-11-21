@@ -194,7 +194,9 @@ final dashboardAlertsProvider = Provider.autoDispose<DashAlertsState>((ref) {
   }
 
   // ── Rescue: genuine emergencies first ─────────────────────────────────
-  final reviewCases = review.asData?.value ?? const <RescueCase>[];
+  // Only organization workload raises alerts: reporter-led neglect/abuse
+  // reports and surrenders still waiting in review do not.
+  final reviewCases = (review.asData?.value ?? const <RescueCase>[]).where((c) => c.countsAsOrgWorkload).toList();
   final assignCases = assign.asData?.value ?? const <RescueCase>[];
   bool isCritical(RescueCase c) => UrgencyLevel.fromFirestoreValue(c.urgency) == UrgencyLevel.critical;
 

@@ -22,6 +22,8 @@ import 'package:respawnd1/features/admin/rescue/state/rescue_reports_providers.d
 import 'package:url_launcher/url_launcher.dart';
 import 'package:respawnd1/features/rescue/widgets/community_report_section.dart';
 import 'package:respawnd1/features/rescue/widgets/live_proof_request_card.dart';
+import 'package:respawnd1/features/rescue/widgets/independent_report_section.dart';
+import 'package:respawnd1/core/models/rescue/org_involvement.dart';
 import 'package:respawnd1/core/widgets/app_messages.dart';
 import 'package:respawnd1/core/repos/rescue_case/rescue_case_store.dart';
 
@@ -1679,6 +1681,11 @@ class _CaseDetailTabState extends State<_CaseDetailTab> {
           // CaseReportDetails). The address is in its Location card.
           CaseReportDetails(caseId: widget.caseId, data: data),
           const SizedBox(height: 12),
+
+          // Reporter-led Neglect or Abuse: what was filed with the
+          // authorities, the guide, and asking the organization for help.
+          if (OrgInvolvement.fromFirestoreValue(data['orgInvolvement']) == OrgInvolvement.independentReport)
+            IndependentReportSection(caseId: widget.caseId, data: data, isReporter: widget.isReporter),
 
           // Rescue gaps 6/10: the interested adopter sends an adoption
           // request (with the vet-fee, obligations and pickup agreements)
