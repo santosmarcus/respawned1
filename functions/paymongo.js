@@ -788,28 +788,36 @@ async function handlePaymongoEvent(type, resource) {
     return (await finalizePaidDonation(ref, session)).outcome;
   }
   if (type === 'payment.failed') return recordFailedAttempt(resource);
-  if (type === 'payout.paid') return recordPayout(resource);
+  // payout.deposited: the money reached the organization's bank.
+  // payout.returned: the bank sent it back to the PayMongo balance.
+  if (type === 'payout.deposited') return recordPayout(resource);
+  if (type === 'payout.returned') return recordPayoutReturned(resource);
   return 'ignored_type';
 }
 
-// PayMongo paid money out of the account balance to the bank. Recorded as a
-// cash-out waiting for the organization to say which fund(s) it came from
-// (functions/campaigns.js assignCashOut). The webhook must be subscribed to
-// payout.paid in the PayMongo dashboard. One PayMongo account serves the
-// platform; while there is exactly one approved organization the payout is
-// theirs, otherwise it is only logged (staff can record it by hand).
+// One PayMongo account serves the platform: while there is exactly one
+// approved organization, its payouts are theirs. Otherwise null (the payout
+// is only logged; staff record it by hand).
+async function payoutOrganizationId(payoutId) {
+  const orgs = await db.collection('organizations').get();
+  const approved = orgs.docs.filter((o) => (o.get('verificationStatus') || 'approved') === 'approved');
+  if (approved.length === 1) return approved[0].id;
+  logger.warn('payout: no single organization for this payout; record it by hand', {
+    payoutId, organizations: approved.length,
+  });
+  return null;
+}
+
+// PayMongo deposited money from the account balance into the bank. Recorded
+// as a cash-out waiting for the organization to say which fund(s) it came
+// from (functions/campaigns.js assignCashOut). The webhook must be
+// subscribed to payout.deposited (and payout.returned) in the PayMongo
+// dashboard.
 async function recordPayout(resource) {
   const payout = cashOutRules.payoutFromPaymongo(resource);
   if (!payout) return 'ignored_unreadable_payout';
-  const orgs = await db.collection('organizations').get();
-  const approved = orgs.docs.filter((o) => (o.get('verificationStatus') || 'approved') === 'approved');
-  if (approved.length !== 1) {
-    logger.warn('recordPayout: no single organization for this payout; record it by hand', {
-      payoutId: payout.payoutId, organizations: approved.length,
-    });
-    return 'unmatched_payout';
-  }
-  const orgId = approved[0].id;
+  const orgId = await payoutOrganizationId(payout.payoutId);
+  if (!orgId) return 'unmatched_payout';
   const ref = db.collection('organizations').doc(orgId).collection('cashOuts').doc(payout.payoutId);
   return db.runTransaction(async (tx) => {
     if ((await tx.get(ref)).exists) return 'duplicate_payout';
@@ -836,6 +844,32 @@ async function recordPayout(resource) {
       updatedAt: now,
     });
     return 'recorded_payout';
+  });
+}
+
+// The bank sent a payout back to the PayMongo balance. A cash-out still
+// waiting for a fund is closed as 'returned'; either way it is flagged, and
+// notifyCashOut asks the finance team to check any spending already
+// assigned from it (nothing is voided automatically).
+async function recordPayoutReturned(resource) {
+  const payout = cashOutRules.payoutFromPaymongo(resource);
+  if (!payout) return 'ignored_unreadable_payout';
+  const orgId = await payoutOrganizationId(payout.payoutId);
+  if (!orgId) return 'unmatched_payout';
+  const ref = db.collection('organizations').doc(orgId).collection('cashOuts').doc(payout.payoutId);
+  return db.runTransaction(async (tx) => {
+    const snap = await tx.get(ref);
+    // Returned before it was ever deposited: no money left PayMongo.
+    if (!snap.exists) return 'ignored_return_without_deposit';
+    const update = cashOutRules.returnUpdate(snap.data());
+    if (!update) return 'duplicate_return';
+    tx.update(ref, {
+      ...update,
+      returnedAt: payout.occurredAtMs ? Timestamp.fromMillis(payout.occurredAtMs) : Timestamp.now(),
+      'paymongo.status': payout.status,
+      updatedAt: FieldValue.serverTimestamp(),
+    });
+    return update.status === 'returned' ? 'closed_returned_payout' : 'flagged_returned_payout';
   });
 }
 

@@ -100,3 +100,28 @@ test('notices: assigning tells the others', () => {
   assert.match(settled.title, /already recorded/);
   assert.strictEqual(r.noticeFor(before, {...before, note: 'edited'}), null);
 });
+
+test('a returned payout closes what still waits and flags assigned spending', () => {
+  assert.deepStrictEqual(r.returnUpdate({status: 'needs_assignment', assignedAmount: 0}),
+      {status: 'returned', payoutReturned: true});
+  assert.deepStrictEqual(r.returnUpdate({status: 'partly_assigned', assignedAmount: 200}),
+      {status: 'returned', payoutReturned: true});
+  assert.deepStrictEqual(r.returnUpdate({status: 'assigned', assignedAmount: 500}), {payoutReturned: true});
+  assert.strictEqual(r.returnUpdate({status: 'returned', payoutReturned: true}), null);
+  assert.strictEqual(r.returnUpdate(null), null);
+
+  const before = {source: 'paymongo', amount: 5000, assignedAmount: 0, status: 'needs_assignment'};
+  const closed = r.noticeFor(before, {...before, status: 'returned', payoutReturned: true});
+  assert.strictEqual(closed.type, 'cash_out_returned');
+  assert.match(closed.body, /returned the ₱5,000 payout to PayMongo, so it no longer needs a fund/);
+  const spent = r.noticeFor({...before, status: 'assigned', assignedAmount: 5000},
+      {...before, status: 'assigned', assignedAmount: 5000, payoutReturned: true});
+  assert.match(spent.body, /₱5,000 of it was already assigned to funds\. Check that spending/);
+});
+
+test('reads the deposit date first', () => {
+  assert.strictEqual(
+      r.payoutFromPaymongo({id: 'po_1', attributes: {amount: 100, deposited_at: 1763700000, created_at: 1763600000}})
+          .occurredAtMs,
+      1763700000000);
+});

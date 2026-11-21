@@ -49,6 +49,13 @@ void main() {
       expect(c.isOpen, isFalse);
       expect(c.statusLabel, 'Already recorded');
     });
+
+    test('a payout the bank sent back', () {
+      final c = CashOut.fromMap('po_2', {'source': 'paymongo', 'amount': 900, 'status': 'returned', 'payoutReturned': true});
+      expect(c.isOpen, isFalse);
+      expect(c.payoutReturned, isTrue);
+      expect(c.statusLabel, 'Returned by the bank');
+    });
   });
 
   group('fundSplitProblem', () {

@@ -4,7 +4,7 @@ _Latest: money taken out / "Where did this money go?" (2026-11-22, not deployed,
 
 ## Money taken out: "Where did this money go?" (2026-11-22, not deployed, not checked on a device)
 
-When money leaves the organization (a **PayMongo payout** to the bank, or someone **taking money out** of the bank, GCash or the cash box), the app asks the people who manage money which fund it came from and what it was for, and tells the rest of the finance team.
+When money leaves the organization (a **PayMongo payout** deposited to the bank, or someone **taking money out** of the bank, GCash or the cash box), the app asks the people who manage money which fund it came from and what it was for, and tells the rest of the finance team.
 
 **What people see** (Donations, admin):
 - **Pop-up** the first time someone with *Manage money* opens Donations while a cash-out has no fund: "₱5,000 was paid out from PayMongo on Nov 20. Choose which fund it came from…" → *Choose fund* / *Later*.
@@ -21,7 +21,10 @@ When money leaves the organization (a **PayMongo payout** to the bank, or someon
 
 **Backend**
 - `functions/campaigns.js`: `recordCashOut`, `assignCashOut`, `settleCashOut` (transactions; idempotent by request id; audit log entries, category `expenses`).
-- `functions/paymongo.js`: the webhook now handles **`payout.paid`** and records a cash-out (doc id = payout id, so repeats are ignored). Fields are read defensively (`net_amount` or `amount` in centavos, `paid_at`/`created_at`, destination bank if present) because PayMongo's payout docs couldn't be checked from here; check one real payout event against `cash_out_rules.js payoutFromPaymongo`. The payout is assigned to the only approved organization; with more than one, it's only logged and staff record it by hand.
+- `functions/paymongo.js`: the webhook now handles PayMongo's two payout events:
+  - **`payout.deposited`** (money reached the bank): records a cash-out (doc id = payout id, so repeats are ignored).
+  - **`payout.returned`** (the bank sent it back to PayMongo): a cash-out still waiting for a fund is closed as *Returned by the bank*; one with spending already assigned is kept and flagged, and the finance team is told to check that spending (type `cash_out_returned`; nothing is voided automatically). A return with no earlier deposit is ignored.
+  - Fields are read defensively (`net_amount` or `amount` in centavos; `deposited_at`, `paid_at`, `updated_at` or `created_at`; destination bank if present) because PayMongo's payout docs couldn't be checked from here; check one real payout event against `cash_out_rules.js payoutFromPaymongo`. A payout belongs to the only approved organization; with more than one, it's only logged and staff record it by hand.
 - `functions/cash_out_rules.js` (+ `cash_out_rules_test.js`): validation, the split plan, payout parsing, notification text.
 - `functions/index.js`: `notifyCashOut` trigger; `notifyStaff` also keeps `cashOutId`.
 - `firestore.rules`: `organizations/{orgId}/cashOuts` read for `financeView`/`financeManage`, no writes; added to the subcollection catch-all's exclusions.
@@ -32,13 +35,13 @@ When money leaves the organization (a **PayMongo payout** to the bank, or someon
 
 1. Rules: `firebase deploy --only firestore:rules` (adds read access only).
 2. Functions, by name: `FUNCTIONS_DISCOVERY_TIMEOUT=60 firebase deploy --only functions:recordCashOut,functions:assignCashOut,functions:settleCashOut,functions:notifyCashOut,functions:paymongoWebhook`.
-3. PayMongo dashboard → Developers → Webhooks: add **`payout.paid`** to the existing webhook's events (same URL and secret).
+3. PayMongo webhook. **None exists yet** (2026-11-22): donations have been confirmed only by `syncDonationPayment` when the donor returns to the app. In the PayMongo dashboard (Test mode first) → Developers → Webhooks → Create, URL = `paymongoWebhook`'s URL from the Firebase console (us-central1), events `checkout_session.payment.paid`, `payment.failed`, `payout.deposited`, `payout.returned`. Then `firebase functions:secrets:set PAYMONGO_WEBHOOK_SECRET` with the webhook's `whsk_…` secret and redeploy `paymongoWebhook`. Test: a test donation adds a `paymongoWebhookEvents` doc. Live mode needs its own webhook and secret (the function ignores events from the other mode). Payout events only happen in live mode.
 4. App build.
 
 ### Checks run
 
-- `functions/`: `npm test` 139 pass (6 new). `rules-tests`: 210 pass, including the new cash-out test (run with `firebase emulators:exec … "node --test --test-concurrency=1 tests/*.test.js"`; the package script's `tests/` folder argument fails on Node 22).
-- App (Flutter 3.50.1): `flutter analyze` 0 errors. `flutter test`: 309 pass; the same 4 Google Fonts widget-test failures as before. New: `test/core/models/cash_out_test.dart` (5 pass).
+- `functions/`: `npm test` 141 pass (8 new). `rules-tests`: 210 pass, including the new cash-out test (run with `firebase emulators:exec … "node --test --test-concurrency=1 tests/*.test.js"`; the package script's `tests/` folder argument fails on Node 22).
+- App (Flutter 3.50.1): `flutter analyze` 0 errors. `flutter test`: 310 pass; the same 4 Google Fonts widget-test failures as before. New: `test/core/models/cash_out_test.dart` (6 pass).
 - Not run: a real PayMongo payout event; the sheets on a device.
 
 ### Check on a device

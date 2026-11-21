@@ -232,6 +232,7 @@ class NotificationService {
       // or someone assigned one.
       case 'cash_out_needs_assignment':
       case 'cash_out_assigned':
+      case 'cash_out_returned':
         return CashOutsPage(openId: data['cashOutId'] as String?);
 
       // remindAdoptionPromotions (functions/adoption_promotion.js): time to

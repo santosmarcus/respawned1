@@ -77,6 +77,7 @@ const Map<String, String> _kDonationNotifLabels = {
   // notifyCashOut (functions/index.js): opens Money taken out (pageFor).
   'cash_out_needs_assignment': 'Funds',
   'cash_out_assigned': 'Funds',
+  'cash_out_returned': 'Funds',
 };
 
 /// Notification types whose tap opens Profile → Certificates.

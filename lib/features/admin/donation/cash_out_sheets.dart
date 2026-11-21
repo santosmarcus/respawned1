@@ -716,7 +716,7 @@ class _CashOutCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final c = cashOut;
     final when = c.occurredAt ?? c.createdAt;
-    final color = c.isOpen ? AppColors.warning : AppColors.success;
+    final color = c.isOpen || c.payoutReturned ? AppColors.warning : AppColors.success;
     return Material(
       color: AppColors.surface,
       borderRadius: BorderRadius.circular(12),
@@ -748,7 +748,8 @@ class _CashOutCard extends StatelessWidget {
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                 decoration: BoxDecoration(color: color.withValues(alpha: 0.18), borderRadius: BorderRadius.circular(20)),
-                child: Text(c.statusLabel, style: GoogleFonts.zain(fontSize: 13, fontWeight: FontWeight.w700)),
+                child: Text(c.payoutReturned && c.status != 'returned' ? 'Returned · check' : c.statusLabel,
+                    style: GoogleFonts.zain(fontSize: 13, fontWeight: FontWeight.w700)),
               ),
             ],
           ),
@@ -785,6 +786,18 @@ class _CashOutDetails extends StatelessWidget {
                   '${formatPesoExact(l.amount)} from ${l.campaignTitle} · ${l.category}\n'
                   '${l.label}${l.byName == null ? '' : ' (by ${l.byName})'}',
                   style: text,
+                ),
+              ),
+            if (c.payoutReturned)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: Text(
+                  c.lines.isEmpty
+                      ? 'The bank sent this payout back to PayMongo, so the money never left. Check the bank '
+                          'details in PayMongo.'
+                      : 'The bank sent this payout back to PayMongo, but the spending above was already recorded. '
+                          'If it didn\'t really happen, open that fund and void the spending.',
+                  style: text.copyWith(color: AppColors.warning),
                 ),
               ),
             if (c.status == 'already_recorded')

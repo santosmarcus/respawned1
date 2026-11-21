@@ -56,8 +56,13 @@ class CashOut {
   final double amount;
   final double assignedAmount;
 
-  /// needs_assignment | partly_assigned | assigned | already_recorded
+  /// needs_assignment | partly_assigned | assigned | already_recorded |
+  /// returned (a PayMongo payout the bank sent back while it waited)
   final String status;
+
+  /// PayMongo reported the bank sent this payout back (payout.returned).
+  /// When some of it was already assigned, that spending needs checking.
+  final bool payoutReturned;
   final String? note;
   final String? settleNote;
   final DateTime? occurredAt;
@@ -72,6 +77,7 @@ class CashOut {
     required this.amount,
     required this.assignedAmount,
     required this.status,
+    this.payoutReturned = false,
     this.note,
     this.settleNote,
     this.occurredAt,
@@ -89,6 +95,7 @@ class CashOut {
       amount: (d['amount'] as num?)?.toDouble() ?? 0,
       assignedAmount: (d['assignedAmount'] as num?)?.toDouble() ?? 0,
       status: d['status'] as String? ?? 'needs_assignment',
+      payoutReturned: d['payoutReturned'] == true,
       note: d['note'] as String?,
       settleNote: d['settleNote'] as String?,
       occurredAt: asDate(d['occurredAt']),
@@ -115,6 +122,7 @@ class CashOut {
         'partly_assigned' => 'Partly assigned',
         'assigned' => 'Assigned',
         'already_recorded' => 'Already recorded',
+        'returned' => 'Returned by the bank',
         _ => status,
       };
 }

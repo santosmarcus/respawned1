@@ -21,7 +21,8 @@ const SOURCES = {
   other: 'Other',
 };
 
-const STATUSES = ['needs_assignment', 'partly_assigned', 'assigned', 'already_recorded'];
+/// 'returned': a PayMongo payout the bank sent back while it still waited for a fund.
+const STATUSES = ['needs_assignment', 'partly_assigned', 'assigned', 'already_recorded', 'returned'];
 const OPEN_STATUSES = ['needs_assignment', 'partly_assigned'];
 /// One assignment can split the money across this many funds.
 const MAX_LINES = 10;
@@ -98,16 +99,17 @@ function planAssignment({cashOut, organizationId, lines, funds}) {
   return {totalC, assignedAfterC, status: statusFor(centavos(num(cashOut.amount)), assignedAfterC)};
 }
 
-/// A PayMongo payout from a webhook's `data` resource, read defensively:
-/// field names follow PayMongo's other resources (amounts in centavos,
-/// seconds since epoch). Returns null when it isn't a usable payout.
+/// A PayMongo payout from a payout.deposited / payout.returned webhook's
+/// `data` resource, read defensively: field names follow PayMongo's other
+/// resources (amounts in centavos, seconds since epoch). Returns null when it
+/// isn't a usable payout.
 function payoutFromPaymongo(resource) {
   if (!resource || typeof resource.id !== 'string' || !/^[A-Za-z0-9_]{1,128}$/.test(resource.id)) return null;
   const a = resource.attributes || {};
   const pick = (...keys) => keys.map((k) => a[k]).find((v) => Number.isInteger(v) && v > 0);
   const amountC = pick('net_amount', 'amount');
   if (!amountC || amountC > MAX_AMOUNT_CENTAVOS) return null;
-  const secs = [a.paid_at, a.updated_at, a.created_at].find((v) => Number.isInteger(v) && v > 0);
+  const secs = [a.deposited_at, a.paid_at, a.updated_at, a.created_at].find((v) => Number.isInteger(v) && v > 0);
   const dest = a.destination || a.bank_account || a.bank || {};
   const bank = [dest.bank_name || dest.bank_code || dest.name, dest.account_number_last4 || dest.last4]
     .filter((v) => typeof v === 'string' && v).join(' ···');
@@ -120,6 +122,18 @@ function payoutFromPaymongo(resource) {
     occurredAtMs: secs ? secs * 1000 : null,
     destination: bank ? bank.slice(0, 80) : null,
   };
+}
+
+/// What a payout.returned event does to the stored cash-out [c]:
+///   null   nothing stored for this payout, or already handled
+///   still waiting for a fund: closed as 'returned', so nobody is asked
+///     about money that never left PayMongo
+///   always flagged (payoutReturned), and notifyCashOut asks the finance
+///     team to check any spending already assigned from it (nothing is
+///     voided automatically)
+function returnUpdate(c) {
+  if (!c || c.payoutReturned === true || c.status === 'returned') return null;
+  return OPEN_STATUSES.includes(c.status) ? {status: 'returned', payoutReturned: true} : {payoutReturned: true};
 }
 
 function plural(n, one, many) {
@@ -161,6 +175,19 @@ function noticeFor(before, after) {
     }
     return null;
   }
+  if (after.payoutReturned === true && before.payoutReturned !== true) {
+    const assigned = num(after.assignedAmount) > 0;
+    return {
+      type: 'cash_out_returned',
+      title: 'A PayMongo payout came back',
+      body: assigned ?
+        `The bank returned the ${amount} payout to PayMongo, but ${formatPeso(centavos(num(after.assignedAmount)))} of it ` +
+          'was already assigned to funds. Check that spending; void it on the fund if it didn\'t happen.' :
+        `The bank returned the ${amount} payout to PayMongo, so it no longer needs a fund. ` +
+          'Check the bank details in PayMongo.',
+      actorUid: null,
+    };
+  }
   if (before.status === after.status && num(before.assignedAmount) === num(after.assignedAmount)) return null;
   const actorName = after.lastActionByName || 'Someone';
   if (after.status === 'already_recorded') {
@@ -195,5 +222,6 @@ module.exports = {
   validateLines,
   planAssignment,
   payoutFromPaymongo,
+  returnUpdate,
   noticeFor,
 };
