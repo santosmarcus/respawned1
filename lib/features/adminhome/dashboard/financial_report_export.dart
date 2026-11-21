@@ -4,19 +4,16 @@ import 'dart:typed_data';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:google_fonts/google_fonts.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
 import 'package:share_plus/share_plus.dart';
 
-import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/core/models/donation/donation_model.dart';
 import 'package:respawnd1/core/models/rescue/expense.dart';
-import 'package:respawnd1/features/admin/donation/donation_admin_providers.dart';
-import 'package:respawnd1/features/admin/rescue/state/rescue_reports_providers.dart';
 import 'package:respawnd1/features/adminhome/dashboard/analytics_export.dart' show pdfSafe, toCsv;
+import 'package:respawnd1/features/adminhome/dashboard/monthly_report_page.dart';
 
 /// Monthly financial report for the organization's finance staff
 /// (financeView or financeManage): money in, refunds, bills paid, how
@@ -384,106 +381,38 @@ Future<MonthlyFinanceReport> loadMonthlyFinanceReport(String orgId, DateTime mon
   );
 }
 
+// ─── Sharing ─────────────────────────────────────────────────────────────
+
+String _slug(DateTime m) => '${m.year}-${m.month.toString().padLeft(2, '0')}';
+
+/// Shares (or saves, from the system sheet) the report as a PDF.
+Future<void> shareFinancialReportPdf(MonthlyFinanceReport r, {required String organizationName}) async {
+  final bytes = await buildFinancialReportPdf(r, organizationName: organizationName);
+  await Printing.sharePdf(bytes: bytes, filename: 'financial_report_${_slug(r.from)}.pdf');
+}
+
+/// Shares the report's sections as CSV files.
+Future<void> shareFinancialReportCsv(MonthlyFinanceReport r) async {
+  final dir = await getTemporaryDirectory();
+  final files = <XFile>[];
+  for (final e in financialReportCsv(r).entries) {
+    final f = File('${dir.path}/financial_report_${_slug(r.from)}_${e.key}.csv');
+    await f.writeAsString(e.value);
+    files.add(XFile(f.path, mimeType: 'text/csv'));
+  }
+  await SharePlus.instance.share(ShareParams(files: files, text: 'Financial report · ${monthLabel(r.from)}'));
+}
+
+/// The organization's display name for the report header.
+Future<String> organizationNameFor(String orgId) async {
+  final snap = await FirebaseFirestore.instance.collection('organizations').doc(orgId).get();
+  final name = (snap.data()?['name'] as String?)?.trim();
+  return (name == null || name.isEmpty) ? 'Organization' : name;
+}
+
 // ─── Entry point ─────────────────────────────────────────────────────────
 
-/// Asks for a month and a format, then builds and shares the report.
-/// Finance staff only; the menus that call this are already gated, and
-/// firestore.rules decides what can be read.
-Future<void> runMonthlyFinancialReport(BuildContext context, WidgetRef ref) async {
-  final messenger = ScaffoldMessenger.of(context);
-  final container = ProviderScope.containerOf(context, listen: false);
-  final canView = await container.read(canViewFinancesProvider.future);
-  if (!canView) {
-    messenger.showSnackBar(const SnackBar(content: Text('Only finance staff can open the financial report.')));
-    return;
-  }
-  if (!context.mounted) return;
-  final choice = await _pickMonthAndFormat(context);
-  if (choice == null) return;
-
-  messenger.showSnackBar(const SnackBar(content: Text('Preparing the financial report…'), duration: Duration(seconds: 2)));
-  try {
-    final orgId = await container.read(currentOrganizationIdProvider.future);
-    if (orgId == null || orgId.isEmpty) {
-      messenger.showSnackBar(const SnackBar(content: Text('Your account is not linked to an organization.')));
-      return;
-    }
-    final report = await loadMonthlyFinanceReport(orgId, choice.month);
-    final orgSnap = await FirebaseFirestore.instance.collection('organizations').doc(orgId).get();
-    final orgName = (orgSnap.data()?['name'] as String?)?.trim();
-    final slug = '${choice.month.year}-${choice.month.month.toString().padLeft(2, '0')}';
-    if (choice.pdf) {
-      final bytes = await buildFinancialReportPdf(report,
-          organizationName: (orgName == null || orgName.isEmpty) ? 'Organization' : orgName);
-      await Printing.sharePdf(bytes: bytes, filename: 'financial_report_$slug.pdf');
-    } else {
-      final dir = await getTemporaryDirectory();
-      final files = <XFile>[];
-      for (final e in financialReportCsv(report).entries) {
-        final f = File('${dir.path}/financial_report_${slug}_${e.key}.csv');
-        await f.writeAsString(e.value);
-        files.add(XFile(f.path, mimeType: 'text/csv'));
-      }
-      await SharePlus.instance.share(ShareParams(files: files, text: 'Financial report · ${monthLabel(choice.month)}'));
-    }
-  } catch (e) {
-    messenger.showSnackBar(SnackBar(content: Text('Could not build the financial report: $e')));
-  }
-}
-
-Future<({DateTime month, bool pdf})?> _pickMonthAndFormat(BuildContext context) {
-  final now = DateTime.now();
-  // This month and the 11 before it; last month is the usual pick.
-  final months = [for (var i = 0; i < 12; i++) DateTime(now.year, now.month - i)];
-  var selected = months.length > 1 ? months[1] : months.first;
-  return showModalBottomSheet<({DateTime month, bool pdf})>(
-    context: context,
-    backgroundColor: AppColors.background,
-    shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
-    builder: (ctx) => StatefulBuilder(
-      builder: (ctx, setSheet) => SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(20, 16, 20, 16),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Text('Monthly financial report', style: GoogleFonts.tiltWarp(fontSize: 18, color: AppColors.textPrimary)),
-              const SizedBox(height: 4),
-              Text('Money received, refunds, bills paid and in-kind items for one month.',
-                  style: GoogleFonts.zain(fontSize: 13, color: AppColors.textSecondary)),
-              const SizedBox(height: 12),
-              DropdownButtonFormField<DateTime>(
-                initialValue: selected,
-                isExpanded: true,
-                decoration: const InputDecoration(labelText: 'Month'),
-                items: [
-                  for (final m in months)
-                    DropdownMenuItem(
-                      value: m,
-                      child: Text(m == months.first ? '${monthLabel(m)} (so far)' : monthLabel(m)),
-                    ),
-                ],
-                onChanged: (v) => setSheet(() => selected = v ?? selected),
-              ),
-              const SizedBox(height: 16),
-              ElevatedButton.icon(
-                style: AppButtons.primary,
-                onPressed: () => Navigator.pop(ctx, (month: selected, pdf: true)),
-                icon: const Icon(Icons.picture_as_pdf_outlined, size: 18),
-                label: Text('Share PDF', style: GoogleFonts.zain(fontWeight: FontWeight.w700)),
-              ),
-              const SizedBox(height: 8),
-              OutlinedButton.icon(
-                style: AppButtons.outline,
-                onPressed: () => Navigator.pop(ctx, (month: selected, pdf: false)),
-                icon: const Icon(Icons.table_chart_outlined, size: 18),
-                label: Text('Share CSV files', style: GoogleFonts.zain(fontWeight: FontWeight.w700)),
-              ),
-            ],
-          ),
-        ),
-      ),
-    ),
-  );
-}
+/// Opens the Monthly Report screen (MonthlyReportPage). Kept as the one
+/// entry point so the screen can be linked from anywhere (the admin menu,
+/// Donations, Analytics export, or a dashboard card) with a single call.
+Future<void> runMonthlyFinancialReport(BuildContext context, WidgetRef ref) => openMonthlyReport(context);

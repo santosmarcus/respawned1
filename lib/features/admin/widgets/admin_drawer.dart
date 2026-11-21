@@ -1,5 +1,6 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:respawnd1/features/adminhome/dashboard/monthly_report_page.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 
@@ -301,6 +302,14 @@ class _AdminDrawerState extends ConsumerState<AdminDrawer> {
                     selected: widget.active == AdminModule.donations,
                     onTap: () => _openModule(context, (_) => const DonationAdminHomeScreen()),
                   ),
+                  // Finance staff only. The screen opens through
+                  // openMonthlyReport, so it can also be linked from the
+                  // dashboard with one call.
+                  if (caps.canViewFinances)
+                    _DrawerItem(
+                      label: 'Monthly Report',
+                      onTap: () => _openModule(context, (_) => const MonthlyReportPage()),
+                    ),
                   _DrawerItem(
                     label: 'Records',
                     viewOnly: !can(caps.canManageRecords || caps.canGiveCare),

@@ -61,6 +61,22 @@ Widget inShelterBadge() => Container(
   ),
 );
 
+/// "Adopted" indicator, same shape as [inShelterBadge]: shown on admin
+/// cards (even compact) once the animal has been released to its adopter.
+Widget adoptedBadge() => Container(
+  margin: const EdgeInsets.only(top: 2),
+  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+  decoration: BoxDecoration(color: AppColors.lavenderrspwn.withValues(alpha: 0.6), borderRadius: BorderRadius.circular(20)),
+  child: Row(
+    mainAxisSize: MainAxisSize.min,
+    children: [
+      const Icon(Icons.volunteer_activism, size: 10, color: AppColors.textPrimary),
+      const SizedBox(width: 3),
+      Text('Adopted', style: GoogleFonts.zain(fontSize: 10, color: AppColors.textPrimary)),
+    ],
+  ),
+);
+
 /// Shared Animal Record list-card — the structural base for both the admin
 /// Animal Records list (`animal_record_page.dart`) and the user Adoption
 /// list (`adoption_page.dart`), which used to be two unrelated layouts (the
@@ -218,6 +234,9 @@ class AnimalRecordCard extends StatelessWidget {
                     Text(animal.age, style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary)),
                   if (animal.hasSpecialNeeds) specialNeedsBadge(),
                   if (showInShelterBadge && isInShelter(animal)) inShelterBadge(),
+                  // Admin list only: the user-facing list shows its own
+                  // public status pill instead.
+                  if (compact && animal.isAdopted) adoptedBadge(),
                   if (!compact && animal.description.isNotEmpty)
                     Text(
                       animal.description,
@@ -393,13 +412,14 @@ class AnimalRecordGridTile extends StatelessWidget {
                     // rows) — sit side-by-side when both fit, only
                     // dropping to a second line when they genuinely don't,
                     // instead of always reserving two full rows of height.
-                    if (animal.hasSpecialNeeds || isInShelter(animal))
+                    if (animal.hasSpecialNeeds || isInShelter(animal) || animal.isAdopted)
                       Wrap(
                         spacing: 4,
                         runSpacing: 4,
                         children: [
                           if (animal.hasSpecialNeeds) specialNeedsBadge(),
                           if (isInShelter(animal)) inShelterBadge(),
+                          if (animal.isAdopted) adoptedBadge(),
                         ],
                       ),
                   ],
