@@ -16,6 +16,8 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/core/widgets/app_messages.dart';
+import 'package:respawnd1/core/widgets/app_dialogs.dart';
+import 'package:respawnd1/features/generalhome/profile/profile_edit_page.dart';
 
 class ServiceScreen extends StatefulWidget{
   const ServiceScreen({super.key});
@@ -487,11 +489,30 @@ class _ServiceScreenState extends State<ServiceScreen> {
         return;
       }
     }
+    // Organizations call the transporter about a pickup, so a phone
+    // number is required to go online (Assign Transport only lists
+    // transporters with one).
+    if (!await _hasPhoneNumber()) {
+      if (!mounted) return;
+      final add = await showConfirmActionDialog(
+        context,
+        title: 'Add your phone number',
+        message: 'Organizations call you about pickups, so you need a phone number on your profile '
+            'before you can go online.',
+        confirmLabel: 'Add Phone Number',
+        cancelLabel: 'Not Now',
+      );
+      if (!add || !mounted) return;
+      await Navigator.push(context, MaterialPageRoute(builder: (_) => const ProfileEditPage()));
+      if (!mounted || !await _hasPhoneNumber()) return;
+    }
+    if (!mounted) return;
     setState(() => _loadingLocation = true);
     try {
       bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
       if (!serviceEnabled) {
-        _showError('Location services are disabled.');
+        _showError('Turn on location to go online. Organizations need it to find you for nearby rescues.');
+        unawaited(Geolocator.openLocationSettings());
         return;
       }
       LocationPermission permission = await Geolocator.checkPermission();
@@ -500,7 +521,8 @@ class _ServiceScreenState extends State<ServiceScreen> {
       }
       if (permission == LocationPermission.denied ||
           permission == LocationPermission.deniedForever) {
-        _showError('Location permission denied.');
+        _showError('Allow location access to go online. Organizations need it to find you for nearby rescues.');
+        if (permission == LocationPermission.deniedForever) unawaited(Geolocator.openAppSettings());
         return;
       }
       // A high-accuracy fix can take 10-30 seconds on budget phones or
@@ -521,14 +543,41 @@ class _ServiceScreenState extends State<ServiceScreen> {
       });
       unawaited(_writePresence(online: true));
       _presenceHeartbeat?.cancel();
-      _presenceHeartbeat = Timer.periodic(
-          const Duration(minutes: 2), (_) => _writePresence(online: true));
+      _presenceHeartbeat = Timer.periodic(const Duration(minutes: 2), (_) => _heartbeat());
       if (lastKnown != null) unawaited(_refineLocation());
     } catch (_) {
       _showError('Could not get location. Check that location is on and try again.');
     } finally {
       if (mounted) setState(() => _loadingLocation = false);
     }
+  }
+
+  Future<bool> _hasPhoneNumber() async {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return false;
+    try {
+      final doc = await FirebaseFirestore.instance.collection('users').doc(uid).get();
+      return ((doc.data()?['phone'] as String?) ?? '').trim().isNotEmpty;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Keeps presence fresh while online. Location must stay on: turning it
+  /// off takes the transporter offline instead of advertising a stale pin.
+  Future<void> _heartbeat() async {
+    var locationOn = true;
+    try {
+      locationOn = await Geolocator.isLocationServiceEnabled();
+    } catch (_) {}
+    if (!locationOn) {
+      if (mounted && _isOnline) {
+        _goOffline();
+        _showError("You're offline because location was turned off. Turn it on and go online again.");
+      }
+      return;
+    }
+    await _writePresence(online: true);
   }
 
   /// Replaces the last known position used to go online with a fresh fix,

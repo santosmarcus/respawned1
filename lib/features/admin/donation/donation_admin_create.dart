@@ -6,7 +6,6 @@ import 'package:image_picker/image_picker.dart';
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/core/models/rescue/animal_record.dart';
 import 'package:respawnd1/features/donation/models.dart';
-import 'package:respawnd1/core/models/rescue/animal_record.dart';
 import 'package:respawnd1/core/models/rescue/rescue_case.dart';
 import 'package:respawnd1/core/models/donation/donation_model.dart';
 import 'donation_admin_providers.dart';
@@ -654,33 +653,26 @@ class _DonationAdminCreatePageState extends ConsumerState<DonationAdminCreatePag
           borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: AppColors.greenrspwn)),
     );
     final style = GoogleFonts.zain(fontSize: 14, color: AppColors.textPrimary);
-    return Padding(
-      padding: const EdgeInsets.only(top: 10),
+    final small = GoogleFonts.zain(fontSize: 12, fontWeight: FontWeight.w700, color: AppColors.textSecondary);
+    // One card per item, every field full width: side-by-side fixed widths
+    // cut off the category and drop-off text on phone screens.
+    return Container(
+      margin: const EdgeInsets.only(top: 10),
+      padding: const EdgeInsets.fromLTRB(12, 4, 4, 12),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppColors.textPrimary.withValues(alpha: 0.15)),
+      ),
       child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Row(
             children: [
-              Container(
-                width: 112,
-                padding: const EdgeInsets.symmetric(horizontal: 8),
-                decoration: BoxDecoration(
-                  color: AppColors.surface,
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: AppColors.textPrimary.withValues(alpha: 0.25)),
-                ),
-                child: DropdownButton<String>(
-                  value: r.category,
-                  isExpanded: true,
-                  underline: const SizedBox(),
-                  items: [
-                    for (final c in kInKindCategories)
-                      DropdownMenuItem(value: c, child: Text(c, overflow: TextOverflow.ellipsis, style: style)),
-                  ],
-                  onChanged: (v) => setState(() => r.category = v ?? r.category),
-                ),
+              Expanded(
+                child: Text('Item ${i + 1}',
+                    style: GoogleFonts.zain(fontSize: 14, fontWeight: FontWeight.w800, color: AppColors.textPrimary)),
               ),
-              const SizedBox(width: 8),
-              Expanded(child: TextField(controller: r.description, style: style, decoration: box('Item, e.g. dry dog food'))),
               IconButton(
                 tooltip: 'Remove item',
                 icon: const Icon(Icons.delete_outline, color: AppColors.textPrimary),
@@ -693,28 +685,55 @@ class _DonationAdminCreatePageState extends ConsumerState<DonationAdminCreatePag
               ),
             ],
           ),
-          const SizedBox(height: 6),
-          Row(
-            children: [
-              SizedBox(
-                width: 112,
-                child: TextField(controller: r.quantity, keyboardType: TextInputType.number, style: style, decoration: box('Qty needed')),
-              ),
-              const SizedBox(width: 8),
-              SizedBox(
-                width: 96,
-                child: DropdownButtonFormField<String>(
-                  initialValue: r.unit.text.isEmpty ? null : r.unit.text,
+          Padding(
+            padding: const EdgeInsets.only(right: 8),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Text('Category', style: small),
+                const SizedBox(height: 4),
+                DropdownButtonFormField<String>(
+                  initialValue: r.category,
                   isExpanded: true,
                   style: style,
-                  decoration: box('Unit'),
-                  items: [for (final u in stockUnits) DropdownMenuItem(value: u, child: Text(u))],
-                  onChanged: (v) => r.unit.text = v ?? '',
+                  decoration: box('Category'),
+                  items: [
+                    for (final c in kInKindCategories)
+                      DropdownMenuItem(value: c, child: Text(c, style: style)),
+                  ],
+                  onChanged: (v) => setState(() => r.category = v ?? r.category),
                 ),
-              ),
-              const SizedBox(width: 8),
-              Expanded(child: TextField(controller: r.instructions, style: style, decoration: box('Drop-off instructions'))),
-            ],
+                const SizedBox(height: 10),
+                Text('Item', style: small),
+                const SizedBox(height: 4),
+                TextField(controller: r.description, style: style, decoration: box('e.g. dry dog food')),
+                const SizedBox(height: 10),
+                Text('Quantity needed', style: small),
+                const SizedBox(height: 4),
+                TextField(
+                  controller: r.quantity,
+                  keyboardType: TextInputType.number,
+                  style: style,
+                  decoration: box('e.g. 10'),
+                ),
+                const SizedBox(height: 8),
+                UnitChips(
+                  value: r.unit.text,
+                  options: stockUnits,
+                  onChanged: (u) => setState(() => r.unit.text = u),
+                ),
+                const SizedBox(height: 10),
+                Text('Drop-off instructions', style: small),
+                const SizedBox(height: 4),
+                TextField(
+                  controller: r.instructions,
+                  style: style,
+                  minLines: 1,
+                  maxLines: 3,
+                  decoration: box('Where and when to bring it'),
+                ),
+              ],
+            ),
           ),
         ],
       ),

@@ -577,6 +577,14 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
         'pickup',
       );
       await _service.submitPickupVerification(urls);
+    } on ShelterLocationMissing {
+      if (mounted) {
+        await showInfoDialog(
+          context,
+          title: 'Shelter location not set',
+          message: kShelterLocationMissingMessage,
+        );
+      }
     } finally {
       if (mounted) setState(() => _isActing = false);
     }

@@ -323,6 +323,20 @@ class RescueCase {
 
   bool get hasSavedClinic => vetClinicName != null && vetClinicName!.isNotEmpty;
 
+  /// Staff chose "Straight to shelter" on Assign Transport: the animal
+  /// goes from pickup to the organization's shelter with no clinic stop.
+  bool get goesToShelter => raw['transportDestination'] == 'shelter';
+
+  /// Where the animal goes is saved: the shelter pin for a shelter trip,
+  /// otherwise a clinic.
+  bool get hasTransportDestination =>
+      goesToShelter ? raw['shelterLat'] is num && raw['shelterLng'] is num : hasSavedClinic;
+
+  /// The shelter or clinic the animal is being taken to, for messages.
+  String get transportDestinationName => goesToShelter
+      ? ((raw['shelterName'] as String?)?.trim().isNotEmpty ?? false ? (raw['shelterName'] as String).trim() : 'the shelter')
+      : (hasSavedClinic ? vetClinicName! : 'the clinic');
+
   /// Every animal in this case with an elevated bite/escape risk — checks
   /// each entry in [animals] (a case now covers one or more animals), not
   /// just the legacy case-level [biteRisk]/[escapeRisk] fields, which are

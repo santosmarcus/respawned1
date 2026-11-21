@@ -196,22 +196,22 @@ class NeglectAbuseFields extends _NeglectSection {
           const SizedBox(height: 6),
           RescueTextField(
             form.neglectReportReferenceController,
-            'Blotter or report reference number (optional)',
+            'Barangay or police report number, if you have one',
           ),
         ],
         if (form.neglectReportedToAuthorities == 'No') ...[
           const SizedBox(height: 6),
           _hint(
-            'Please report it to your barangay officials or the police as '
-                'soon as you can. A barangay blotter or police report is needed '
-                'before a case can be filed, and we can guide you through it.',
+            'Please report it to your barangay or the police as soon as you '
+                'can. A case can only be filed after it is reported to them, and '
+                'we can guide you through it.',
           ),
         ],
         const SizedBox(height: 20),
 
         RescueFieldLabel(
-          'If a case is filed, are you willing to give a sworn statement '
-              '(affidavit) as a witness?',
+          'If a case is filed, are you willing to be a witness and give a '
+              'signed written statement?',
           required: true,
         ),
         const SizedBox(height: 4),
@@ -222,9 +222,9 @@ class NeglectAbuseFields extends _NeglectSection {
         ),
         const SizedBox(height: 4),
         _hint(
-          'Cruelty cases rely on witnesses who are willing to execute an '
-              'affidavit and appear in court. Your identity can still be kept '
-              'confidential from the alleged owner (see the option below).',
+          'Cruelty cases need witnesses who will sign a statement and, if '
+              'needed, speak in court. You can still keep your name hidden from '
+              'the owner (see the option below).',
         ),
       ],
     );
@@ -319,9 +319,8 @@ class _GuidanceBox extends StatelessWidget {
           ),
           const SizedBox(height: 8),
           Text(
-            'Animal cruelty and neglect are crimes under the Animal Welfare '
-                'Act (Republic Act No. 8485, as amended by Republic Act No. '
-                '10631). Please report this to your barangay officials or the '
+            'Hurting or neglecting an animal is against the law in the '
+                'Philippines. Please also report this to your barangay or the '
                 'police (911) as soon as possible. Posting about it on social '
                 'media alone is not a report and does not stop the abuse.',
             style: body(),
@@ -352,13 +351,11 @@ class _GuidanceBox extends StatelessWidget {
           ),
           const SizedBox(height: 3),
           Text(
-            'Animal welfare organizations are private groups. They cannot '
-                'legally confiscate an animal from its owner or file a criminal '
-                'case on your behalf; only law enforcement and the courts can '
-                'act on a cruelty complaint. What we can do is help you report '
-                'the case to the proper authorities, guide you in preparing '
-                'your evidence and affidavits, and assist with the animal\'s '
-                'rescue and veterinary care once it is safe and lawful to do so.',
+            'Rescue groups are private groups. They cannot take an animal '
+                'away from its owner or file a case for you; only the police '
+                'and the courts can. What we can do is help you report it, help '
+                'you prepare your photos and written statement, and help rescue '
+                'and treat the animal once it is safe and legal to do so.',
             style: body(),
           ),
           const SizedBox(height: 10),

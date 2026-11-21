@@ -18,6 +18,7 @@ import 'donation_admin_create.dart';
 import 'donation_admin_filters.dart';
 import 'donation_admin_info.dart';
 import 'donation_admin_providers.dart';
+import 'package:respawnd1/features/adminhome/dashboard/financial_report_export.dart';
 import 'package:respawnd1/features/adminhome/dashboard/shelter_settings.dart';
 import 'donation_admin_records.dart';
 import 'donation_admin_search.dart';
@@ -86,6 +87,7 @@ class _DonationAdminHomeScreenState extends ConsumerState<DonationAdminHomeScree
   @override
   Widget build(BuildContext context) {
     final canFinance = ref.watch(canManageFinancesProvider).asData?.value ?? false;
+    final canViewFinance = ref.watch(canViewFinancesProvider).asData?.value ?? false;
     final openRefunds = (ref.watch(allDonationsProvider).asData?.value ?? const [])
         .where((d) => d.refundRequest?.isOpen ?? false)
         .length;
@@ -109,6 +111,14 @@ class _DonationAdminHomeScreenState extends ConsumerState<DonationAdminHomeScree
               label: 'General expenses',
               icon: Icons.receipt_long_outlined,
               onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const GeneralExpensesPage())),
+            ),
+          // financeView or financeManage, the same people who see donor
+          // records and donation reports.
+          if (canViewFinance)
+            AdminMenuAction(
+              label: 'Monthly financial report',
+              icon: Icons.summarize_outlined,
+              onTap: () => runMonthlyFinancialReport(context, ref),
             ),
           if (canFinance)
             AdminMenuAction(

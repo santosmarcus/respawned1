@@ -264,6 +264,19 @@ class RescueCaseRepository {
     actorName: actorName,
   );
 
+  /// Delegates to [TransportAssignmentRepository.confirmOrganizationTransportAtShelter].
+  Future<void> confirmOrganizationTransportAtShelter({
+    required String caseId,
+    required String actorUid,
+    required String actorName,
+    required List<Map<String, dynamic>> animals,
+  }) => transport.confirmOrganizationTransportAtShelter(
+    caseId: caseId,
+    actorUid: actorUid,
+    actorName: actorName,
+    animals: animals,
+  );
+
   /// Delegates to [TransportAssignmentRepository.returnToAssignmentAfterTransitEnded].
   Future<void> returnToAssignmentAfterTransitEnded({
     required String caseId,
@@ -489,6 +502,38 @@ class RescueCaseRepository {
     actorName: actorName,
     availabilityStatus: availabilityStatus,
     closedWarningAcknowledged: closedWarningAcknowledged,
+  );
+
+  /// Delegates to [ClinicAssignmentRepository.sendToShelter].
+  Future<void> sendToShelter({
+    required String caseId,
+    required String shelterName,
+    String? shelterAddress,
+    required double shelterLat,
+    required double shelterLng,
+    required String actorUid,
+    required String actorName,
+  }) => clinics.sendToShelter(
+    caseId: caseId,
+    shelterName: shelterName,
+    shelterAddress: shelterAddress,
+    shelterLat: shelterLat,
+    shelterLng: shelterLng,
+    actorUid: actorUid,
+    actorName: actorName,
+  );
+
+  /// Delegates to [ClinicAssignmentRepository.useClinicDestination].
+  Future<void> useClinicDestination({
+    required String caseId,
+    required String clinicName,
+    required String actorUid,
+    required String actorName,
+  }) => clinics.useClinicDestination(
+    caseId: caseId,
+    clinicName: clinicName,
+    actorUid: actorUid,
+    actorName: actorName,
   );
 
   /// Delegates to [ClinicAssignmentRepository.changeClinic].

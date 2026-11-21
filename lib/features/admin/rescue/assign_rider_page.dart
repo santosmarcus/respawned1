@@ -29,6 +29,7 @@ import 'package:respawnd1/features/admin/rescue/widgets/refer_case_sheet.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/select_clinic_sheet.dart';
 import 'package:respawnd1/core/widgets/app_messages.dart';
 import 'package:respawnd1/core/widgets/app_dialogs.dart';
+import 'package:respawnd1/features/organization/shelter_location_picker_page.dart';
 
 // ---- Demo transporters ---------------------------------------------------
 // Two fixed, clearly-marked (isDemo: true) test transporters so the whole
@@ -100,6 +101,8 @@ void _scheduleDemoResponse({
 }
 
 enum _RiderAvailability { available, pending, busy }
+
+enum _FallbackChoice { retry, chooseAnother, refer, selfTransport, keepWaiting }
 
 class _RiderVm {
   final String uid;
@@ -299,15 +302,18 @@ class _AssignRiderPageState extends ConsumerState<AssignRiderPage> {
   }
 
   Future<void> _organizationWillTransport() async {
+    final toShelter = _currentCaseData()['transportDestination'] == 'shelter';
+    final place = toShelter ? 'your shelter' : 'the selected clinic';
+    final next = toShelter ? 'start intake' : 'start treatment';
     final confirmed = await showConfirmActionDialog(
       context,
       title: _isIndependent ? 'Bring it yourself?' : 'Organization will transport?',
       message: _isIndependent
-          ? 'You or someone on your team brings the animal to the selected clinic, without a transporter. '
-              'The case moves to Ongoing; confirm arrival on Rescue Details to start treatment. '
+          ? 'You or someone on your team brings the animal to $place, without a transporter. '
+              'The case moves to Ongoing; confirm arrival on Rescue Details to $next. '
               "If the trip can't be finished, switch to a transporter from Rescue Details."
-          : 'Your organization will bring the animal to the selected clinic itself, without a transporter. '
-              'The case moves to Ongoing; confirm arrival on Rescue Details to start treatment.',
+          : 'Your organization will bring the animal to $place itself, without a transporter. '
+              'The case moves to Ongoing; confirm arrival on Rescue Details to $next.',
       confirmLabel: _isIndependent ? "I'll Bring It" : 'We Will Transport',
       cancelLabel: 'Back',
     );
@@ -323,7 +329,7 @@ class _AssignRiderPageState extends ConsumerState<AssignRiderPage> {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         appSnackBar(_isIndependent
-            ? 'Recorded: your team is bringing this animal to the clinic.'
+            ? 'Recorded: your team is bringing this animal to ${toShelter ? 'the shelter' : 'the clinic'}.'
             : 'Recorded: your organization is transporting this animal.'),
       );
       Navigator.pop(context);
@@ -339,48 +345,193 @@ class _AssignRiderPageState extends ConsumerState<AssignRiderPage> {
     }
   }
 
-  Widget _noTransporterPrompt({required int failedOffers, required bool isCritical}) {
-    final reason = failedOffers >= kNoTransporterAttemptLimit
-        ? '$failedOffers transporter offers for this case were declined or expired.'
-        : 'Nobody is available within ${_maxRadiusKm.toStringAsFixed(0)} km.';
+  String _fallbackReason(int failedOffers) => failedOffers >= kNoTransporterAttemptLimit
+      ? '$failedOffers transporter offers for this case were declined or expired.'
+      : 'Nobody is available within ${_maxRadiusKm.toStringAsFixed(0)} km.';
+
+  /// True while the no-transporter sheet is on screen, so build() doesn't
+  /// stack a second one.
+  bool _fallbackSheetOpen = false;
+
+  /// Latest transporter list, for Retry from the sheet.
+  List<_RiderVm> _latestRiders = const [];
+
+  /// The no-transporter options as a bottom sheet, so they aren't squeezed
+  /// between the map and the transporter list. Opens by itself when the
+  /// fallback applies (again on every visit to this page, and again when
+  /// another offer fails); the banner reopens it after Keep Waiting.
+  Future<void> _openFallbackSheet({
+    required int failedOffers,
+    required bool isCritical,
+    required TransportAssignment? failedOffer,
+  }) async {
+    if (_fallbackSheetOpen || !mounted) return;
+    _fallbackSheetOpen = true;
     final tone = isCritical ? AppColors.error : AppColors.warning;
-    return Container(
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: tone.withValues(alpha: 0.12),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: tone),
+    final declined = failedOffer?.status == TransportAssignmentStatus.rejected;
+    final choice = await showModalBottomSheet<_FallbackChoice>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: AppColors.background,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (ctx) => SafeArea(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.fromLTRB(20, 12, 20, 16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Center(
+                child: Container(
+                  width: 40,
+                  height: 4,
+                  decoration: BoxDecoration(color: AppColors.slaterspwn, borderRadius: BorderRadius.circular(2)),
+                ),
+              ),
+              const SizedBox(height: 14),
+              Row(children: [
+                Icon(Icons.warning_amber_rounded, color: tone),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text('No transporter yet',
+                      style: GoogleFonts.tiltWarp(fontSize: 18, color: AppColors.textPrimary)),
+                ),
+              ]),
+              const SizedBox(height: 6),
+              Text('${_fallbackReason(failedOffers)} Choose how to move this case forward.',
+                  style: GoogleFonts.zain(fontSize: 14, color: AppColors.textPrimary)),
+              if (failedOffer != null) ...[
+                const SizedBox(height: 10),
+                Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: AppColors.error.withValues(alpha: 0.08),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Text(
+                    [
+                      declined ? 'Last offer: ${failedOffer.riderName} declined' : 'Last offer to ${failedOffer.riderName} expired',
+                      if (declined && (failedOffer.rejectionReason ?? '').isNotEmpty) failedOffer.rejectionReason!,
+                    ].join('\n'),
+                    style: GoogleFonts.zain(fontSize: 13, color: AppColors.textPrimary),
+                  ),
+                ),
+              ],
+              const SizedBox(height: 16),
+              _sheetLabel('Try a transporter again'),
+              if (failedOffer != null) ...[
+                OutlinedButton.icon(
+                  onPressed: () => Navigator.pop(ctx, _FallbackChoice.retry),
+                  style: AppButtons.outline,
+                  icon: const Icon(Icons.refresh, size: 18),
+                  label: Text('Retry ${failedOffer.riderName}',
+                      maxLines: 1, overflow: TextOverflow.ellipsis, style: GoogleFonts.zain(fontWeight: FontWeight.w700)),
+                ),
+                const SizedBox(height: 8),
+              ],
+              OutlinedButton.icon(
+                onPressed: () => Navigator.pop(ctx, _FallbackChoice.chooseAnother),
+                style: AppButtons.outline,
+                icon: const Icon(Icons.person_search_outlined, size: 18),
+                label: Text('Choose Another Transporter', style: GoogleFonts.zain(fontWeight: FontWeight.w700)),
+              ),
+              const SizedBox(height: 16),
+              _sheetLabel('Or move the case another way'),
+              ElevatedButton.icon(
+                onPressed: () => Navigator.pop(ctx, _FallbackChoice.refer),
+                style: AppButtons.primary,
+                icon: const Icon(Icons.forward_outlined, size: 18),
+                label: Text('Refer Case (Organization / LGU)', style: GoogleFonts.zain(fontWeight: FontWeight.w700)),
+              ),
+              const SizedBox(height: 8),
+              OutlinedButton.icon(
+                onPressed: () => Navigator.pop(ctx, _FallbackChoice.selfTransport),
+                style: AppButtons.outline,
+                icon: const Icon(Icons.directions_car_outlined, size: 18),
+                label: Text(_isIndependent ? "I'll Bring It Myself" : 'Organization Will Transport',
+                    style: GoogleFonts.zain(fontWeight: FontWeight.w700)),
+              ),
+              const SizedBox(height: 8),
+              TextButton(
+                onPressed: () => Navigator.pop(ctx, _FallbackChoice.keepWaiting),
+                child: Text('Keep Waiting for a Transporter',
+                    style: GoogleFonts.zain(color: AppColors.textSecondary, fontWeight: FontWeight.w600)),
+              ),
+            ],
+          ),
+        ),
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Text('No transporter available',
-              style: GoogleFonts.tiltWarp(fontSize: 15, color: AppColors.textPrimary)),
-          const SizedBox(height: 4),
-          Text('$reason Choose how to move this case forward.',
-              style: GoogleFonts.zain(fontSize: 13, color: AppColors.textPrimary)),
-          const SizedBox(height: 10),
-          ElevatedButton.icon(
-            onPressed: _fallbackBusy ? null : _referFromFallback,
-            style: AppButtons.primary,
-            icon: const Icon(Icons.forward_outlined, size: 18),
-            label: Text('Refer Case (Organization / LGU)', style: GoogleFonts.zain(fontWeight: FontWeight.w700)),
+    );
+    _fallbackSheetOpen = false;
+    if (!mounted) return;
+    // Any close (including a swipe down) counts as Keep Waiting: it comes
+    // back when another offer fails, on the next visit, or from the banner.
+    setState(() => _fallbackDismissedAtCount = failedOffers);
+    switch (choice) {
+      case _FallbackChoice.retry:
+        if (failedOffer != null) await _retryRider(failedOffer, _latestRiders);
+      case _FallbackChoice.chooseAnother:
+        if (failedOffer != null) setState(() => _dismissedOutcomeId = failedOffer.id);
+      case _FallbackChoice.refer:
+        await _referFromFallback();
+      case _FallbackChoice.selfTransport:
+        await _organizationWillTransport();
+      case _FallbackChoice.keepWaiting:
+      case null:
+        break;
+    }
+  }
+
+  Widget _sheetLabel(String text) => Padding(
+        padding: const EdgeInsets.only(bottom: 6),
+        child: Text(text.toUpperCase(),
+            style: GoogleFonts.zain(
+                fontSize: 11, fontWeight: FontWeight.w800, letterSpacing: 0.6, color: AppColors.textSecondary)),
+      );
+
+  /// One line in place of the old inline prompt; reopens the sheet.
+  Widget _fallbackBanner({
+    required int failedOffers,
+    required bool isCritical,
+    required TransportAssignment? failedOffer,
+  }) {
+    final tone = isCritical ? AppColors.error : AppColors.warning;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
+      child: Material(
+        color: tone.withValues(alpha: 0.12),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12), side: BorderSide(color: tone)),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(12),
+          onTap: _fallbackBusy
+              ? null
+              : () => _openFallbackSheet(failedOffers: failedOffers, isCritical: isCritical, failedOffer: failedOffer),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(12, 10, 8, 10),
+            child: Row(
+              children: [
+                Icon(Icons.warning_amber_rounded, color: tone, size: 20),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    failedOffers >= kNoTransporterAttemptLimit
+                        ? 'No transporter yet · $failedOffers offers declined or expired'
+                        : 'No transporter available nearby',
+                    style: GoogleFonts.zain(fontSize: 13, fontWeight: FontWeight.w700, color: AppColors.textPrimary),
+                  ),
+                ),
+                _fallbackBusy
+                    ? const Padding(
+                        padding: EdgeInsets.all(8),
+                        child: SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)),
+                      )
+                    : Text('Options',
+                        style: GoogleFonts.zain(fontSize: 13, fontWeight: FontWeight.w800, color: AppColors.textPrimary)),
+                const Icon(Icons.chevron_right, color: AppColors.textPrimary),
+              ],
+            ),
           ),
-          const SizedBox(height: 8),
-          OutlinedButton.icon(
-            onPressed: _fallbackBusy ? null : _organizationWillTransport,
-            style: AppButtons.outline,
-            icon: const Icon(Icons.directions_car_outlined, size: 18),
-            label: Text(_isIndependent ? "I'll Bring It Myself" : 'Organization Will Transport',
-                style: GoogleFonts.zain(fontWeight: FontWeight.w700)),
-          ),
-          const SizedBox(height: 4),
-          TextButton(
-            onPressed: _fallbackBusy ? null : () => setState(() => _fallbackDismissedAtCount = failedOffers),
-            child: Text('Keep Waiting for a Transporter',
-                style: GoogleFonts.zain(color: AppColors.textSecondary, fontWeight: FontWeight.w600)),
-          ),
-        ],
+        ),
       ),
     );
   }
@@ -528,7 +679,6 @@ class _AssignRiderPageState extends ConsumerState<AssignRiderPage> {
   /// choose another.
   Widget _failedOfferCard(TransportAssignment a, List<_RiderVm> riders) {
     final declined = a.status == TransportAssignmentStatus.rejected;
-    final firstName = a.riderName.split(' ').first;
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
       child: Container(
@@ -547,21 +697,28 @@ class _AssignRiderPageState extends ConsumerState<AssignRiderPage> {
             if (declined && (a.rejectionReason ?? '').isNotEmpty)
               Text(a.rejectionReason!, style: GoogleFonts.zain(fontSize: 13, color: AppColors.textSecondary)),
             const SizedBox(height: 10),
+            // Short labels: the header already names the transporter, and
+            // a name inside a half-width button got squeezed.
             Row(
               children: [
                 Expanded(
                   child: OutlinedButton(
                     onPressed: _isAssigning ? null : () => _retryRider(a, riders),
-                    style: AppButtons.outline,
-                    child: Text('Retry $firstName', style: GoogleFonts.zain(fontWeight: FontWeight.w700)),
+                    style: AppButtons.outline.copyWith(
+                        padding: const WidgetStatePropertyAll(EdgeInsets.symmetric(horizontal: 8, vertical: 10))),
+                    child: Text('Retry', maxLines: 1, style: GoogleFonts.zain(fontWeight: FontWeight.w700)),
                   ),
                 ),
                 const SizedBox(width: 10),
                 Expanded(
                   child: ElevatedButton(
                     onPressed: () => setState(() => _dismissedOutcomeId = a.id),
-                    style: AppButtons.primary,
-                    child: Text('Choose Another', style: GoogleFonts.zain(fontWeight: FontWeight.w700)),
+                    style: AppButtons.primary.copyWith(
+                        padding: const WidgetStatePropertyAll(EdgeInsets.symmetric(horizontal: 8, vertical: 10))),
+                    child: FittedBox(
+                      fit: BoxFit.scaleDown,
+                      child: Text('Choose another', maxLines: 1, style: GoogleFonts.zain(fontWeight: FontWeight.w700)),
+                    ),
                   ),
                 ),
               ],
@@ -616,7 +773,16 @@ class _AssignRiderPageState extends ConsumerState<AssignRiderPage> {
       ) {
     // Unverified transporters can't take transits (firestore.rules
     // isVerifiedResponder), so they are never offered one.
-    final onlineTransporters = transporters.where((t) => t.isOnline && t.isVerified).toList();
+    // Phone and location are required too: staff call the transporter
+    // about the pickup, and distance/radius need where they are.
+    final onlineTransporters = transporters
+        .where((t) =>
+            t.isOnline &&
+            t.isVerified &&
+            (t.phone ?? '').trim().isNotEmpty &&
+            t.lastLat != null &&
+            t.lastLng != null)
+        .toList();
     double distanceFor(LatLng pos) =>
         haversineDistanceKm(center.latitude, center.longitude, pos.latitude, pos.longitude);
 
@@ -777,48 +943,186 @@ class _AssignRiderPageState extends ConsumerState<AssignRiderPage> {
     }
   }
 
+  /// Direct to shelter applies only to organizations with a shelter —
+  /// independent rescuers have none (statusAfterTreatmentAccepted).
+  bool _canGoToShelter(Map<String, dynamic> d) => !_isIndependent && d['ownerKind'] != 'independent';
+
+  /// Staff chose "straight to the shelter" and the pin is on the case.
+  static bool _shelterChosen(Map<String, dynamic> d) =>
+      d['transportDestination'] == 'shelter' && d['shelterLat'] is num && d['shelterLng'] is num;
+
+  /// Direct to shelter: resolves the organization's shelter pin and saves
+  /// it as the destination. Without a pin, offers to set one first.
+  Future<void> _chooseShelter(Map<String, dynamic> d) async {
+    if (_savingClinic) return;
+    final orgId = (d['organizationId'] as String?) ?? '';
+    final directory = ref.read(organizationDirectoryRepositoryProvider);
+    setState(() => _savingClinic = true);
+    try {
+      var s = await directory.resolveShelterLocation(orgId);
+      if (!mounted) return;
+      if (s == null || s.lat == null || s.lng == null) {
+        final setNow = await showConfirmActionDialog(
+          context,
+          title: 'Shelter location not set',
+          message: "Pin your shelter's exact location first. The transporter's arrival is checked against it.",
+          confirmLabel: 'Set Shelter Location',
+          cancelLabel: 'Not Now',
+        );
+        if (!setNow || !mounted || orgId.isEmpty) return;
+        final saved = await Navigator.push<bool>(
+          context,
+          MaterialPageRoute(
+            builder: (_) => ShelterLocationPickerPage(
+              organizationId: orgId,
+              initialName: s?.name,
+              initialAddress: s?.address,
+              initialPlaceId: s?.placeId,
+            ),
+          ),
+        );
+        if (saved != true || !mounted) return;
+        s = await directory.resolveShelterLocation(orgId);
+        if (!mounted || s == null || s.lat == null || s.lng == null) return;
+      }
+      await ref.read(rescueCaseRepositoryProvider).sendToShelter(
+            caseId: widget.caseId,
+            shelterName: s.name,
+            shelterAddress: s.address,
+            shelterLat: s.lat!,
+            shelterLng: s.lng!,
+            actorUid: _actorUid,
+            actorName: _actorName,
+          );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(appSnackBar('Destination: ${s.name} (shelter)'));
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          appSnackBar('Could not set the shelter as the destination: $e', kind: AppMessageKind.error),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _savingClinic = false);
+    }
+  }
+
+  /// Clinic chosen again: keeps the clinic already saved, or opens the
+  /// clinic picker when there is none.
+  Future<void> _chooseClinic(Map<String, dynamic> d) async {
+    if (_savingClinic) return;
+    final clinicName = (d['vetClinicName'] as String?)?.trim() ?? '';
+    if (clinicName.isEmpty) return _pickClinic(d);
+    if (d['transportDestination'] != 'shelter') return;
+    setState(() => _savingClinic = true);
+    try {
+      await ref.read(rescueCaseRepositoryProvider).useClinicDestination(
+            caseId: widget.caseId,
+            clinicName: clinicName,
+            actorUid: _actorUid,
+            actorName: _actorName,
+          );
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          appSnackBar('Could not switch back to the clinic: $e', kind: AppMessageKind.error),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _savingClinic = false);
+    }
+  }
+
+  /// Where the transporter takes the animal: a clinic (then on to the
+  /// shelter after treatment) or straight to the organization's shelter.
   Widget _clinicCard(Map<String, dynamic> d) {
-    final name = (d['vetClinicName'] as String?)?.trim() ?? '';
-    final address = (d['vetClinicAddress'] as String?)?.trim() ?? '';
-    final hasClinic = name.isNotEmpty;
+    final toShelter = d['transportDestination'] == 'shelter';
+    final name = toShelter
+        ? (d['shelterName'] as String?)?.trim() ?? ''
+        : (d['vetClinicName'] as String?)?.trim() ?? '';
+    final address = toShelter
+        ? (d['shelterAddress'] as String?)?.trim() ?? ''
+        : (d['vetClinicAddress'] as String?)?.trim() ?? '';
+    final ready = toShelter ? _shelterChosen(d) : name.isNotEmpty;
+    final showChoice = _canGoToShelter(d);
+    final chipStyle = GoogleFonts.zain(fontSize: 13, fontWeight: FontWeight.w700, color: AppColors.textPrimary);
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.fromLTRB(12, 10, 6, 10),
       decoration: BoxDecoration(
-        color: hasClinic ? Colors.white : AppColors.yellowrspwn.withValues(alpha: 0.25),
+        color: ready ? Colors.white : AppColors.yellowrspwn.withValues(alpha: 0.25),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: hasClinic ? AppColors.slaterspwn : AppColors.yellowrspwn),
+        border: Border.all(color: ready ? AppColors.slaterspwn : AppColors.yellowrspwn),
       ),
-      child: Row(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Icon(Icons.local_hospital_outlined, color: AppColors.textPrimary),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+          if (showChoice) ...[
+            Text('Take the animal to',
+                style: GoogleFonts.zain(fontSize: 11, fontWeight: FontWeight.w700, color: AppColors.textSecondary)),
+            const SizedBox(height: 4),
+            Wrap(
+              spacing: 8,
+              runSpacing: 4,
               children: [
-                Text(hasClinic ? 'Clinic' : 'Choose a clinic first',
-                    style: GoogleFonts.zain(fontSize: 11, fontWeight: FontWeight.w700, color: AppColors.textSecondary)),
-                Text(hasClinic ? name : 'Where the transporter takes the animal',
-                    style: GoogleFonts.zain(fontSize: 14, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
-                if (hasClinic && address.isNotEmpty)
-                  Text(address,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary)),
+                ChoiceChip(
+                  label: Text('Clinic first', style: chipStyle),
+                  avatar: const Icon(Icons.local_hospital_outlined, size: 16),
+                  selected: !toShelter,
+                  onSelected: _savingClinic ? null : (_) => _chooseClinic(d),
+                ),
+                ChoiceChip(
+                  label: Text('Straight to shelter', style: chipStyle),
+                  avatar: const Icon(Icons.home_outlined, size: 16),
+                  selected: toShelter,
+                  onSelected: _savingClinic ? null : (_) => _chooseShelter(d),
+                ),
               ],
             ),
-          ),
-          _savingClinic
-              ? const Padding(
+            const SizedBox(height: 6),
+          ],
+          Row(
+            children: [
+              Icon(toShelter ? Icons.home_outlined : Icons.local_hospital_outlined, color: AppColors.textPrimary),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                        toShelter
+                            ? 'Shelter'
+                            : name.isNotEmpty
+                                ? 'Clinic'
+                                : 'Choose a clinic first',
+                        style: GoogleFonts.zain(fontSize: 11, fontWeight: FontWeight.w700, color: AppColors.textSecondary)),
+                    Text(name.isNotEmpty ? name : 'Where the transporter takes the animal',
+                        style: GoogleFonts.zain(fontSize: 14, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
+                    if (address.isNotEmpty)
+                      Text(address,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary)),
+                    if (toShelter)
+                      Text('No clinic stop: the animal goes from pickup to intake.',
+                          style: GoogleFonts.zain(fontSize: 11, color: AppColors.textSecondary)),
+                  ],
+                ),
+              ),
+              if (_savingClinic)
+                const Padding(
                   padding: EdgeInsets.all(12),
                   child: SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2)),
                 )
-              : TextButton(
+              else if (!toShelter)
+                TextButton(
                   onPressed: () => _pickClinic(d),
-                  child: Text(hasClinic ? 'Change' : 'Choose',
+                  child: Text(name.isNotEmpty ? 'Change' : 'Choose',
                       style: GoogleFonts.zain(fontWeight: FontWeight.w800, color: AppColors.textPrimary)),
                 ),
+            ],
+          ),
         ],
       ),
     );
@@ -915,6 +1219,10 @@ class _AssignRiderPageState extends ConsumerState<AssignRiderPage> {
         ScaffoldMessenger.of(context).showSnackBar(appSnackBar('${e.riderName} already has a pending offer for this case.'));
       }
       return;
+    } on TransporterNoLongerOnlineException catch (e) {
+      _offerRefused(e.toString());
+    } on TransporterNotReachableException catch (e) {
+      _offerRefused(e.toString());
     } catch (e, st) {
       debugPrint('Assign transporter failed: $e\n$st');
       if (mounted) {
@@ -928,6 +1236,16 @@ class _AssignRiderPageState extends ConsumerState<AssignRiderPage> {
     } finally {
       if (mounted) setState(() => _isAssigning = false);
     }
+  }
+
+  /// The server refused the offer for this transporter: back to the list.
+  void _offerRefused(String message) {
+    if (!mounted) return;
+    setState(() {
+      _optimisticOffer = null;
+      _selectedRiderUid = null;
+    });
+    ScaffoldMessenger.of(context).showSnackBar(appSnackBar(message, kind: AppMessageKind.error));
   }
 
   /// Retry the same transporter after a decline or expiry. Skips the
@@ -1118,17 +1436,27 @@ class _AssignRiderPageState extends ConsumerState<AssignRiderPage> {
     // Only for the rescue pickup: this page is also the intake-leg
     // reassignment picker, where referring or "organization will
     // transport" don't apply.
-    final showFallback = RescueStatus.fromFirestoreValue(d['status'] as String?) ==
+    // fallbackApplies: the banner stays to reopen the options;
+    // showFallback: the sheet opens by itself (not after Keep Waiting).
+    final fallbackApplies = RescueStatus.fromFirestoreValue(d['status'] as String?) ==
         RescueStatus.awaitingAssignment &&
         blockingOffer == null &&
         acceptedAssignment == null &&
-        !fallbackDismissed &&
         shouldOfferNoTransporterFallback(searchExhausted: searchExhausted, failedOfferCount: failedOffers);
+    final showFallback = fallbackApplies && !fallbackDismissed;
+    _latestRiders = riders;
+    if (showFallback && !_fallbackSheetOpen && !transportersLoading) {
+      final isCritical = urgency == 'Critical';
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        _openFallbackSheet(failedOffers: failedOffers, isCritical: isCritical, failedOffer: failedOffer);
+      });
+    }
 
     // Independent rescuers choose up front: bring it themselves, or pick a
     // transporter below. Needs the clinic saved first (awaitingAssignment).
     final showSelfTransport = _isIndependent &&
-        !showFallback &&
+        !fallbackApplies &&
         RescueStatus.fromFirestoreValue(d['status'] as String?) == RescueStatus.awaitingAssignment &&
         blockingOffer == null &&
         acceptedAssignment == null;
@@ -1138,8 +1466,12 @@ class _AssignRiderPageState extends ConsumerState<AssignRiderPage> {
       legacyBiteRisk: d['biteRisk'] as String?,
       legacyEscapeRisk: d['escapeRisk'] as String?,
     );
+    // Rescue pickup needs a destination: a clinic, or the shelter pin when
+    // staff chose straight to shelter.
     final needsClinic = widget.postAcceptTrackingMode == TrackingMode.rescuePickup &&
-        ((d['vetClinicName'] as String?)?.trim().isEmpty ?? true);
+        (d['transportDestination'] == 'shelter'
+            ? !_shelterChosen(d)
+            : ((d['vetClinicName'] as String?)?.trim().isEmpty ?? true));
     final canSend = _selectedRiderUid != null &&
         !_isAssigning &&
         !needsClinic &&
@@ -1338,7 +1670,10 @@ class _AssignRiderPageState extends ConsumerState<AssignRiderPage> {
           if (blockingOffer != null)
             _pendingOfferPanel(blockingOffer)
           else ...[
-            if (failedOffer != null) _failedOfferCard(failedOffer, riders),
+            if (fallbackApplies)
+              _fallbackBanner(failedOffers: failedOffers, isCritical: urgency == 'Critical', failedOffer: failedOffer)
+            else if (failedOffer != null)
+              _failedOfferCard(failedOffer, riders),
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16),
               child: Row(
@@ -1445,7 +1780,7 @@ class _AssignRiderPageState extends ConsumerState<AssignRiderPage> {
             Expanded(
               child: transportersLoading
                   ? const Center(child: CircularProgressIndicator())
-                  : visibleRiders.isEmpty && !showFallback
+                  : visibleRiders.isEmpty
                   ? Center(
                 child: Padding(
                   padding: const EdgeInsets.all(24),
@@ -1459,18 +1794,9 @@ class _AssignRiderPageState extends ConsumerState<AssignRiderPage> {
                   : ListView.separated(
                 key: const PageStorageKey('assign_rider_list'),
                 padding: const EdgeInsets.symmetric(horizontal: 16),
-                itemCount: visibleRiders.length + (showFallback ? 1 : 0),
+                itemCount: visibleRiders.length,
                 separatorBuilder: (_, _) => const SizedBox(height: 12),
                 itemBuilder: (context, index) {
-                  if (showFallback) {
-                    if (index == 0) {
-                      return _noTransporterPrompt(
-                        failedOffers: failedOffers,
-                        isCritical: urgency == 'Critical',
-                      );
-                    }
-                    index -= 1;
-                  }
                   final rider = visibleRiders[index];
                   final isSelected = _selectedRiderUid == rider.uid;
                   return _RiderCard(
@@ -1511,7 +1837,7 @@ class _AssignRiderPageState extends ConsumerState<AssignRiderPage> {
                     if (needsClinic)
                       Padding(
                         padding: const EdgeInsets.only(bottom: 6),
-                        child: Text('Choose a clinic to send the offer.',
+                        child: Text('Choose where the animal goes to send the offer.',
                             style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary)),
                       ),
                     SizedBox(
@@ -1609,67 +1935,38 @@ class _RiderCard extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Row(
+                  // The name gets the full width (two lines if needed);
+                  // the labels wrap underneath instead of squeezing it.
+                  Text(rider.name,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: GoogleFonts.zain(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                          color: AppColors.textPrimary)),
+                  const SizedBox(height: 4),
+                  Wrap(
+                    spacing: 4,
+                    runSpacing: 4,
+                    crossAxisAlignment: WrapCrossAlignment.center,
                     children: [
-                      Expanded(
-                        child: Text(rider.name,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: GoogleFonts.zain(
-                                fontSize: 14,
-                                fontWeight: FontWeight.w600,
-                                color: AppColors.textPrimary)),
-                      ),
-                      const SizedBox(width: 6),
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 8, vertical: 2),
-                        decoration: BoxDecoration(
-                          color: AppColors.yellowrspwn,
-                          borderRadius: BorderRadius.circular(20),
-                        ),
-                        child: Text(rider.type,
-                            style: GoogleFonts.zain(
-                                fontSize: 10,
-                                fontWeight: FontWeight.bold,
-                                color: AppColors.textPrimary)),
-                      ),
-                      if (rider.isDemo) ...[
-                        const SizedBox(width: 4),
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                          decoration: BoxDecoration(
-                            color: Colors.transparent,
-                            borderRadius: BorderRadius.circular(20),
-                            border: Border.all(color: AppColors.textSecondary.withValues(alpha: 0.5)),
-                          ),
-                          child: Text('DEMO',
-                              style: GoogleFonts.zain(
-                                  fontSize: 9,
-                                  fontWeight: FontWeight.bold,
-                                  color: AppColors.textSecondary)),
-                        ),
-                      ],
+                      // Selection is shown only by the card border; this
+                      // always reflects true Available/Pending/Busy state.
+                      _pill(statusLabel, fill: statusColor, text: statusTextColor),
+                      _pill(rider.type, fill: AppColors.yellowrspwn, text: AppColors.textPrimary),
+                      // Transporter Ranking spec — "Preferred" is shown as an
+                      // explicit reason, never a silent reordering.
+                      if (rider.isPreferred)
+                        _pill('Preferred',
+                            fill: AppColors.greenrspwn.withValues(alpha: 0.18), text: AppColors.greenrspwn),
+                      if (rider.isDemo)
+                        _pill('DEMO',
+                            fill: Colors.transparent,
+                            text: AppColors.textSecondary,
+                            border: AppColors.textSecondary.withValues(alpha: 0.5)),
                     ],
                   ),
-                  // Transporter Ranking spec — "Preferred" is shown as an
-                  // explicit reason, never a silent reordering; every other
-                  // eligible transporter is still listed (and tappable)
-                  // below, just without this badge.
-                  if (rider.isPreferred) ...[
-                    const SizedBox(height: 2),
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                      decoration: BoxDecoration(
-                        color: AppColors.greenrspwn.withValues(alpha: 0.18),
-                        borderRadius: BorderRadius.circular(20),
-                      ),
-                      child: Text('Preferred',
-                          style: GoogleFonts.zain(
-                              fontSize: 10, fontWeight: FontWeight.bold, color: AppColors.greenrspwn)),
-                    ),
-                  ],
-                  const SizedBox(height: 2),
+                  const SizedBox(height: 4),
                   Text(rider.distanceLabel,
                       style: GoogleFonts.zain(
                           fontSize: 12, color: AppColors.textSecondary)),
@@ -1687,47 +1984,31 @@ class _RiderCard extends StatelessWidget {
               ),
             ),
 
-            const SizedBox(width: 8),
-
-            // Contact + one status chip — no "Selected" state here at all;
-            // selection is shown only by the card border above.
-            Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                // Message removed — redundant with the shared case-level
-                // Messages thread on Track Case (spec: only Call stays on
-                // a transporter card). Hidden when there's no number to dial
-                // (demo transporters, or accounts that never saved one).
-                if ((rider.phone ?? '').trim().isNotEmpty) ...[
-                  GestureDetector(
-                    onTap: () => _launchCall(context),
-                    child: Container(
-                      padding: const EdgeInsets.all(4),
-                      child: const Icon(Icons.phone_outlined,
-                          size: 20, color: AppColors.textPrimary),
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                ],
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-                  decoration: BoxDecoration(
-                    color: statusColor,
-                    borderRadius: BorderRadius.circular(20),
-                  ),
-                  child: Text(statusLabel,
-                      style: GoogleFonts.zain(
-                          fontSize: 12,
-                          fontWeight: FontWeight.w600,
-                          color: statusTextColor)),
-                ),
-              ],
-            ),
+            // Call only (messages live on Track Case). Hidden when there's
+            // no number to dial (demo transporters).
+            if ((rider.phone ?? '').trim().isNotEmpty)
+              IconButton(
+                onPressed: () => _launchCall(context),
+                tooltip: 'Call',
+                visualDensity: VisualDensity.compact,
+                icon: const Icon(Icons.phone_outlined, size: 20, color: AppColors.textPrimary),
+              ),
           ],
         ),
       ),
     );
   }
+
+  Widget _pill(String label, {required Color fill, required Color text, Color? border}) => Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+        decoration: BoxDecoration(
+          color: fill,
+          borderRadius: BorderRadius.circular(20),
+          border: border == null ? null : Border.all(color: border),
+        ),
+        child: Text(label,
+            style: GoogleFonts.zain(fontSize: 11, fontWeight: FontWeight.w700, color: text)),
+      );
 }
 
 class _Avatar extends StatelessWidget {

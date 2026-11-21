@@ -86,6 +86,8 @@ class _InfoBodyState extends ConsumerState<_InfoBody> {
     return ListView(
       padding: const EdgeInsets.fromLTRB(20, 20, 20, 32),
       children: [
+        CampaignCover(url: c.imageUrl, background: c.backgroundColor),
+        const SizedBox(height: 14),
         Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [

@@ -15,7 +15,9 @@ import 'package:respawnd1/core/models/rescue/vaccination_record.dart';
 import 'package:respawnd1/features/admin/adoption/state/adoption_providers.dart';
 import 'package:respawnd1/features/admin/animals/state/animal_records_providers.dart';
 import 'package:respawnd1/features/admin/rescue/state/rescue_reports_providers.dart';
+import 'package:respawnd1/features/admin/donation/donation_admin_providers.dart' show canViewFinancesProvider;
 import 'package:respawnd1/features/adminhome/dashboard/analytics_export.dart';
+import 'package:respawnd1/features/adminhome/dashboard/financial_report_export.dart';
 import 'package:respawnd1/features/adminhome/dashboard/analytics_range.dart';
 import 'package:respawnd1/features/adminhome/dashboard/area_reports.dart';
 
@@ -231,6 +233,7 @@ class AnalyticsPeriodButton extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final range = ref.watch(analyticsPeriodProvider);
+    final canViewFinances = ref.watch(canViewFinancesProvider).asData?.value ?? false;
     final now = DateTime.now();
     final thisMonth = AnalyticsRange.month(now.year, now.month);
     final lastMonth = now.month == 1 ? AnalyticsRange.month(now.year - 1, 12) : AnalyticsRange.month(now.year, now.month - 1);
@@ -283,11 +286,18 @@ class AnalyticsPeriodButton extends ConsumerWidget {
         // Analytics gap 1: PDF summary, CSV of the rows, monthly report.
         PopupMenuButton<String>(
           tooltip: 'Export',
-          onSelected: (k) => runAnalyticsExport(context, ref, k),
+          onSelected: (k) => k == 'finance'
+              ? runMonthlyFinancialReport(context, ref)
+              : runAnalyticsExport(context, ref, k),
           itemBuilder: (_) => [
             PopupMenuItem(value: 'pdf', child: Text('Summary PDF · ${range.label}')),
             const PopupMenuItem(value: 'csv', child: Text('Rows as CSV (cases, animals, adoptions, donations)')),
             PopupMenuItem(value: 'monthly', child: Text('Monthly accomplishment report · ${lastMonth.label}')),
+            // Finance staff only (restricted finance access).
+            if (canViewFinances) ...[
+              const PopupMenuDivider(),
+              const PopupMenuItem(value: 'finance', child: Text('Monthly financial report…')),
+            ],
           ],
           child: const _Pill(icon: Icons.ios_share, text: 'Export'),
         ),

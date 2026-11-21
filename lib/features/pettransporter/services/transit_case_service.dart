@@ -125,8 +125,27 @@ class TransitCaseService {
     return urls;
   }
 
-  Future<void> submitPickupVerification(List<String> urls) {
-    return _record('transit_picked_up', 'Animal rescued. On the way to treatment.', {
+  /// Picked up. Staff chose either a clinic (on to treatment) or, with
+  /// `transportDestination: 'shelter'` (Assign Transport), straight to
+  /// the shelter, skipping the clinic leg. The shelter pin is refreshed
+  /// from the organization; without one the trip is held like the
+  /// post-treatment shelter leg ([ShelterLocationMissing]).
+  Future<void> submitPickupVerification(List<String> urls) async {
+    final data = await fetchCase();
+    if (data['transportDestination'] == 'shelter') {
+      final shelter = await _shelterPin(data);
+      if (shelter == null) {
+        await _flagMissingShelter(data);
+        throw const ShelterLocationMissing();
+      }
+      await _record('transit_picked_up', 'Animal rescued. On the way to the shelter.', {
+        'status': 'in_transit_shelter',
+        'pickupVerificationUrls': urls,
+        ..._shelterFields(shelter),
+      });
+      return;
+    }
+    await _record('transit_picked_up', 'Animal rescued. On the way to treatment.', {
       'status': 'treatment',
       'pickupVerificationUrls': urls,
     });

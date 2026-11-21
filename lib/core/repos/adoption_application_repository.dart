@@ -729,9 +729,15 @@ class AdoptionApplicationRepository {
       final animalSnap = await tx.get(animalRef);
       if (!animalSnap.exists) return;
       final animalData = animalSnap.data()!;
-      if (animalData['reservedApplicationId'] != applicationId) {
-        // Already unreserved, or reserved by a different application by
-        // now — nothing for this call to safely undo.
+      final reservedFor = animalData['reservedApplicationId'];
+      if (reservedFor != null && reservedFor != applicationId) {
+        // Never undo another applicant's reservation; say so instead of
+        // doing nothing silently.
+        throw StateError('This animal is reserved for a different applicant, so it was not unreserved.');
+      }
+      if (reservedFor == null) {
+        // Already unreserved: only clear this application's stale marker.
+        tx.update(appRef, {'reservedAt': FieldValue.delete()});
         return;
       }
 

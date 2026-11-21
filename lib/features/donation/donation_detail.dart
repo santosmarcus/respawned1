@@ -161,14 +161,31 @@ class _DonationDetailPageState extends State<DonationDetail> {
   }
 
   Widget _buildHeroImage(DonationListing donation) {
+    // The listing's own cover first, then the linked animal's photo; a
+    // paw when neither is set or the image fails to load.
+    final cover = donation.imageUrl?.trim() ?? '';
+    final animalPhoto =
+        (_linkedAnimal != null && _linkedAnimal!.photoUrls.isNotEmpty) ? _linkedAnimal!.photoUrls.first : '';
+    final url = cover.isNotEmpty ? cover : animalPhoto;
+    const paw = Center(child: Icon(Icons.pets, size: 50, color: AppColors.textPrimary));
     return Container(
       height: 200, width: double.infinity,
       decoration: BoxDecoration(color: donation.backgroundColor, borderRadius: BorderRadius.circular(16)),
-      child: donation.imageUrl != null 
-          ? ClipRRect(borderRadius: BorderRadius.circular(16), child: Image.network(donation.imageUrl!, fit: BoxFit.cover))
-          : (_linkedAnimal != null && _linkedAnimal!.photoUrls.isNotEmpty)
-              ? ClipRRect(borderRadius: BorderRadius.circular(16), child: Image.network(_linkedAnimal!.photoUrls.first, fit: BoxFit.cover))
-              : const Center(child: Icon(Icons.pets, size: 50, color: AppColors.textPrimary)),
+      child: url.isEmpty
+          ? paw
+          : ClipRRect(
+              borderRadius: BorderRadius.circular(16),
+              child: Image.network(
+                url,
+                fit: BoxFit.cover,
+                width: double.infinity,
+                height: 200,
+                loadingBuilder: (context, child, progress) => progress == null
+                    ? child
+                    : const Center(child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.textPrimary)),
+                errorBuilder: (_, _, _) => paw,
+              ),
+            ),
     );
   }
 

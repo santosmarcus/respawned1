@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 import 'package:respawnd1/app_theme.dart';
+import 'package:respawnd1/core/utils/animal_health_assessment.dart' show plainOptionLabel;
 import 'package:respawnd1/features/rescue/rescue_form_options.dart';
 
 // Small, stateless form building blocks shared by the Report a Stray form's
@@ -352,9 +353,9 @@ class RescueUrgencyCard extends StatelessWidget {
           const SizedBox(width: 10),
           Expanded(
             child: Text(
-              'Set automatically from the rescue type'
+              'Based on the rescue type you picked'
                   '${description == null ? '' : ' — $rescueType: ${description[0].toLowerCase()}${description.substring(1)}'}.'
-                  ' Staff may update the animal\'s condition after the rescue.',
+                  ' Rescuers may change it after they see the animal.',
               style: GoogleFonts.zain(fontSize: 12, color: AppColors.textPrimary),
             ),
           ),
@@ -472,10 +473,12 @@ class AssessmentDropdown extends StatelessWidget {
       initialValue: value,
       isDense: true,
       isExpanded: true,
+      // A floating label, so the question stays visible after an answer
+      // is picked (a hint disappeared and left only the answer).
       decoration: InputDecoration(
         isDense: true,
-        hintText: hintText,
-        hintStyle: GoogleFonts.zain(
+        labelText: hintText,
+        labelStyle: GoogleFonts.zain(
           fontSize: 13,
           color: AppColors.textSecondary,
         ),
@@ -488,7 +491,7 @@ class AssessmentDropdown extends StatelessWidget {
           DropdownMenuItem(
             value: o,
             child: Text(
-              o,
+              plainOptionLabel(o),
               overflow: TextOverflow.ellipsis,
               style: GoogleFonts.zain(fontSize: 13),
             ),
@@ -609,7 +612,7 @@ class RiskDropdown extends StatelessWidget {
             for (final level in options)
               DropdownMenuItem(
                 value: level,
-                child: Text(level, overflow: TextOverflow.ellipsis),
+                child: Text(plainOptionLabel(level), overflow: TextOverflow.ellipsis),
               ),
           ],
           selectedItemBuilder: (context) => [
@@ -617,7 +620,7 @@ class RiskDropdown extends StatelessWidget {
               Align(
                 alignment: Alignment.centerLeft,
                 child: Text(
-                  value ?? '',
+                  value == null ? '' : plainOptionLabel(value!),
                   overflow: TextOverflow.ellipsis,
                   maxLines: 1,
                 ),

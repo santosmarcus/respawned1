@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:firebase_auth/firebase_auth.dart';
@@ -42,6 +43,9 @@ class ReleaseDetailsPage extends ConsumerStatefulWidget {
 class _ReleaseDetailsPageState extends ConsumerState<ReleaseDetailsPage> {
   bool _initialized = false;
   bool _busy = false;
+  /// Only the agreement button waits while the PDF is built; the rest of
+  /// the page stays usable.
+  bool _agreementBusy = false;
   DateTime _releaseDate = DateTime.now();
   List<FollowUpScheduleRule> _rules = [];
   bool _noFollowUpsPlanned = false;
@@ -123,7 +127,13 @@ class _ReleaseDetailsPageState extends ConsumerState<ReleaseDetailsPage> {
       await ref.read(adoptionApplicationRepositoryProvider).recordDeliveryAttempt(
         applicationId: widget.applicationId,
         actorName: _actorName,
-      );
+      ).timeout(_writeTimeout);
+    } on TimeoutException {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+            appSnackBar('Recording the attempt is taking too long. Check your connection and try again.',
+                kind: AppMessageKind.error));
+      }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(appSnackBar('Could not record attempt: $e', kind: AppMessageKind.error));
@@ -219,13 +229,21 @@ class _ReleaseDetailsPageState extends ConsumerState<ReleaseDetailsPage> {
     setState(() => _busy = true);
     try {
       final ref0 = FirebaseStorage.instance.ref('adoptions/${app.id}/signed_agreement_${DateTime.now().millisecondsSinceEpoch}.jpg');
-      await ref0.putFile(File(picked.path));
+      // Storage retries for a long time when offline; don't keep every
+      // button on this page disabled while it does.
+      await ref0.putFile(File(picked.path)).timeout(const Duration(seconds: 90));
       await ref.read(adoptionApplicationRepositoryProvider).attachSignedAgreement(
         applicationId: app.id,
         url: await ref0.getDownloadURL(),
         actorName: _actorName,
-      );
+      ).timeout(_writeTimeout);
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(appSnackBar('Signed agreement attached.'));
+    } on TimeoutException {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+            appSnackBar('Uploading the agreement is taking too long. Check your connection and try again.',
+                kind: AppMessageKind.error));
+      }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(appSnackBar('Could not attach: $e', kind: AppMessageKind.error));
@@ -300,10 +318,14 @@ class _ReleaseDetailsPageState extends ConsumerState<ReleaseDetailsPage> {
     }
   }
 
+  static const _writeTimeout = Duration(seconds: 30);
+
   Future<void> _openAgreement(AdoptionApplication app, AnimalRecord? animal) async {
-    setState(() => _busy = true);
+    setState(() => _agreementBusy = true);
     try {
-      await AdoptionAgreementService().preview(app: app, animal: animal, adoptionDate: _releaseDate);
+      await AdoptionAgreementService()
+          .preview(app: app, animal: animal, adoptionDate: _releaseDate)
+          .timeout(_writeTimeout);
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -311,7 +333,7 @@ class _ReleaseDetailsPageState extends ConsumerState<ReleaseDetailsPage> {
         );
       }
     } finally {
-      if (mounted) setState(() => _busy = false);
+      if (mounted) setState(() => _agreementBusy = false);
     }
   }
 
@@ -334,8 +356,12 @@ class _ReleaseDetailsPageState extends ConsumerState<ReleaseDetailsPage> {
         // app.animalId is the legacy join key, never a real doc id —
         // see the comment on _markReleased.
         final animalRecordId = app.animalRecordId;
-        final animal = animalRecordId == null ? null : ref.watch(animalRecordProvider(animalRecordId)).asData?.value;
-        final guard = _releaseGuard(app, animal);
+        final animalAsync = animalRecordId == null ? null : ref.watch(animalRecordProvider(animalRecordId));
+        final animal = animalAsync?.asData?.value;
+        final animalLoading = animalAsync != null && !animalAsync.hasValue && !animalAsync.hasError;
+        final guard = animalLoading
+            ? (canRelease: false, reason: null)
+            : _releaseGuard(app, animal);
 
         return SingleChildScrollView(
           padding: const EdgeInsets.all(16),
@@ -354,8 +380,10 @@ class _ReleaseDetailsPageState extends ConsumerState<ReleaseDetailsPage> {
                     const SizedBox(height: 4),
                     // Printed for both parties to sign at handover.
                     OutlinedButton.icon(
-                      onPressed: _busy ? null : () => _openAgreement(app, animal),
-                      icon: const Icon(Icons.description_outlined, size: 16),
+                      onPressed: _agreementBusy ? null : () => _openAgreement(app, animal),
+                      icon: _agreementBusy
+                          ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                          : const Icon(Icons.description_outlined, size: 16),
                       label: const Text('Adoption Agreement (PDF)'),
                     ),
                   ],
@@ -516,10 +544,28 @@ class _ReleaseDetailsPageState extends ConsumerState<ReleaseDetailsPage> {
                 label: Text(app.raw['signedAgreementUrl'] == null ? 'Attach signed agreement' : 'Signed agreement attached · replace'),
               ),
               const SizedBox(height: 12),
-              if (!guard.canRelease)
-                Padding(
-                  padding: const EdgeInsets.only(bottom: 10),
-                  child: Text(guard.reason ?? '', style: GoogleFonts.zain(fontSize: 12, color: AppColors.error)),
+              // Why Mark as Released is disabled, where it can't be missed.
+              if (!guard.canRelease && guard.reason != null)
+                Container(
+                  width: double.infinity,
+                  margin: const EdgeInsets.only(bottom: 10),
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: AppColors.error.withValues(alpha: 0.08),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: AppColors.error.withValues(alpha: 0.3)),
+                  ),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Icon(Icons.info_outline, size: 18, color: AppColors.error),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text('Mark as Released is off: ${guard.reason}',
+                            style: GoogleFonts.zain(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.error)),
+                      ),
+                    ],
+                  ),
                 ),
               Row(
                 children: [
@@ -535,7 +581,9 @@ class _ReleaseDetailsPageState extends ConsumerState<ReleaseDetailsPage> {
                     child: ElevatedButton(
                       onPressed: (_busy || !guard.canRelease) ? null : () => _markReleased(app),
                       style: AppButtons.primary,
-                      child: Text('Mark as Released', style: GoogleFonts.tiltWarp(fontSize: 14, color: AppColors.textPrimary)),
+                      child: _busy || animalLoading
+                          ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
+                          : Text('Mark as Released', style: GoogleFonts.tiltWarp(fontSize: 14, color: AppColors.textPrimary)),
                     ),
                   ),
                 ],

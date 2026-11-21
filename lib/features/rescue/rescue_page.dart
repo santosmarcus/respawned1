@@ -702,43 +702,41 @@ class _RescuePageState extends State<RescuePage> {
               ),
             ),
 
-            const SizedBox(height: 20),
-
-            // Submit Button
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              child: SizedBox(
-                width: double.infinity,
-                child: ElevatedButton(
-                  onPressed:
-                  (_isLoading ||
-                      (_form.isPetSurrenderType &&
-                          _form.isRescueOrgAcquisition))
-                      ? null
-                      : _handleSubmit,
-                  style: AppButtons.primary,
-                  child: _isLoading
-                      ? const SizedBox(
-                    height: 22,
-                    width: 22,
-                    child: CircularProgressIndicator(
-                      strokeWidth: 2.5,
-                      color: AppColors.textPrimary,
-                    ),
-                  )
-                      : Text(
-                    'Submit Report',
-                    style: GoogleFonts.tiltWarp(
-                      fontSize: 16,
-                      color: AppColors.textPrimary,
-                    ),
-                  ),
-                ),
+            const SizedBox(height: 24),
+          ],
+        ),
+      ),
+      // Pinned below the form so Submit is always in reach; anything still
+      // missing is pointed out when it is tapped.
+      bottomNavigationBar: Container(
+        decoration: BoxDecoration(
+          color: AppColors.background,
+          border: Border(top: BorderSide(color: AppColors.textPrimary.withValues(alpha: 0.12))),
+        ),
+        child: SafeArea(
+          top: false,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
+            child: SizedBox(
+              width: double.infinity,
+              child: ElevatedButton(
+                onPressed: (_isLoading || (_form.isPetSurrenderType && _form.isRescueOrgAcquisition))
+                    ? null
+                    : _handleSubmit,
+                style: AppButtons.primary,
+                child: _isLoading
+                    ? const SizedBox(
+                        height: 22,
+                        width: 22,
+                        child: CircularProgressIndicator(strokeWidth: 2.5, color: AppColors.textPrimary),
+                      )
+                    : Text(
+                        _form.isPetSurrenderType ? 'Submit Surrender' : 'Submit Report',
+                        style: GoogleFonts.tiltWarp(fontSize: 16, color: AppColors.textPrimary),
+                      ),
               ),
             ),
-
-            const SizedBox(height: 32),
-          ],
+          ),
         ),
       ),
     );

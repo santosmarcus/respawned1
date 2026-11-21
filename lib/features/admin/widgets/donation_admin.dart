@@ -381,6 +381,39 @@ class CampaignCard extends StatelessWidget {
   }
 }
 
+/// A listing's cover photo with a loading state and a paw placeholder when
+/// it is missing or fails to load.
+class CampaignCover extends StatelessWidget {
+  final String? url;
+  final Color background;
+  final double height;
+  const CampaignCover({super.key, required this.url, required this.background, this.height = 180});
+
+  @override
+  Widget build(BuildContext context) {
+    final u = url?.trim() ?? '';
+    Widget placeholder() => const Center(child: Icon(Icons.pets, size: 44, color: AppColors.textPrimary));
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(14),
+      child: Container(
+        height: height,
+        width: double.infinity,
+        color: background,
+        child: u.isEmpty
+            ? placeholder()
+            : Image.network(
+                u,
+                fit: BoxFit.cover,
+                loadingBuilder: (context, child, progress) => progress == null
+                    ? child
+                    : const Center(child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.textPrimary)),
+                errorBuilder: (_, _, _) => placeholder(),
+              ),
+      ),
+    );
+  }
+}
+
 /// Small section title used across the Donations tabs, with an optional
 /// line of help underneath and a link on the right.
 class DonationSectionHeader extends StatelessWidget {

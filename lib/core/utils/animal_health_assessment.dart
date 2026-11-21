@@ -112,6 +112,35 @@ const List<String> kSkinAndCoatOptions = [
   kNotAssessedOption,
 ];
 
+/// Everyday wording shown on the report form for the stored values above
+/// (and the risk levels in rescue_risk.dart). The stored strings stay as
+/// they are: saved reports, staff screens and risk checks compare them.
+const Map<String, String> kPlainOptionLabels = {
+  'Extremely Underweight (prominent rib bones)': 'Very thin (ribs clearly showing)',
+  'Walks and runs normally': 'Walks and runs normally',
+  'Minor limp/stiffness': 'Limping a little or stiff',
+  'Cannot walk/crawling only': "Can't walk, only crawls",
+  'Alert/responsive': 'Alert and reacts to you',
+  'Lethargic/timid': 'Weak, sleepy or very quiet',
+  'Unresponsive/collapsed/disoriented': 'Not responding, collapsed or confused',
+  'Clear and no discharge': 'Clean, nothing coming out',
+  'Small amount of discharge': 'A little discharge (wet or crusty)',
+  'Thick and excessive discharge': 'A lot of thick discharge (pus or mucus)',
+  'Clean; no visible skin disease (fleas/ticks, mange)': 'Clean skin and fur',
+  'Minor hairloss; presence of irritation/skin disease (fleas/ticks, mange)':
+      'Some bald spots, itching, fleas or ticks',
+  'Large open wounds; severe skin disease (fleas/ticks, mange)': 'Big open wounds or very bad skin',
+  'Eating/drinking normally': 'Eating and drinking normally',
+  'Refuses food/water; Obvious hunger/dehydration': "Won't eat or drink, or looks starved or dried out",
+  'Uncertain': 'Not sure',
+  'Has attempted to bite': 'Has tried to bite',
+  'Actively fleeing': 'Running away',
+  'Unable to contain': "Can't be held or kept in one place",
+};
+
+/// The form's label for a stored option value.
+String plainOptionLabel(String value) => kPlainOptionLabels[value] ?? value;
+
 /// Single-select.
 const List<String> kAppetiteHydrationOptions = [
   'Uncertain',

@@ -1,4 +1,6 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:respawnd1/features/admin/rescue/intake_detail_page.dart';
+import 'package:respawnd1/features/pettransporter/transit_rules.dart' show animalsAfterShelterDropoff;
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
@@ -429,6 +431,50 @@ class _RescueDetailPageState extends ConsumerState<RescueDetailPage> {
     }
   }
 
+  /// "Straight to shelter" trip by the team: arrival moves the case to
+  /// Intake, where staff confirm the animal was received.
+  Future<void> _confirmOrganizationAtShelter(RescueCase c) async {
+    final confirmed = await showConfirmActionDialog(
+      context,
+      title: 'Animal arrived at the shelter?',
+      message: 'The case moves to Intake, where you confirm the animal was received and create its record.',
+      confirmLabel: 'Arrived at Shelter',
+    );
+    if (confirmed != true || !mounted) return;
+    setState(() => _isLoading = true);
+    try {
+      final now = Timestamp.now();
+      final animals = animalsAfterShelterDropoff(
+        [for (final a in (c.raw['animals'] as List?) ?? const []) if (a is Map) Map<String, dynamic>.from(a)],
+        now,
+      );
+      await ref.read(rescueCaseRepositoryProvider).confirmOrganizationTransportAtShelter(
+        caseId: c.id,
+        actorUid: _actorUid,
+        actorName: _actorName,
+        animals: animals,
+      );
+      if (!mounted) return;
+      await Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(
+          builder: (_) => IntakeDetailPage(
+            caseId: c.id,
+            data: {...c.raw, 'status': RescueStatus.intake.firestoreValue, if (animals.isNotEmpty) 'animals': animals},
+          ),
+        ),
+      );
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          appSnackBar('Could not record the arrival: $e', kind: AppMessageKind.error),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
   Future<void> _confirmOrganizationArrived(RescueCase c) async {
     final confirmed = await showConfirmActionDialog(
       context,
@@ -720,13 +766,17 @@ class _RescueDetailPageState extends ConsumerState<RescueDetailPage> {
       // Select Clinic (also covers animal-record admissions, which start at
       // awaitingAssignment with no clinic); an outstanding offer routes to
       // its status view instead of a second Assign Transporter.
-        if (!c.hasSavedClinic) {
+        if (!c.hasTransportDestination) {
           primary = CaseAction('Assign Transport', () => _push(AssignRiderPage(caseId: c.id, data: c.raw)));
         } else if (hasActiveAssignment) {
           primary = CaseAction('View Assignment Status', () => _push(AdminTrackCasePage(caseId: c.id, data: c.raw)));
         } else {
           primary = CaseAction('Assign Transporter', () => _push(AssignRiderPage(caseId: c.id, data: c.raw)));
         }
+      case RescueStatus.ongoing when c.raw['organizationTransport'] is Map && c.goesToShelter:
+        primary = CaseAction('Arrived at Shelter', () => _confirmOrganizationAtShelter(c));
+        secondary = CaseAction('Switch to a Transporter', () => _stopOrganizationTransport(c));
+        overflow.add(CaseAction('Close Case', () => _closeCase(c), icon: Icons.block, destructive: true));
       case RescueStatus.ongoing when c.raw['organizationTransport'] is Map:
         primary = CaseAction('Arrived — Start Treatment', () => _confirmOrganizationArrived(c));
         secondary = CaseAction('Switch to a Transporter', () => _stopOrganizationTransport(c));
@@ -886,23 +936,26 @@ class _RescueDetailPageState extends ConsumerState<RescueDetailPage> {
           title: (c.raw['organizationTransport'] as Map)['byChoice'] == true
               ? 'Your team is transporting'
               : 'Your organization is transporting',
-          message: 'Bringing this animal to ${c.vetClinicName ?? 'the clinic'} (recorded by '
-              '${(c.raw['organizationTransport'] as Map)['byName'] ?? 'staff'}). Confirm arrival to start treatment.',
+          message: 'Bringing this animal to ${c.transportDestinationName} (recorded by '
+              '${(c.raw['organizationTransport'] as Map)['byName'] ?? 'staff'}). '
+              '${c.goesToShelter ? 'Confirm arrival to start intake.' : 'Confirm arrival to start treatment.'}',
         );
       case RescueStatus.accepted:
       case RescueStatus.awaitingAssignment:
         return CaseOutcomeBanner(
           tone: CaseBannerTone.info,
           icon: Icons.arrow_forward,
-          title: !c.hasSavedClinic
-              ? 'Next: select a clinic'
+          title: !c.hasTransportDestination
+              ? 'Next: choose where the animal goes'
               : hasActiveAssignment
               ? 'Waiting on the transporter'
               : 'Next: assign a transporter',
-          message: !c.hasSavedClinic
-              ? 'The case is accepted. Pick the clinic the animal goes to before assigning a transporter.'
+          message: !c.hasTransportDestination
+              ? 'The case is accepted. Pick a clinic, or the shelter, before assigning a transporter.'
               : hasActiveAssignment
               ? 'An offer is out. Open the assignment status to follow it.'
+              : c.goesToShelter
+              ? 'Going straight to the shelter: ${c.transportDestinationName}.'
               : 'Clinic saved: ${c.vetClinicName}.',
         );
       default:

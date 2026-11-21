@@ -380,7 +380,7 @@ class OwnerFields extends StatelessWidget {
               ),
               const SizedBox(height: 8),
               RiskDropdown(
-                label: 'Bite Risk',
+                label: 'Might it bite?',
                 hintText: 'Select',
                 value: form.lostAnimal.biteRisk,
                 options: kBiteRiskLevels,

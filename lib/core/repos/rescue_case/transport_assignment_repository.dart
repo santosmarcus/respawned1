@@ -273,6 +273,13 @@ class TransportAssignmentRepository {
         if (!stillOnline) {
           throw const TransporterNoLongerOnlineException();
         }
+        if (!isTransporterReachable(
+          phone: riderData?['phone'],
+          lastLat: riderData?['lastLat'],
+          lastLng: riderData?['lastLng'],
+        )) {
+          throw const TransporterNotReachableException();
+        }
       }
       final currentId = caseSnap.data()?['currentAssignmentId'] as String?;
       if (currentId != null) {
@@ -675,13 +682,15 @@ class TransportAssignmentRepository {
         }
       }
       final trimmedNote = note?.trim() ?? '';
+      // "Straight to shelter" (Assign Transport) goes to the shelter instead.
+      final place = data['transportDestination'] == 'shelter' ? 'the shelter' : 'the clinic';
       _store.recordActionIn(
         tx,
         caseId: caseId,
         action: 'organization_transport_started',
         statusLine: byChoice
-            ? 'The rescuer is bringing the animal to the clinic themselves.'
-            : 'No transporter was available. The organization is bringing the animal to the clinic itself.',
+            ? 'The rescuer is bringing the animal to $place themselves.'
+            : 'No transporter was available. The organization is bringing the animal to $place itself.',
         actorUid: actorUid,
         actorName: actorName,
         details: {if (trimmedNote.isNotEmpty) 'note': trimmedNote},
@@ -724,8 +733,8 @@ class TransportAssignmentRepository {
         caseId: caseId,
         action: 'organization_transport_stopped',
         statusLine: why.isEmpty
-            ? 'The trip to the clinic stopped. The case is waiting for a transporter.'
-            : 'The trip to the clinic stopped ($why). The case is waiting for a transporter.',
+            ? "The team's trip stopped. The case is waiting for a transporter."
+            : "The team's trip stopped ($why). The case is waiting for a transporter.",
         actorUid: actorUid,
         actorName: actorName,
         details: {'previous': data['organizationTransport'], if (why.isNotEmpty) 'reason': why},
@@ -756,6 +765,35 @@ class TransportAssignmentRepository {
         'status': RescueStatus.treatment.firestoreValue,
         'dateAdmitted': now,
         'organizationTransport.arrivedAt': now,
+      },
+    );
+  }
+
+  /// The organization brought the animal straight to its shelter ("Straight
+  /// to shelter" on Assign Transport): the case moves to Intake with the
+  /// same writes as a transporter's shelter drop-off
+  /// (TransitCaseService.completeShelterDropoff). [animals] is the case's
+  /// animals already marked for intake (animalsAfterShelterDropoff).
+  Future<void> confirmOrganizationTransportAtShelter({
+    required String caseId,
+    required String actorUid,
+    required String actorName,
+    required List<Map<String, dynamic>> animals,
+  }) async {
+    final now = Timestamp.now();
+    await _store.recordAction(
+      caseId: caseId,
+      action: 'organization_delivered_to_shelter',
+      statusLine: 'The animal has reached the shelter. Waiting for the organization to confirm it was received.',
+      actorUid: actorUid,
+      actorName: actorName,
+      details: {'transportedBy': 'organization'},
+      fields: {
+        'status': RescueStatus.intake.firestoreValue,
+        'shelterDeliveredAt': now,
+        'organizationTransport.arrivedAt': now,
+        if (animals.isNotEmpty) 'animals': animals,
+        if (animals.isNotEmpty) ...RescueCaseStore.stageSummaryUpdate(animals),
       },
     );
   }

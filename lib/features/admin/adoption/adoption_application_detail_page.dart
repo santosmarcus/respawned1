@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:cloud_functions/cloud_functions.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -53,14 +55,25 @@ class _AdoptionApplicationDetailPageState extends ConsumerState<AdoptionApplicat
     super.dispose();
   }
 
+  /// Runs one write with the page's buttons disabled. The timeout makes
+  /// sure they always come back: a write that never answers (offline,
+  /// stuck transaction) used to leave them disabled until the page was
+  /// reopened.
   Future<void> _run(Future<void> Function() action) async {
     if (_busy) return;
     setState(() => _busy = true);
     try {
-      await action();
+      await action().timeout(const Duration(seconds: 30));
+    } on TimeoutException {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(appSnackBar(
+            'This is taking too long. Check your connection, then check the status here before trying again.',
+            kind: AppMessageKind.error));
+      }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(appSnackBar('Action failed: $e', kind: AppMessageKind.error));
+        ScaffoldMessenger.of(context).showSnackBar(
+            appSnackBar(e is StateError ? e.message : 'Action failed: $e', kind: AppMessageKind.error));
       }
     } finally {
       if (mounted) setState(() => _busy = false);
@@ -1433,28 +1446,54 @@ class _ActionsSection extends ConsumerWidget {
       case AdoptionStatus.approved:
         // app.animalId is the legacy join key, never a real doc id.
         final approvedAnimalRecordId = app.animalRecordId;
-        final animal =
-            approvedAnimalRecordId == null ? null : ref.watch(animalRecordProvider(approvedAnimalRecordId)).asData?.value;
+        final animalAsync =
+            approvedAnimalRecordId == null ? null : ref.watch(animalRecordProvider(approvedAnimalRecordId));
+        // Still loading: don't guess "Reserve" for an animal that may be
+        // reserved for this applicant already.
+        if (animalAsync != null && !animalAsync.hasValue && !animalAsync.hasError) {
+          return const Padding(
+            padding: EdgeInsets.symmetric(vertical: 12),
+            child: Center(child: CircularProgressIndicator()),
+          );
+        }
+        final animal = animalAsync?.asData?.value;
         final isReservedForThis = animal?.reservedApplicationId == app.id;
+        final reservedForOther =
+            animal != null && animal.isReserved && !isReservedForThis;
+        final alreadyAdopted = animal?.isAdopted ?? false;
+        final blockedReason = alreadyAdopted
+            ? 'This animal has already been adopted.'
+            : reservedForOther
+                ? 'This animal is reserved for a different applicant.'
+                : null;
         return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            SizedBox(
-              width: double.infinity,
-              child: OutlinedButton(
-                onPressed: busy ? null : (isReservedForThis ? onUnreserve : onReserve),
-                style: AppButtons.outline,
-                child: Text(isReservedForThis ? 'Unreserve Animal' : 'Reserve Animal',
-                    style: GoogleFonts.tiltWarp(fontSize: 15, color: AppColors.textPrimary)),
+            if (blockedReason != null)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 10),
+                child: Text(blockedReason,
+                    style: GoogleFonts.zain(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.error)),
+              )
+            else if (isReservedForThis)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 10),
+                child: Text('Reserved for this applicant.',
+                    style: GoogleFonts.zain(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.textSecondary)),
               ),
+            OutlinedButton(
+              onPressed: busy || blockedReason != null ? null : (isReservedForThis ? onUnreserve : onReserve),
+              style: AppButtons.outline,
+              child: busy
+                  ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
+                  : Text(isReservedForThis ? 'Unreserve Animal' : 'Reserve Animal',
+                      style: GoogleFonts.tiltWarp(fontSize: 15, color: AppColors.textPrimary)),
             ),
             const SizedBox(height: 12),
-            SizedBox(
-              width: double.infinity,
-              child: ElevatedButton(
-                onPressed: busy ? null : onRelease,
-                style: AppButtons.primary,
-                child: Text('Release Animal', style: GoogleFonts.tiltWarp(fontSize: 15, color: AppColors.textPrimary)),
-              ),
+            ElevatedButton(
+              onPressed: busy || blockedReason != null ? null : onRelease,
+              style: AppButtons.primary,
+              child: Text('Release Animal', style: GoogleFonts.tiltWarp(fontSize: 15, color: AppColors.textPrimary)),
             ),
           ],
         );
