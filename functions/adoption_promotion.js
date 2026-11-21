@@ -9,9 +9,10 @@
 //    caption. The app's Promote Adoptions screen preselects the top ones.
 //  - remindAdoptionPromotions (hourly): when a slot comes due, or (smart
 //    suggestions) when animals have never been shared or have waited
-//    without applicants, everyone who may publish gets a push and an
-//    in-app notification (type adoption_promotion_due). Nothing is posted
-//    on its own: a person reviews the animals and caption and posts.
+//    without applicants, every active member of the organization gets a
+//    push and an in-app notification (type adoption_promotion_due).
+//    Nothing is posted on its own: a member with facebookPublish reviews
+//    the animals and caption and posts; others see who can.
 //
 // facebookPublishAnimalRecords (functions/facebook.js) stamps lastPostedAt
 // on the same doc, so a post made shortly before a slot counts for it.
@@ -168,7 +169,10 @@ module.exports = function adoptionPromotion({db, orgStaffUids, notifyStaff}) {
         })
         : null;
       if (message) {
-        const uids = await orgStaffUids(orgId, {anyOf: ['facebookPublish']});
+        // Every active member (owner, Admins, all Staff): the Admin's
+        // schedule is a reminder for the whole team. Only members with
+        // facebookPublish can post from the screen it opens.
+        const uids = await orgStaffUids(orgId);
         await notifyStaff(uids, {
           ...message,
           data: {

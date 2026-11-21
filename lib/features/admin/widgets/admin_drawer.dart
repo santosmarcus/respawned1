@@ -11,6 +11,7 @@ import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/core/repos/auth_service.dart';
 import 'package:respawnd1/features/admin/adoption/adoption_application_review_page.dart';
 import 'package:respawnd1/features/admin/animals/animal_record_page.dart';
+import 'package:respawnd1/features/admin/animals/promote_adoptions_page.dart';
 import 'package:respawnd1/features/admin/audit/audit_page.dart';
 import 'package:respawnd1/features/admin/collarTags/admin_collar_screen.dart';
 import 'package:respawnd1/features/admin/donation/donation_admin_home.dart';
@@ -316,6 +317,13 @@ class _AdminDrawerState extends ConsumerState<AdminDrawer> {
                     selected: widget.active == AdminModule.records,
                     onTap: () => _openModule(context, (_) => const AnimalRecordsPage()),
                   ),
+                  // Every member sees the adoption post schedule (they all get
+                  // its reminders); members allowed to share to Facebook post.
+                  if (caps.isActive)
+                    _DrawerItem(
+                      label: 'Promote Adoptions',
+                      onTap: () => _openModule(context, (_) => const PromoteAdoptionsPage()),
+                    ),
                   if (caps.canOpenCareTasks && orgId != null)
                     _DrawerItem(
                       label: 'Care Tasks',

@@ -1,6 +1,45 @@
 # Handoff
 
-_Latest: independent rescuers (2026-11-20, indexes, functions and rules deployed; app build pending, not checked on a device). Before that, animal QR tags fixed, with New Code and Remove (2026-11-20, app only, not checked on a device). Before that, one mobile number and one email per account (2026-11-20, not deployed, not checked on a device). Before that, one default Staff permission set, carers merged into Staff, volunteer naming (2026-11-20, functions and rules deployed; app build pending). Before that, user Events page and Facebook sharing for campaigns and events (2026-11-20, function deployed; app build pending). Before that, Facebook sharing and photo descriptions (2026-11-20, deployed). Before that, feedback round (2026-11-18, Firestore rules deployed; app build pending). Before that, Admin + Staff permissions (2026-11-18, committed and deployed; app build pending). Then the system admin console, one-organization scope and referral links (2026-11-17, committed and deployed). The build-fix sections further down are from branch `marcus` (base `a899293`), 2026-11-04._
+_Latest: scheduled adoption posts to Facebook (2026-11-21, fixed up 2026-11-22; not deployed, not checked on a device). Before that, independent rescuers (2026-11-20, indexes, functions and rules deployed; app build pending, not checked on a device). Before that, animal QR tags fixed, with New Code and Remove (2026-11-20, app only, not checked on a device). Before that, one mobile number and one email per account (2026-11-20, not deployed, not checked on a device). Before that, one default Staff permission set, carers merged into Staff, volunteer naming (2026-11-20, functions and rules deployed; app build pending). Before that, user Events page and Facebook sharing for campaigns and events (2026-11-20, function deployed; app build pending). Before that, Facebook sharing and photo descriptions (2026-11-20, deployed). Before that, feedback round (2026-11-18, Firestore rules deployed; app build pending). Before that, Admin + Staff permissions (2026-11-18, committed and deployed; app build pending). Then the system admin console, one-organization scope and referral links (2026-11-17, committed and deployed). The build-fix sections further down are from branch `marcus` (base `a899293`), 2026-11-04._
+
+## Scheduled adoption posts to Facebook (2026-11-21, fixed up 2026-11-22; not deployed, not checked on a device)
+
+Adoption listings get shared to the organization's Facebook Page on a schedule the organization sets. **The Admin sets the schedule; the whole organization is reminded.** Nothing posts automatically: when a post is due, every active member (owner, Admins, all Staff) gets a reminder with suggested animals, and a member with the Share to Facebook permission reviews and posts it.
+
+**Schedule (Admin).** Organization Profile → Facebook Page Integration → *Set/Edit Post Schedule*, or *Edit* on the Promote Adoptions screen:
+- Scheduled reminders: every 1, 2 or 4 weeks, on a weekday, at an hour (Philippine time), N animals per post (1–6).
+- Smart suggestions (separate switch): a nudge between reminders when an animal open for adoption has **never been shared**, or **2+ animals** listed 14+ days with no open application haven't been shared in 30+ days. Sent at the schedule's hour, at most every 3 days, not within 3 days of a post, nor within 2 days of the next scheduled reminder.
+- A post made in the half-interval before a slot (3.5 days for weekly) counts for that slot: no reminder.
+- Missed slots (job down) collapse into one reminder.
+
+**Reminder.** Push + in-app notification `adoption_promotion_due` to every active member (`orgStaffUids(orgId)`: owner, Admins, all Staff, linked accounts). Tapping opens **Promote Adoptions**: members with `facebookPublish` get the suggested animals ticked; others see the schedule and a note that posting needs that permission. If the Page isn't connected, the slot passes silently.
+
+**Promote Adoptions screen** (`lib/features/admin/animals/promote_adoptions_page.dart`; admin drawer → Promote Adoptions for every active member; also from the Facebook section): the schedule (everyone; only Admins can edit), then, for members with Share to Facebook, every animal open for adoption (adoptable, not archived/deceased/hidden, with a photo), most in need first (never shared → no applicants → longest since shared → longest listed), with the reason. Tick up to 10, edit the caption (draft follows the selection until edited), **Post** → the existing `facebookPublishAnimalRecords`.
+
+**Backend** (`functions/adoption_promotion.js`, rules in `functions/adoption_promotion_rules.js` + tests):
+- `facebookSaveAdoptionPromotion` (callable, Admin only): validates and stores the schedule at `organizations/{orgId}/integrations/facebookPromotion` with the next slot (`nextDueAt`); audit log entry with old and new values. The existing rules already cover the doc (members read, no client writes), so **no rules change**.
+- `facebookAdoptionPromotionSuggestions` (callable, `facebookPublish`): ranked animals, suggested ids, draft caption. Callable because `facebookShares` is closed to clients.
+- `remindAdoptionPromotions` (scheduled, minute 5 of every hour, Asia/Manila): per approved organization with a schedule doc.
+- `facebookPublishAnimalRecords` now also stamps `lastPostedAt`/`lastPostUrl`/`lastPostAnimalIds` on the schedule doc (best effort).
+- `notifyStaff` (index.js) now also keeps `organizationId` and `animalIds` on the in-app notification when given.
+
+**Posting** uses the current `facebookPublishAnimalRecords` items API: one photo per animal (its first) plus the caption. Facebook campaign/event posts (`facebookPublishRecordPost`) don't count as adoption posts.
+
+**Merge fix (2026-11-22):** commit `0c9cacb` brought these files in by hand. It overwrote `lib/core/repos/facebook_integration_repository.dart` with a copy of `functions/index.js` (1,600+ analyzer errors), replaced the newer `functions/facebook.js` (per-photo captions, link posts, Secret Manager errors) with an older copy, added a second unused copy of the schedule sheet, and left out the drawer entry, provider, push routing and Facebook section. All fixed in the following commit; `functions/facebook.js` is the team's version plus the `lastPostedAt` stamp.
+
+### Deploy
+
+1. Functions, by name (a plain `--only functions` would delete the two functions that aren't in the repo; see below): `FUNCTIONS_DISCOVERY_TIMEOUT=60 firebase deploy --only functions:facebookSaveAdoptionPromotion,functions:facebookAdoptionPromotionSuggestions,functions:remindAdoptionPromotions,functions:facebookPublishAnimalRecords`. Safe for older builds (they never call the new callables). Other functions pick up the `notifyStaff` change at their next deploy; nothing depends on it.
+2. App build.
+
+### Checks run
+
+- `functions/`: `npm test` 133 pass (9 new in `adoption_promotion_rules_test.js`); `index.js` loads and exports the new functions.
+- App (Flutter 3.50.1): `flutter analyze` 0 errors (1 warning, unused `_FundTrackingPanel` in donation_detail.dart, not from this work). `flutter test`: 304 pass, 4 fail (`admin_shared_widgets_test.dart` x2, `rescue_closed_tab_test.dart`, `member_access_editor_test.dart`) with "An animation is still running even after the widget tree was disposed" from Google Fonts' system-font relayout; the same 4 fail on `0c9cacb^`, so they're unrelated. New: `test/core/models/adoption_promotion_schedule_test.dart` (6 pass).
+
+### Check on a device
+
+As an Admin, set a weekly schedule for the next hour with smart suggestions on; at that hour, every member gets the reminder. A Staff member with Share to Facebook taps it, sees the suggested animals ticked, posts; the schedule shows the last post, and the next reminder moves a week ahead. A Staff member without the permission also gets the reminder; Promote Adoptions shows them the schedule and that posting needs the permission, and they can't edit the schedule.
 
 ## Independent rescuers (2026-11-20, indexes, functions and rules deployed; app build pending, not checked on a device)
 

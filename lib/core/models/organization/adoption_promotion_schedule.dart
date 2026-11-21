@@ -4,8 +4,9 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 /// to its Facebook Page. Mirrors `organizations/{orgId}/integrations/
 /// facebookPromotion`, written only by the backend
 /// (functions/adoption_promotion.js; facebookPublishAnimalRecords stamps
-/// [lastPostedAt]). Nothing is posted on its own: at each slot, people
-/// allowed to share to Facebook get a reminder with suggested animals.
+/// [lastPostedAt]). An Admin sets it; nothing is posted on its own: at
+/// each slot every active member gets a reminder with suggested animals,
+/// and members allowed to share to Facebook post them.
 ///
 /// Keep the option lists equal to functions/adoption_promotion_rules.js.
 class AdoptionPromotionSchedule {
@@ -73,13 +74,13 @@ class AdoptionPromotionSchedule {
 
   /// What facebookSaveAdoptionPromotion accepts.
   Map<String, dynamic> toCallableMap() => {
-    'enabled': enabled,
-    'smartSuggestions': smartSuggestions,
-    'intervalWeeks': intervalWeeks,
-    'dayOfWeek': dayOfWeek,
-    'hour': hour,
-    'animalsPerPost': animalsPerPost,
-  };
+        'enabled': enabled,
+        'smartSuggestions': smartSuggestions,
+        'intervalWeeks': intervalWeeks,
+        'dayOfWeek': dayOfWeek,
+        'hour': hour,
+        'animalsPerPost': animalsPerPost,
+      };
 
   AdoptionPromotionSchedule copyWith({
     bool? enabled,
@@ -113,10 +114,10 @@ class AdoptionPromotionSchedule {
   }
 
   static String intervalLabel(int weeks) => switch (weeks) {
-    1 => 'Every week',
-    2 => 'Every 2 weeks',
-    _ => 'Every 4 weeks',
-  };
+        1 => 'Every week',
+        2 => 'Every 2 weeks',
+        _ => 'Every 4 weeks',
+      };
 
   /// e.g. "Every week on Saturday at 10:00 AM".
   String get summary {

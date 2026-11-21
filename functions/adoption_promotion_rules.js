@@ -3,8 +3,9 @@
 // `node --test` checks them.
 //
 // An Admin sets a schedule (every 1, 2 or 4 weeks, a weekday and an hour,
-// Manila time). When a slot comes due, staff who may publish get a push and
-// an in-app notification with the animals the system suggests; nothing is
+// Manila time). When a slot comes due, every member of the organization
+// gets a push and an in-app notification with the animals the system
+// suggests (members allowed to share to Facebook post it); nothing is
 // posted on its own. With smart suggestions on, they are also nudged
 // between slots when animals have never been shared or have waited a long
 // time without applicants.

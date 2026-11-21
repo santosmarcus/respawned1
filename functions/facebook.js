@@ -22,6 +22,8 @@ const {defineSecret} = require('firebase-functions/params');
 const admin = require('firebase-admin');
 const {SecretManagerServiceClient} = require('@google-cloud/secret-manager');
 const {loadOrgAccess, memberPermissions, presetFor} = require('./org_access');
+const {photosOf} = require('./public_animals');
+const {normalizePublishItems, normalizeRecordPost, recordPostBlockedReason, recordPhotoUrl} = require('./facebook_share_rules');
 
 const fbAppId = defineSecret('FB_APP_ID');
 const fbAppSecret = defineSecret('FB_APP_SECRET');
@@ -61,7 +63,35 @@ function gcpProjectId() {
 // at least create+addVersion+access+delete on this project) — a `defineSecret`-only
 // deployment does NOT include this broader permission automatically.
 
+// The runtime service account can't use Secret Manager: say so instead of
+// the callable's bare "internal" error.
+function secretAccessError(e) {
+  if (e && e.code === 7 /* PERMISSION_DENIED */) {
+    console.error('[facebook] Secret Manager refused the runtime service account', e.message);
+    return new HttpsError(
+        'failed-precondition',
+        'The server is not allowed to store Facebook connections yet. Ask the project admin to give the ' +
+        'Cloud Functions service account the Secret Manager Admin role.',
+        {facebookErrorCode: 'server-setup'},
+    );
+  }
+  return e;
+}
+
+/// Runs a Secret Manager operation, turning a permission error into [secretAccessError].
+async function withSecretAccess(op) {
+  try {
+    return await op();
+  } catch (e) {
+    throw secretAccessError(e);
+  }
+}
+
 async function writeDynamicSecret(secretId, value) {
+  return withSecretAccess(() => writeDynamicSecretUnchecked(secretId, value));
+}
+
+async function writeDynamicSecretUnchecked(secretId, value) {
   const client = secretClient();
   const parent = `projects/${gcpProjectId()}`;
   const secretPath = `${parent}/secrets/${secretId}`;
@@ -97,6 +127,10 @@ async function writeDynamicSecret(secretId, value) {
 }
 
 async function readDynamicSecret(secretId) {
+  return withSecretAccess(() => readDynamicSecretUnchecked(secretId));
+}
+
+async function readDynamicSecretUnchecked(secretId) {
   const client = secretClient();
   const name = `projects/${gcpProjectId()}/secrets/${secretId}/versions/latest`;
   try {
@@ -109,6 +143,10 @@ async function readDynamicSecret(secretId) {
 }
 
 async function deleteDynamicSecret(secretId) {
+  return withSecretAccess(() => deleteDynamicSecretUnchecked(secretId));
+}
+
+async function deleteDynamicSecretUnchecked(secretId) {
   const client = secretClient();
   const name = `projects/${gcpProjectId()}/secrets/${secretId}`;
   try {
@@ -480,19 +518,21 @@ exports.facebookDisconnectPage = onCall(async (request) => {
   return {status: 'disconnected'};
 });
 
-function firstImageUrl(animal) {
-  const photoUrls = animal.photoUrls || animal.images || animal.imageUrls;
-  return (Array.isArray(photoUrls) && photoUrls[0]) || animal.photoUrl || animal.imageUrl || null;
-}
-
 // ---- 5. Publish Animal Records ----------------------------------------------
 exports.facebookPublishAnimalRecords = onCall(async (request) => {
   if (!request.auth) throw new HttpsError('unauthenticated', 'Sign in required.');
   const uid = request.auth.uid;
-  const {organizationId, animalRecordIds, message} = request.data || {};
-  if (!organizationId || !Array.isArray(animalRecordIds) || animalRecordIds.length === 0) {
-    throw new HttpsError('invalid-argument', 'organizationId and at least one animalRecordId are required.');
+  const {organizationId, message, link} = request.data || {};
+  if (!organizationId) throw new HttpsError('invalid-argument', 'organizationId is required.');
+  // `items` (current builds): each record with the photos staff picked and a
+  // caption per photo. `animalRecordIds` (older builds): first photo each.
+  let items;
+  try {
+    items = normalizePublishItems(request.data || {});
+  } catch (e) {
+    throw new HttpsError('invalid-argument', e.message);
   }
+  const animalRecordIds = items.map((i) => i.animalId);
   // Owner, active Admin, or a member granted facebookPublisher (Animal
   // Records viewing/managing itself stays open to every Member).
   await requireFacebookPublisher(uid, organizationId);
@@ -520,7 +560,8 @@ exports.facebookPublishAnimalRecords = onCall(async (request) => {
   // Validated up front so a rejected record never leaves earlier photos
   // uploaded to the Page. Records written before the app stamped
   // organizationId need scripts/backfill_organization_ids.js first.
-  for (const snap of animalDocs) {
+  const photosToPost = [];
+  for (const [index, snap] of animalDocs.entries()) {
     if (!snap.exists) throw new HttpsError('not-found', `Animal record ${snap.id} not found.`);
     const animal = snap.data();
     if (animal.organizationId !== organizationId) {
@@ -531,30 +572,41 @@ exports.facebookPublishAnimalRecords = onCall(async (request) => {
             : `${animal.name || snap.id} is not linked to an organization yet. Ask an admin to run the organization backfill.`,
       );
     }
-    if (!firstImageUrl(animal)) {
-      throw new HttpsError('failed-precondition', `${animal.name || snap.id} has no image to publish.`);
+    // Only the record's own photos: a client can't post an arbitrary image
+    // as the Page.
+    const own = photosOf(animal);
+    const item = items[index];
+    const photos = item.legacy ? own.slice(0, 1).map((url) => ({url, caption: ''})) : item.photos;
+    for (const p of photos) {
+      if (!own.includes(p.url)) {
+        throw new HttpsError('permission-denied', `A selected photo is not one of ${animal.name || snap.id}'s photos.`);
+      }
+      photosToPost.push(p);
     }
   }
+  if (photosToPost.length === 0 && !link) {
+    throw new HttpsError('failed-precondition', 'Pick at least one photo, or add the link to the full profile.');
+  }
 
+  // Unpublished photo uploads (each with its own description), then one
+  // post that attaches them all. With no photos, a link post (Facebook
+  // builds the preview from the page's og: tags).
   const mediaFbids = [];
-  const publishedAnimalIds = [];
-  for (const snap of animalDocs) {
-    const imageUrl = firstImageUrl(snap.data());
+  for (const p of photosToPost) {
     const photo = await graphFetch(`/${pageId}/photos`, {
       method: 'POST',
-      params: {url: imageUrl, published: 'false', access_token: token},
+      params: {url: p.url, caption: p.caption || undefined, published: 'false', access_token: token},
     });
     mediaFbids.push(photo.id);
-    publishedAnimalIds.push(snap.id);
   }
+  const publishedAnimalIds = animalDocs.map((snap) => snap.id);
 
   const feedPost = await graphFetch(`/${pageId}/feed`, {
     method: 'POST',
     params: {access_token: token},
-    body: {
-      message: message || '',
-      attached_media: mediaFbids.map((id) => ({media_fbid: id})),
-    },
+    body: mediaFbids.length ?
+      {message: message || '', attached_media: mediaFbids.map((id) => ({media_fbid: id}))} :
+      {message: message || '', link},
   });
 
   const postId = feedPost.id;
@@ -566,6 +618,8 @@ exports.facebookPublishAnimalRecords = onCall(async (request) => {
     animalRecordIds: publishedAnimalIds,
     postId,
     postUrl,
+    link: link || null,
+    photoCount: photosToPost.length,
     publishedBy: uid,
     publishedByEmail: request.auth.token.email || null,
     createdAt: admin.firestore.FieldValue.serverTimestamp(),
@@ -595,13 +649,101 @@ exports.facebookPublishAnimalRecords = onCall(async (request) => {
       actorId: uid,
       actorEmail: request.auth.token.email || null,
       organizationId,
-      newValues: {postId, postUrl},
+      newValues: {postId, postUrl, photoCount: photosToPost.length},
       sourceModule: 'AnimalRecords',
       timestamp: admin.firestore.FieldValue.serverTimestamp(),
     });
   }
 
   return {postId, postUrl, animalRecordIds: publishedAnimalIds};
+});
+
+// ---- 5b. Publish a campaign or volunteer event -------------------------------
+//
+// One post for a donation/sponsorship campaign (`campaigns/{id}`) or a
+// volunteer event (`events/{id}`): the text staff wrote, with the record's
+// own cover photo when asked. The photo is read from the record, never from
+// the request, so a client can't post an arbitrary image as the Page.
+exports.facebookPublishRecordPost = onCall(async (request) => {
+  if (!request.auth) throw new HttpsError('unauthenticated', 'Sign in required.');
+  const uid = request.auth.uid;
+  const {organizationId} = request.data || {};
+  if (!organizationId) throw new HttpsError('invalid-argument', 'organizationId is required.');
+  let post;
+  try {
+    post = normalizeRecordPost(request.data || {});
+  } catch (e) {
+    throw new HttpsError('invalid-argument', e.message);
+  }
+  await requireFacebookPublisher(uid, organizationId);
+
+  const recordSnap = await db().collection(post.collection).doc(post.recordId).get();
+  if (!recordSnap.exists) throw new HttpsError('not-found', `This ${post.kind} no longer exists.`);
+  const record = recordSnap.data();
+  if (record.organizationId !== organizationId) {
+    throw new HttpsError(
+        'permission-denied',
+        record.organizationId ?
+          `This ${post.kind} belongs to another organization.` :
+          `This ${post.kind} is not linked to an organization yet. Ask an admin to run the organization backfill.`,
+    );
+  }
+  const blocked = recordPostBlockedReason(post.kind, record);
+  if (blocked) throw new HttpsError('failed-precondition', blocked);
+
+  const integrationSnap = await db()
+      .collection('organizations').doc(organizationId).collection('integrations').doc('facebook').get();
+  if (!integrationSnap.exists || integrationSnap.data().connectionStatus !== 'connected') {
+    throw new HttpsError('failed-precondition', 'No Facebook Page is connected for this organization.');
+  }
+  const pageId = integrationSnap.data().pageId;
+  const token = await readDynamicSecret(pageTokenSecretId(organizationId));
+  if (!token) {
+    throw new HttpsError('failed-precondition', 'This Facebook connection needs attention. Reconnect the Page.');
+  }
+
+  const photoUrl = recordPhotoUrl(post.kind, record);
+  const withPhoto = post.includePhoto && photoUrl != null;
+  // A published photo with the text as its caption is a normal photo post;
+  // without a photo, a plain text post.
+  const result = withPhoto ?
+    await graphFetch(`/${pageId}/photos`, {
+      method: 'POST',
+      params: {url: photoUrl, caption: post.message, published: 'true', access_token: token},
+    }) :
+    await graphFetch(`/${pageId}/feed`, {
+      method: 'POST',
+      params: {access_token: token},
+      body: {message: post.message},
+    });
+
+  const postId = result.post_id || result.id;
+  const postUrl = `https://www.facebook.com/${postId}`;
+
+  await db().collection('facebookShares').doc().set({
+    organizationId,
+    recordKind: post.kind,
+    recordId: post.recordId,
+    postId,
+    postUrl,
+    photoCount: withPhoto ? 1 : 0,
+    publishedBy: uid,
+    publishedByEmail: request.auth.token.email || null,
+    createdAt: admin.firestore.FieldValue.serverTimestamp(),
+  });
+  await writeOrgAuditLog({
+    action: {
+      campaign: 'Shared campaign to Facebook Page',
+      event: 'Shared event to Facebook Page',
+      referral: 'Shared referral to Facebook Page',
+    }[post.kind],
+    actorId: uid,
+    actorEmail: request.auth.token.email,
+    organizationId,
+    newValues: {recordKind: post.kind, recordId: post.recordId, title: record.title || (post.kind === 'referral' ? `Case ${post.recordId.slice(0, 6)}` : null), postId, postUrl},
+  });
+
+  return {postId, postUrl};
 });
 
 // ---- 6. Grant / revoke Facebook publishing to a member ----------------------

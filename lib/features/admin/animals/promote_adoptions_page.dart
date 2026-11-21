@@ -153,11 +153,26 @@ class _PromoteAdoptionsPageState extends ConsumerState<PromoteAdoptionsPage> {
     setState(() => _posting = true);
     final messenger = ScaffoldMessenger.of(context);
     try {
+      // One photo per animal (its first), the same as a post from the
+      // animal's record; the caption carries the text.
+      final items = <FacebookShareItem>[];
+      for (final id in _selected) {
+        final record = await ref.read(animalRecordProvider(id).future);
+        final photo = (record?.photoUrls.isNotEmpty ?? false) ? record!.photoUrls.first : null;
+        if (photo == null) continue;
+        items.add(FacebookShareItem(animalId: id, photos: [(url: photo, caption: '')]));
+      }
+      if (items.isEmpty) {
+        messenger.showSnackBar(
+          appSnackBar('The selected animals have no photos to post.', kind: AppMessageKind.error),
+        );
+        return;
+      }
       final result = await ref.read(facebookIntegrationRepositoryProvider).publishAnimalRecords(
-        organizationId: orgId,
-        animalRecordIds: _selected.toList(),
-        message: caption,
-      );
+            organizationId: orgId,
+            items: items,
+            message: caption,
+          );
       if (!mounted) return;
       messenger.showSnackBar(appSnackBar('Posted to Facebook Page.', kind: AppMessageKind.success));
       final open = await showConfirmActionDialog(
@@ -245,9 +260,9 @@ class _PromoteAdoptionsPageState extends ConsumerState<PromoteAdoptionsPage> {
   }
 
   Widget _notice(String text) => Padding(
-    padding: const EdgeInsets.symmetric(vertical: 24),
-    child: Text(text, textAlign: TextAlign.center, style: GoogleFonts.zain(fontSize: 14, color: AppColors.textSecondary)),
-  );
+        padding: const EdgeInsets.symmetric(vertical: 24),
+        child: Text(text, textAlign: TextAlign.center, style: GoogleFonts.zain(fontSize: 14, color: AppColors.textSecondary)),
+      );
 
   Widget _picker() {
     return FutureBuilder<PromotionSuggestions>(
@@ -290,9 +305,9 @@ class _PromoteAdoptionsPageState extends ConsumerState<PromoteAdoptionsPage> {
                   onPressed: _posting
                       ? null
                       : () => setState(() {
-                    _captionEdited = false;
-                    _refreshCaption();
-                  }),
+                            _captionEdited = false;
+                            _refreshCaption();
+                          }),
                   child: const Text('Reset caption'),
                 ),
               ),
@@ -418,8 +433,8 @@ class _CandidateTile extends ConsumerWidget {
           child: photo == null
               ? const ColoredBox(color: AppColors.slaterspwn, child: Icon(Icons.pets, color: AppColors.textSecondary))
               : Image.network(photo, fit: BoxFit.cover,
-              errorBuilder: (context, error, stack) =>
-              const ColoredBox(color: AppColors.slaterspwn, child: Icon(Icons.pets, color: AppColors.textSecondary))),
+                  errorBuilder: (context, error, stack) =>
+                      const ColoredBox(color: AppColors.slaterspwn, child: Icon(Icons.pets, color: AppColors.textSecondary))),
         ),
       ),
       title: Text(candidate.name.isEmpty ? 'Unnamed animal' : candidate.name,

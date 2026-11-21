@@ -13,10 +13,10 @@ import 'package:respawnd1/features/admin/rescue/state/rescue_reports_providers.d
 /// whether the system may also suggest a post between slots. Saved through
 /// facebookSaveAdoptionPromotion (Admin only on the server too).
 Future<void> showAdoptionPromotionScheduleSheet(
-    BuildContext context, {
-      required String organizationId,
-      required AdoptionPromotionSchedule current,
-    }) {
+  BuildContext context, {
+  required String organizationId,
+  required AdoptionPromotionSchedule current,
+}) {
   return showModalBottomSheet<void>(
     context: context,
     isScrollControlled: true,
@@ -45,9 +45,9 @@ class _ScheduleSheetState extends ConsumerState<_ScheduleSheet> {
     final navigator = Navigator.of(context);
     try {
       await ref.read(facebookIntegrationRepositoryProvider).savePromotionSchedule(
-        organizationId: widget.organizationId,
-        schedule: _draft,
-      );
+            organizationId: widget.organizationId,
+            schedule: _draft,
+          );
       navigator.pop();
       messenger.showSnackBar(appSnackBar('Adoption post schedule saved.', kind: AppMessageKind.success));
     } on FacebookOperationException catch (e) {
@@ -77,7 +77,7 @@ class _ScheduleSheetState extends ConsumerState<_ScheduleSheet> {
               const SizedBox(height: 4),
               Text(
                 'Every member of the organization gets a reminder with suggested animals. '
-                    'Nothing is posted until a member allowed to share to Facebook reviews it and taps Post.',
+                'Nothing is posted until a member allowed to share to Facebook reviews it and taps Post.',
                 style: help,
               ),
               const SizedBox(height: 8),
@@ -152,7 +152,7 @@ class _ScheduleSheetState extends ConsumerState<_ScheduleSheet> {
                 title: Text('Smart suggestions', style: label),
                 subtitle: Text(
                   'Also suggest a post between reminders when an animal open for adoption has never been '
-                      'shared, or several have waited weeks without applicants. At most every 3 days, at the time above.',
+                  'shared, or several have waited weeks without applicants. At most every 3 days, at the time above.',
                   style: help,
                 ),
                 value: d.smartSuggestions,

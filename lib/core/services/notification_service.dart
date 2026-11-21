@@ -7,6 +7,7 @@ import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import 'package:respawnd1/features/admin/animals/promote_adoptions_page.dart';
 import 'package:respawnd1/core/models/rescue/rescue_status.dart';
 import 'package:respawnd1/core/utils/case_access.dart';
 import 'package:respawnd1/features/admin/adoption/post_adoption_details_page.dart';
@@ -225,6 +226,14 @@ class NotificationService {
         final caseId = data['caseId'] as String?;
         if (caseId == null || caseId.isEmpty) return null;
         return _casePageFor(caseId);
+
+      // remindAdoptionPromotions (functions/adoption_promotion.js): time to
+      // post animals open for adoption to the Facebook Page.
+      case 'adoption_promotion_due':
+        return PromoteAdoptionsPage(
+          organizationId: data['organizationId'] as String?,
+          preselectedIds: promotionIdsFrom(data['animalIds']),
+        );
 
     // A transport offer was declined or expired (notifyStaffOfOfferOutcome,
     // functions/index.js): staff go straight to Assign Transporter while the

@@ -71,6 +71,9 @@ const Map<String, String> _kDonationNotifLabels = {
   // post-adoption page.
   'community_adoption_checkin': 'Community Adoption',
   'community_post_adoption_update': 'Community Adoption',
+  // functions/adoption_promotion.js: reminder to post animals open for
+  // adoption to the Facebook Page; opens Promote Adoptions (pageFor).
+  'adoption_promotion_due': 'Facebook Post',
 };
 
 /// Notification types whose tap opens Profile → Certificates.

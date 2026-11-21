@@ -1,6 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:respawnd1/core/models/organization/adoption_promotion_schedule.dart';
 
 import 'package:respawnd1/core/models/organization/organization_capabilities.dart';
 import 'package:respawnd1/core/models/rescue/activity_log_entry.dart';
@@ -154,6 +155,12 @@ final facebookIntegrationRepositoryProvider = Provider<FacebookIntegrationReposi
 final organizationFacebookIntegrationProvider =
     StreamProvider.family.autoDispose<FacebookIntegration?, String>((ref, organizationId) {
   return ref.watch(facebookIntegrationRepositoryProvider).streamIntegration(organizationId);
+});
+
+/// The organization's adoption post schedule (Facebook Page reminders).
+final organizationAdoptionPromotionProvider =
+    StreamProvider.family.autoDispose<AdoptionPromotionSchedule, String>((ref, organizationId) {
+  return ref.watch(facebookIntegrationRepositoryProvider).streamPromotionSchedule(organizationId);
 });
 
 // ---- Case list / detail streams ---------------------------------------

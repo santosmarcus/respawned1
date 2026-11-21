@@ -6,9 +6,12 @@ import 'package:url_launcher/url_launcher.dart';
 
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/core/constants/facebook_config.dart';
+import 'package:respawnd1/core/models/organization/adoption_promotion_schedule.dart';
 import 'package:respawnd1/core/models/organization/facebook_integration.dart';
 import 'package:respawnd1/core/repos/facebook_integration_repository.dart';
+import 'package:respawnd1/features/admin/animals/promote_adoptions_page.dart';
 import 'package:respawnd1/features/admin/rescue/state/rescue_reports_providers.dart';
+import 'package:respawnd1/features/organization/widgets/adoption_promotion_schedule_sheet.dart';
 import 'package:respawnd1/core/widgets/app_messages.dart';
 import 'package:respawnd1/core/widgets/app_dialogs.dart';
 
@@ -232,6 +235,42 @@ class _FacebookIntegrationSectionState extends ConsumerState<FacebookIntegration
       );
     }
     // connected
+    final canPublish =
+        ref.watch(currentOrganizationCapabilitiesProvider).asData?.value.canPublishToFacebook ?? false;
+    final schedule = ref.watch(organizationAdoptionPromotionProvider(widget.organizationId)).asData?.value ??
+        AdoptionPromotionSchedule.initial;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _connectedRow(integration),
+        const SizedBox(height: 12),
+        Text('Adoption posts',
+            style: GoogleFonts.zain(fontSize: 14, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
+        Text(schedule.summary, style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary)),
+        const SizedBox(height: 8),
+        Wrap(spacing: 8, runSpacing: 8, children: [
+          if (widget.canManage)
+            _actionButton(
+              schedule.isOff ? 'Set Post Schedule' : 'Edit Post Schedule',
+              () => showAdoptionPromotionScheduleSheet(
+                context,
+                organizationId: widget.organizationId,
+                current: schedule,
+              ),
+            ),
+          _actionButton(
+            canPublish ? 'Create Adoption Post' : 'View Post Schedule',
+            () => Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => PromoteAdoptionsPage(organizationId: widget.organizationId)),
+            ),
+          ),
+        ]),
+      ],
+    );
+  }
+
+  Widget _connectedRow(FacebookIntegration integration) {
     return _row(
       title: integration.pageName,
       subtitle: 'Connected',

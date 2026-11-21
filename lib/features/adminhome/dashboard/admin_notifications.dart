@@ -69,6 +69,7 @@ class AdminNotice {
     'quarantine_ended' => Icons.health_and_safety,
     'shelter_location_missing' => Icons.location_off,
     'follow_up_overdue_staff' => Icons.assignment_late,
+    'adoption_promotion_due' => Icons.campaign,
     _ => Icons.notifications,
   };
 }
