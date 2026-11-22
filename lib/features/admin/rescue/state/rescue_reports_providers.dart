@@ -16,6 +16,7 @@ import 'package:respawnd1/core/models/rescue/transporter_profile.dart';
 import 'package:respawnd1/core/models/rescue/treatment_log_entry.dart';
 import 'package:respawnd1/core/repos/clinic_search_repository.dart';
 import 'package:respawnd1/core/repos/directions_repository.dart';
+import 'package:respawnd1/core/utils/stream_combine.dart';
 import 'package:respawnd1/core/repos/org_membership_service.dart';
 import 'package:respawnd1/core/models/organization/facebook_integration.dart';
 import 'package:respawnd1/core/repos/facebook_integration_repository.dart';
@@ -188,8 +189,32 @@ final caseActivityLogsProvider = StreamProvider.family<List<ActivityLogEntry>, S
   return ref.watch(rescueCaseRepositoryProvider).streamActivityLogs(caseId);
 });
 
+/// Community reports for a case, including those filed on duplicate cases
+/// merged into it (mergedCaseIds), newest first — so a sighting reported on
+/// a duplicate still reaches the case staff work on. Each report's
+/// [CommunityReport.caseId] says which case it was filed on.
 final caseCommunityReportsProvider = StreamProvider.family<List<CommunityReport>, String>((ref, caseId) {
-  return ref.watch(rescueCaseRepositoryProvider).streamCommunityReports(caseId);
+  final repo = ref.watch(rescueCaseRepositoryProvider);
+  // Rebuild only when the merged list changes, not on every case update.
+  final mergedKey = ref.watch(
+    caseDetailProvider(caseId).select((a) => (a.asData?.value?.mergedCaseIds ?? const <String>[]).join(',')),
+  );
+  final merged = mergedKey.isEmpty ? const <String>[] : mergedKey.split(',');
+  if (merged.isEmpty) return repo.streamCommunityReports(caseId);
+  return combineLatest([
+    repo.streamCommunityReports(caseId),
+    for (final id in merged) repo.streamCommunityReports(id),
+  ]).map((lists) {
+    final all = [for (final l in lists) ...l];
+    all.sort((a, b) {
+      final at = a.timestamp, bt = b.timestamp;
+      if (at == null && bt == null) return 0;
+      if (at == null) return -1; // just submitted, timestamp pending
+      if (bt == null) return 1;
+      return bt.compareTo(at);
+    });
+    return all;
+  });
 });
 
 /// The most recent transporter offer for a case (any status) — drives the

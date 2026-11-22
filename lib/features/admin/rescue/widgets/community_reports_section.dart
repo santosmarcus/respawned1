@@ -1,5 +1,9 @@
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/foundation.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:geolocator/geolocator.dart';
+import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 
@@ -13,101 +17,155 @@ import 'package:respawnd1/core/widgets/app_dialogs.dart';
 
 String _formatReportDateTime(DateTime? d) => formatDateTimeOr(d, '');
 
-/// Read-only view of `cases/{caseId}/communityReports` — the same
-/// subcollection the user-side track_case_page.dart's
-/// `_CommunityReportSection` writes to. Reused as-is on both the admin
-/// Rescue Details page and the admin Track Case page so there's a single
-/// source of truth for these submissions.
-class CommunityReportsSection extends ConsumerStatefulWidget {
+/// The one place staff see a case's community reports: the case's own
+/// `cases/{caseId}/communityReports` (written by the user side's
+/// CommunityReportSection) plus those filed on duplicates merged into it.
+/// Always open — no expanding — with "Animal moved" reports waiting for
+/// review at the top. Staff verify a move against the map (current pin vs
+/// the reported pin) and confirming it moves the case's location, which
+/// the transporter's pickup, the maps and the distances all follow.
+/// Used on Rescue Details and on Track Case (whichever the case's status
+/// opens), never twice on one screen.
+class CommunityReportsSection extends ConsumerWidget {
   final String caseId;
   const CommunityReportsSection({super.key, required this.caseId});
 
   @override
-  ConsumerState<CommunityReportsSection> createState() =>
-      _CommunityReportsSectionState();
-}
-
-class _CommunityReportsSectionState
-    extends ConsumerState<CommunityReportsSection> {
-  bool _expanded = false;
-
-  @override
-  Widget build(BuildContext context) {
-    final reportsAsync = ref.watch(caseCommunityReportsProvider(widget.caseId));
-    final count = reportsAsync.asData?.value.length;
+  Widget build(BuildContext context, WidgetRef ref) {
+    final reportsAsync = ref.watch(caseCommunityReportsProvider(caseId));
+    final rescueCase = ref.watch(caseDetailProvider(caseId)).asData?.value;
+    final reports = reportsAsync.asData?.value ?? const <CommunityReport>[];
+    final pending = reports.where((r) => r.isPendingMove).toList();
+    final others = reports.where((r) => !r.isPendingMove).toList();
+    final currentPin = (rescueCase?.lat != null && rescueCase?.lng != null)
+        ? LatLng(rescueCase!.lat!, rescueCase.lng!)
+        : null;
 
     return SectionCard(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          InkWell(
-            borderRadius: BorderRadius.circular(8),
-            onTap: () => setState(() => _expanded = !_expanded),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(vertical: 2),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      'Community Reports${count == null ? '' : '  $count'}',
-                      style: GoogleFonts.tiltWarp(
-                        fontSize: 14,
-                        color: AppColors.textPrimary,
-                      ),
-                    ),
-                  ),
-                  Icon(
-                    _expanded ? Icons.expand_less : Icons.expand_more,
-                    color: AppColors.textPrimary,
-                  ),
-                ],
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  'Community Reports${reportsAsync.hasValue ? '  ${reports.length}' : ''}',
+                  style: GoogleFonts.tiltWarp(fontSize: 14, color: AppColors.textPrimary),
+                ),
               ),
-            ),
+              if (pending.isNotEmpty)
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                  decoration: BoxDecoration(
+                    color: AppColors.warning.withValues(alpha: 0.15),
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: Text(
+                    '${pending.length} to verify',
+                    style: GoogleFonts.zain(fontSize: 11, fontWeight: FontWeight.bold, color: AppColors.warning),
+                  ),
+                ),
+            ],
           ),
-          if (_expanded) ...[
-            const SizedBox(height: 8),
-            reportsAsync.when(
-              loading: () => const Padding(
-                padding: EdgeInsets.symmetric(vertical: 8),
-                child: SizedBox(
-                  height: 16,
-                  width: 16,
-                  child: CircularProgressIndicator(strokeWidth: 2),
-                ),
-              ),
-              error: (e, _) => Text(
-                'Could not load community reports.',
-                style: GoogleFonts.zain(
-                  fontSize: 12,
-                  color: AppColors.textSecondary,
-                ),
-              ),
-              data: (reports) {
-                if (reports.isEmpty) {
-                  return Text(
-                    'No community reports submitted yet.',
-                    style: GoogleFonts.zain(
-                      fontSize: 12,
-                      color: AppColors.textSecondary,
-                    ),
-                  );
-                }
-                return Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: reports
-                      .map(
-                        (r) => _CommunityReportTile(
-                          caseId: widget.caseId,
-                          report: r,
-                        ),
-                      )
-                      .toList(),
-                );
-              },
+          const SizedBox(height: 8),
+          reportsAsync.when(
+            loading: () => const Padding(
+              padding: EdgeInsets.symmetric(vertical: 8),
+              child: SizedBox(height: 16, width: 16, child: CircularProgressIndicator(strokeWidth: 2)),
             ),
-          ],
+            error: (e, _) => Text(
+              'Could not load community reports.',
+              style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary),
+            ),
+            data: (_) {
+              if (reports.isEmpty) {
+                return Text(
+                  'No community reports submitted yet.',
+                  style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary),
+                );
+              }
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  for (final r in [...pending, ...others])
+                    _CommunityReportTile(caseId: caseId, report: r, currentPin: currentPin),
+                ],
+              );
+            },
+          ),
         ],
       ),
+    );
+  }
+}
+
+/// Current case pin (red) and the reported new pin (orange), so staff can
+/// check how far the animal moved before confirming.
+class _MoveCheckMap extends StatelessWidget {
+  final LatLng? current;
+  final LatLng reported;
+  const _MoveCheckMap({required this.current, required this.reported});
+
+  @override
+  Widget build(BuildContext context) {
+    final cur = current;
+    final meters = cur == null
+        ? null
+        : Geolocator.distanceBetween(cur.latitude, cur.longitude, reported.latitude, reported.longitude);
+    final center = cur == null
+        ? reported
+        : LatLng((cur.latitude + reported.latitude) / 2, (cur.longitude + reported.longitude) / 2);
+    final zoom = meters == null
+        ? 16.0
+        : meters < 300
+            ? 16.0
+            : meters < 1500
+                ? 14.0
+                : meters < 6000
+                    ? 12.5
+                    : 11.0;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        ClipRRect(
+          borderRadius: BorderRadius.circular(10),
+          child: SizedBox(
+            height: 150,
+            child: GoogleMap(
+              gestureRecognizers: {Factory<OneSequenceGestureRecognizer>(() => EagerGestureRecognizer())},
+              initialCameraPosition: CameraPosition(target: center, zoom: zoom),
+              markers: {
+                if (cur != null) Marker(markerId: const MarkerId('current'), position: cur),
+                Marker(
+                  markerId: const MarkerId('reported'),
+                  position: reported,
+                  icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueOrange),
+                ),
+              },
+              polylines: {
+                if (cur != null)
+                  Polyline(
+                    polylineId: const PolylineId('move'),
+                    points: [cur, reported],
+                    width: 3,
+                    color: AppColors.warning,
+                    patterns: [PatternItem.dash(12), PatternItem.gap(8)],
+                  ),
+              },
+              myLocationButtonEnabled: false,
+              zoomControlsEnabled: false,
+              mapToolbarEnabled: false,
+            ),
+          ),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          meters == null
+              ? 'Orange: reported location'
+              : 'Red: current location · Orange: reported · ${meters >= 1000 ? '${(meters / 1000).toStringAsFixed(1)} km' : '${meters.round()} m'} apart',
+          style: GoogleFonts.zain(fontSize: 11, color: AppColors.textSecondary),
+        ),
+      ],
     );
   }
 }
@@ -115,7 +173,8 @@ class _CommunityReportsSectionState
 class _CommunityReportTile extends ConsumerStatefulWidget {
   final String caseId;
   final CommunityReport report;
-  const _CommunityReportTile({required this.caseId, required this.report});
+  final LatLng? currentPin;
+  const _CommunityReportTile({required this.caseId, required this.report, this.currentPin});
 
   @override
   ConsumerState<_CommunityReportTile> createState() =>
@@ -131,7 +190,21 @@ class _CommunityReportTileState extends ConsumerState<_CommunityReportTile> {
     return (n != null && n.isNotEmpty) ? n : 'Admin Staff';
   }
 
+  /// Set when the report was filed on a duplicate merged into this case.
+  String? get _reportCaseId {
+    final id = widget.report.caseId;
+    return (id == null || id == widget.caseId) ? null : id;
+  }
+
   Future<void> _approve() async {
+    final ok = await showConfirmActionDialog(
+      context,
+      title: 'Confirm the animal moved?',
+      message: 'The case location changes to ${widget.report.newAddress?.trim().isNotEmpty == true ? '"${widget.report.newAddress}"' : 'the reported pin'}. '
+          'The transporter, maps and distances follow the new location.',
+      confirmLabel: 'Update location',
+    );
+    if (!ok || !mounted) return;
     setState(() => _busy = true);
     try {
       await ref
@@ -139,6 +212,7 @@ class _CommunityReportTileState extends ConsumerState<_CommunityReportTile> {
           .approveLocationUpdate(
             caseId: widget.caseId,
             reportId: widget.report.id,
+            reportCaseId: _reportCaseId,
             actorUid: _actorUid,
             actorName: _actorName,
           );
@@ -171,6 +245,7 @@ class _CommunityReportTileState extends ConsumerState<_CommunityReportTile> {
           .rejectLocationUpdate(
             caseId: widget.caseId,
             reportId: widget.report.id,
+            reportCaseId: _reportCaseId,
             actorUid: _actorUid,
             actorName: _actorName,
             reason: reason,
@@ -205,7 +280,7 @@ class _CommunityReportTileState extends ConsumerState<_CommunityReportTile> {
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
           ),
           child: const Text(
-            'Reject',
+            'Not Verified',
             style: TextStyle(fontSize: 12),
             textAlign: TextAlign.center,
           ),
@@ -229,7 +304,7 @@ class _CommunityReportTileState extends ConsumerState<_CommunityReportTile> {
                   ),
                 )
               : const Text(
-                  'Approve Location Change',
+                  'Confirm Move · Update Location',
                   style: TextStyle(fontSize: 12),
                   textAlign: TextAlign.center,
                 ),
@@ -333,6 +408,15 @@ class _CommunityReportTileState extends ConsumerState<_CommunityReportTile> {
                     ),
                   ),
                 ],
+                if (_reportCaseId != null)
+                  Text(
+                    'Filed on merged duplicate report',
+                    style: GoogleFonts.zain(fontSize: 11, color: AppColors.textSecondary),
+                  ),
+                if (report.isPendingMove && report.newLat != null && report.newLng != null) ...[
+                  const SizedBox(height: 6),
+                  _MoveCheckMap(current: widget.currentPin, reported: LatLng(report.newLat!, report.newLng!)),
+                ],
                 // Community Location Approval spec §9 — the case's own
                 // address/lat/lng only ever change once Approve is tapped
                 // here; this card never implies otherwise while pending.
@@ -352,7 +436,7 @@ class _CommunityReportTileState extends ConsumerState<_CommunityReportTile> {
                           borderRadius: BorderRadius.circular(20),
                         ),
                         child: Text(
-                          'Pending approval',
+                          'Moved? Verify before updating',
                           style: GoogleFonts.zain(
                             fontSize: 10,
                             fontWeight: FontWeight.bold,
