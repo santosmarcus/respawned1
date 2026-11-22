@@ -57,6 +57,28 @@ class OrganizationDirectoryRepository {
     return results.take(limit).toList();
   }
 
+  /// Names of the approved organizations (rescue volunteers included) whose
+  /// coverage circle contains ([lat], [lng]): the same test the server uses
+  /// to route a new report (orgCoversPoint in functions/index.js). Empty
+  /// when the point is outside every partner organization's reach.
+  Future<List<String>> organizationsCovering({required double lat, required double lng}) async {
+    final snap = await _organizations.where('verificationStatus', isEqualTo: 'approved').get();
+    final names = <String>[];
+    for (final doc in snap.docs) {
+      final d = doc.data();
+      for (final raw in (d['serviceAreas'] as List? ?? const []).whereType<Map>()) {
+        final a = ServiceArea.fromMap(Map<String, dynamic>.from(raw));
+        if (!a.hasGeofence) continue;
+        if (Geolocator.distanceBetween(lat, lng, a.lat!, a.lng!) / 1000 <= a.radiusKm!) {
+          final name = (d['name'] as String?)?.trim();
+          names.add(name == null || name.isEmpty ? 'A partner organization' : name);
+          break;
+        }
+      }
+    }
+    return names;
+  }
+
   /// Approved independent rescuers whose coverage circle contains
   /// ([lat], [lng]), nearest first, with how much room each has. Those at
   /// capacity or paused are listed last and can't be picked

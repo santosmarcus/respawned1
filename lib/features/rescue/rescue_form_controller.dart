@@ -492,7 +492,24 @@ class RescueFormController {
   bool get isNeglectAbuseType => selectedRescueType == kNeglectAbuseType;
 
   /// Neglect or Abuse: kAbusePathOrgAssistance | kAbusePathIndependent.
+  /// Decided by where the animal is ([applyAbuseCoverage]), not asked.
   String? abuseReportPath;
+
+  /// Neglect or Abuse: whether a partner organization covers the pinned
+  /// location. Null while it is being checked (or before a pin).
+  bool? abuseAreaCovered;
+  List<String> abuseCoveringOrgs = const [];
+
+  /// Inside a partner organization's coverage the report asks it for help;
+  /// outside, the reporter takes it to the authorities with the guide.
+  /// [covered] null clears it (checking again).
+  void applyAbuseCoverage(bool? covered, [List<String> orgs = const []]) {
+    abuseAreaCovered = covered;
+    abuseCoveringOrgs = orgs;
+    abuseReportPath = covered == null
+        ? null
+        : (covered ? kAbusePathOrgAssistance : kAbusePathIndependent);
+  }
   bool get isIndependentAbuseReport =>
       isNeglectAbuseType && abuseReportPath == kAbusePathIndependent;
 
@@ -505,7 +522,11 @@ class RescueFormController {
   /// Whether this report asks the organization to coordinate (shelter
   /// coordination, witnesses, adoption interest).
   bool get asksOrgCoordination =>
-      orgInvolvement == OrgInvolvement.orgAssist && !isLostPetType;
+      orgInvolvement == OrgInvolvement.orgAssist && !isLostPetType && !isNeglectAbuseType;
+
+  /// "Are you on-site?" — Neglect or Abuse asks whether the harm is
+  /// happening right now instead.
+  bool get asksOnSite => !isNeglectAbuseType;
 
   /// Live urgency assessment from the animals' answers; null for report
   /// types that carry no urgency (Pet Surrender, Lost Pet) and before any
@@ -569,11 +590,11 @@ class RescueFormController {
         return 'Please explain the issue and what you\'ve tried.';
       }
     } else if (isNeglectAbuseType && abuseReportPath == null) {
-      return 'Please choose how you want to handle this report.';
+      return 'Still checking whether a partner organization covers this location. Try again in a moment.';
     } else if (condition.isEmpty ||
         selectedRescueType == null ||
         valid.isEmpty ||
-        onSiteChoice == null ||
+        (asksOnSite && onSiteChoice == null) ||
         (asksOrgCoordination &&
             (coordinateChoice == null || adoptionChoice == null))) {
       return 'Please fill in all required fields.';
@@ -597,10 +618,6 @@ class RescueFormController {
           neglectReportedToAuthorities == null ||
           neglectWillingWitness == null) {
         return 'Please fill in all required fields.';
-      }
-      if (neglectObserved.contains(kNeglectObservedOther) &&
-          neglectObservedOtherController.text.trim().isEmpty) {
-        return 'Please describe what you are seeing.';
       }
     }
 

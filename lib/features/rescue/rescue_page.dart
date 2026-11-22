@@ -10,6 +10,7 @@ import 'package:geolocator/geolocator.dart';
 import 'package:respawnd1/features/admin/collarTags/nfc_service.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:respawnd1/core/constants/app.links.dart';
+import 'package:respawnd1/core/repos/organization_directory_repository.dart';
 import 'package:respawnd1/features/collartag/collar_id_tag_screen.dart';
 import 'package:respawnd1/features/collartag/scan_tag_flow.dart';
 import 'package:respawnd1/features/collartag/animal_tag_scan.dart';
@@ -240,6 +241,7 @@ class _RescuePageState extends State<RescuePage> {
     _mapController?.animateCamera(
       CameraUpdate.newCameraPosition(CameraPosition(target: pos, zoom: 17)),
     );
+    _checkAbuseCoverage();
 
     final resolvedAddress = await _geocoder.reverseGeocode(pos);
 
@@ -290,7 +292,34 @@ class _RescuePageState extends State<RescuePage> {
     if (selected != null) {
       // Urgency is assessed from the animals' answers, not the type.
       setState(() => _form.selectedRescueType = selected);
+      _checkAbuseCoverage();
     }
+  }
+
+  int _coverageCheck = 0;
+
+  /// Neglect or Abuse: whether a partner organization covers the pin, which
+  /// decides between the reporting guidelines and the rescue form
+  /// (NeglectAbuseCoverageSection). Only the latest check counts. If the
+  /// check fails, the report goes to the organizations (the server routes
+  /// it by coverage anyway).
+  Future<void> _checkAbuseCoverage() async {
+    if (!_form.isNeglectAbuseType || !_hasResolvedLocation) return;
+    final token = ++_coverageCheck;
+    final pos = _pinnedLocation;
+    setState(() => _form.applyAbuseCoverage(null));
+    bool covered;
+    List<String> orgs = const [];
+    try {
+      orgs = await OrganizationDirectoryRepository()
+          .organizationsCovering(lat: pos.latitude, lng: pos.longitude)
+          .timeout(const Duration(seconds: 15));
+      covered = orgs.isNotEmpty;
+    } catch (_) {
+      covered = true;
+    }
+    if (!mounted || token != _coverageCheck) return;
+    setState(() => _form.applyAbuseCoverage(covered, orgs));
   }
 
   //Media picker
@@ -693,7 +722,7 @@ class _RescuePageState extends State<RescuePage> {
                   if (_form.isPetSurrenderType) ...[
                     SurrenderFields(form: _form, onChanged: _onFormChanged),
                   ] else if (!_form.isLostPetType) ...[
-                    StrayReportFields(form: _form, onChanged: _onFormChanged),
+                    StrayReportFields(form: _form, onChanged: _onFormChanged, hasPin: _hasResolvedLocation),
                   ] else ...[
                     LostPetFields(
                       form: _form,
@@ -799,6 +828,19 @@ class _RescuePageState extends State<RescuePage> {
           'recognize it and reach you. Please keep '
           'searching nearby, check with local shelters and your barangay, '
           'and share your alert as widely as you can.';
+    }
+    if (_form.isNeglectAbuseType) {
+      if (_form.abuseAreaCovered == false) {
+        return 'This location is outside our partner organizations\' reach. Your report is '
+            'recorded and subject to review, but no one can be sent from here. Please report '
+            'it to your barangay, city or municipal LGU, or the police (911), and keep your '
+            'photos and notes for them.';
+      }
+      return 'Your report is subject to review and approval by our partner organizations. '
+          'They may coordinate with the authorities or rescue the animal depending on their '
+          'assessment and availability, so a response cannot be guaranteed. Please also '
+          'report it yourself to your barangay or the police (911). Do not confront anyone '
+          'or enter private property.';
     }
     return 'Our partner organizations review every report and will make '
         'every effort to respond as quickly as possible. However, response '

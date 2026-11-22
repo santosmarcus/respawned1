@@ -228,12 +228,8 @@ class RescueReportService {
     'surrenderTimeline': form.surrenderTimeline,
     // Neglect or Abuse follow-up answers — see NeglectAbuseFields.
     if (form.isNeglectAbuseType) 'neglectAbuse': {
-    'observed': [
-    for (final o in form.neglectObserved)
-    o == kNeglectObservedOther
-    ? 'Other: ${form.neglectObservedOtherController.text.trim()}'
-        : o,
-    ],
+    // "Other" is described in the report's own description.
+    'observed': [for (final o in form.neglectObserved) o],
     'happeningNow': form.neglectHappeningNow,
     'ownerKnown': form.neglectOwnerKnown,
     if (form.neglectOwnerKnown == 'Yes')
