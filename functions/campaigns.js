@@ -23,6 +23,7 @@
 // or transferred (available == 0).
 
 const crypto = require('crypto');
+const needsRules = require('./campaign_needs_rules');
 const {onCall, HttpsError} = require('firebase-functions/v2/https');
 const {onSchedule} = require('firebase-functions/v2/scheduler');
 const {onDocumentCreated} = require('firebase-functions/v2/firestore');
@@ -322,8 +323,73 @@ function sponsorshipBlocker(a) {
   return null;
 }
 
+// ── Campaigns for an animal in treatment ────────────────────────────────────
+// The admin picks an animal of a rescue case (treatmentCaseId +
+// treatmentAnimalIndex). Its rescue reason, condition, treatment log and
+// treatment expenses are read from the case here (staff-only data) and
+// stored on the campaign as `animalNeeds`, the public summary; the target
+// is the expenses' total (functions/campaign_needs_rules.js). A draft can be
+// prepared while the animal is in treatment; it launches only once intake
+// is complete, and launching captures every expense recorded by then.
+// After launch the animal, its expenses and the target are fixed.
+
+async function loadAnimalNeeds(actor, caseId, animalIndex) {
+  const caseRef = db.collection('cases').doc(caseId);
+  const [caseSnap, expSnap, logSnap, recSnap] = await Promise.all([
+    caseRef.get(),
+    caseRef.collection('expenses').get(),
+    caseRef.collection('treatmentLogs').get(),
+    db.collection('animals').where('linkedCaseId', '==', caseId).get(),
+  ]);
+  if (!caseSnap.exists) throw new HttpsError('not-found', 'That rescue case does not exist.');
+  const c = caseSnap.data();
+  if ((c.organizationId || '') !== (actor.organizationId || '')) {
+    throw new HttpsError('permission-denied', 'This rescue case belongs to another organization.');
+  }
+  const count = Array.isArray(c.animals) && c.animals.length ? c.animals.length : 1;
+  if (!Number.isInteger(animalIndex) || animalIndex < 0 || animalIndex >= count) {
+    throw new HttpsError('invalid-argument', 'Choose an animal from the rescue case.');
+  }
+  // Older cases kept their log in the case document (treatmentLog array).
+  const logs = logSnap.empty ? (Array.isArray(c.treatmentLog) ? c.treatmentLog : []) : logSnap.docs.map((d) => d.data());
+  const records = recSnap.docs.map((d) => ({id: d.id, ...d.data()}));
+  const built = needsRules.buildAnimalNeeds({
+    caseData: c, animalIndex, expenses: expSnap.docs.map((d) => d.data()), logs, records,
+  });
+  built.animalNeeds.caseId = caseId;
+  built.record = records.find((r) => r.sourceAnimalIndex === animalIndex) || null;
+  return built;
+}
+
+// Sets the needs fields from [built]; [requireIntake] when launching.
+function applyAnimalNeeds(fields, built, {requireIntake}) {
+  if (!(built.expenseTotal > 0)) {
+    throw new HttpsError('failed-precondition',
+        'No treatment expenses are recorded for this animal yet. Record them on the rescue case first.');
+  }
+  if (requireIntake && !built.animalNeeds.intakeComplete) {
+    throw new HttpsError('failed-precondition',
+        'This animal\'s campaign can be launched once intake is complete. Save it as a draft for now.');
+  }
+  const n = built.animalNeeds;
+  fields.animalNeeds = {...n, capturedAt: Timestamp.now()};
+  fields.targetAmount = built.expenseTotal;
+  fields.treatmentCaseId = n.caseId;
+  fields.treatmentAnimalIndex = n.animalIndex;
+  fields.linkedCaseId = n.caseId;
+  if (built.record) {
+    fields.animalId = built.record.id;
+    fields.animalName = typeof built.record.name === 'string' ? built.record.name : (n.animalName || '');
+    fields.isDog = String(built.record.species || n.species || '').toLowerCase() === 'dog';
+  } else {
+    fields.animalId = null;
+    fields.animalName = n.animalName || null;
+    fields.isDog = String(n.species || '').toLowerCase() === 'dog';
+  }
+}
+
 // Validates the editable listing fields. `existing` is the stored doc on edit.
-async function buildListingFields(data, existing) {
+async function buildListingFields(data, existing, actor, {publish = false} = {}) {
   const type = existing ? (existing.type || 'donation') : data.type;
   if (!TYPES.includes(type)) throw new HttpsError('invalid-argument', 'Choose Donation or Sponsorship.');
 
@@ -372,7 +438,33 @@ async function buildListingFields(data, existing) {
 
   if (type === 'donation') {
     fields.title = requireString(data.title, 'Title', {max: 200});
-    fields.targetAmount = requireAmount(data.targetAmount, 'Target amount');
+    const treatmentCaseId = requireString(data.treatmentCaseId, 'Rescue case', {max: 128, optional: true});
+    const launched = existing && statusOf(existing) !== 'draft' && existing.animalNeeds;
+    if (launched) {
+      // Fixed once launched: new costs can't be added to a running campaign.
+      if (treatmentCaseId !== existing.treatmentCaseId || data.treatmentAnimalIndex !== existing.treatmentAnimalIndex) {
+        throw new HttpsError('failed-precondition', 'The animal and its expenses are fixed once the campaign is launched.');
+      }
+      fields.animalNeeds = existing.animalNeeds;
+      fields.targetAmount = existing.targetAmount;
+      fields.treatmentCaseId = existing.treatmentCaseId;
+      fields.treatmentAnimalIndex = existing.treatmentAnimalIndex;
+      fields.linkedCaseId = existing.linkedCaseId || existing.treatmentCaseId;
+      fields.animalId = existing.animalId || null;
+      fields.animalName = existing.animalName || null;
+    } else if (treatmentCaseId) {
+      if (data.expensesConfirmed !== true) {
+        throw new HttpsError('invalid-argument',
+            'Confirm that every treatment expense for this animal is recorded: they can\'t be added after launch.');
+      }
+      const built = await loadAnimalNeeds(actor, treatmentCaseId, data.treatmentAnimalIndex);
+      applyAnimalNeeds(fields, built, {requireIntake: !existing && publish === true});
+    } else {
+      fields.targetAmount = requireAmount(data.targetAmount, 'Target amount');
+      fields.animalNeeds = null;
+      fields.treatmentCaseId = null;
+      fields.treatmentAnimalIndex = null;
+    }
     fields.acceptInKind = data.acceptInKind === true;
     fields.inKindItems = fields.acceptInKind ? parseInKindItems(data.inKindItems) : [];
     if (fields.acceptInKind && !fields.inKindItems.length) {
@@ -386,6 +478,9 @@ async function buildListingFields(data, existing) {
     fields.monthlyAmount = requireAmount(data.monthlyAmount, 'Monthly amount');
     fields.intendedUse = requireString(data.intendedUse, 'Intended use of funds', {max: 1000});
     fields.targetAmount = 0; // sponsorships have no funding goal
+    fields.animalNeeds = null;
+    fields.treatmentCaseId = null;
+    fields.treatmentAnimalIndex = null;
     fields.acceptInKind = false;
     fields.inKindItems = [];
   }
@@ -397,7 +492,8 @@ async function buildListingFields(data, existing) {
 // Create (no campaignId) or edit (campaignId) a listing.
 // data: {type, title, description, imageUrl, animalId, fundKind, purposeTags,
 //        restricted, linkedCaseId, targetAmount, deadlineMs, acceptInKind,
-//        inKindItems, monthlyAmount, intendedUse}
+//        inKindItems, monthlyAmount, intendedUse, treatmentCaseId,
+//        treatmentAnimalIndex, expensesConfirmed}
 // publish: true publishes immediately on create.
 exports.saveCampaign = onCall(async (request) => {
   const actor = await loadActor(request);
@@ -405,7 +501,7 @@ exports.saveCampaign = onCall(async (request) => {
   if (!data || typeof data !== 'object') throw new HttpsError('invalid-argument', 'Listing details are required.');
 
   if (!campaignId) {
-    const {type, fields} = await buildListingFields(data, null);
+    const {type, fields} = await buildListingFields(data, null, actor, {publish});
     let deadline = null;
     if (type === 'donation') deadline = requireFutureDeadline(data.deadlineMs, 'Expected end date');
     else if (data.deadlineMs !== undefined && data.deadlineMs !== null) deadline = requireFutureDeadline(data.deadlineMs, 'End date');
@@ -452,7 +548,7 @@ exports.saveCampaign = onCall(async (request) => {
   if (status === 'closed') throw new HttpsError('failed-precondition', 'Closed listings cannot be edited. Relaunch it first.');
   if (status === 'archived') throw new HttpsError('failed-precondition', 'Archived listings cannot be edited.');
 
-  const {type, fields} = await buildListingFields(data, existing);
+  const {type, fields} = await buildListingFields(data, existing, actor);
   if (existing.restricted === true && fields.restricted === false && num(existing.collectedAmount) > 0) {
     throw new HttpsError('failed-precondition', 'Funds were raised as restricted; the restriction cannot be lifted.');
   }
@@ -486,6 +582,21 @@ exports.setCampaignStatus = onCall(async (request) => {
   const why = requireString(reason, 'Reason', {max: 500, optional: true});
   const ref = campaignsCol().doc(campaignId);
 
+  // Launching a campaign for an animal in treatment: intake must be done,
+  // and every expense recorded by now is captured (read before the
+  // transaction; the case's documents aren't part of it).
+  let needsFields = null;
+  if (action === 'publish') {
+    const pre = await ref.get();
+    const p = pre.exists ? pre.data() : null;
+    if (p && p.treatmentCaseId && statusOf(p) === 'draft') {
+      assertSameOrg(actor, p);
+      needsFields = {};
+      applyAnimalNeeds(needsFields, await loadAnimalNeeds(actor, p.treatmentCaseId, p.treatmentAnimalIndex),
+          {requireIntake: true});
+    }
+  }
+
   const result = await db.runTransaction(async (tx) => {
     const snap = await tx.get(ref);
     if (!snap.exists) throw new HttpsError('not-found', 'Listing not found.');
@@ -504,7 +615,7 @@ exports.setCampaignStatus = onCall(async (request) => {
       if (c.type !== 'sponsorship' && (!(c.date instanceof Timestamp) || deadlinePassed)) {
         throw new HttpsError('failed-precondition', 'Set a future end date before publishing.');
       }
-      next = {status: 'active', isActive: true, startDate: now};
+      next = {status: 'active', isActive: true, startDate: now, ...(needsFields || {})};
     } else if (action === 'deactivate') {
       if (status !== 'active') throw new HttpsError('failed-precondition', 'Only active listings can be deactivated.');
       next = {status: 'paused', isActive: false};
