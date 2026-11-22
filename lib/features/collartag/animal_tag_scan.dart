@@ -4,6 +4,9 @@ import 'package:flutter/material.dart';
 
 import 'package:respawnd1/core/models/organization/organization_capabilities.dart';
 import 'package:respawnd1/core/repos/animal_record_repository.dart';
+import 'package:respawnd1/core/repos/animal_collar_tag_repository.dart';
+import 'package:respawnd1/features/collartag/collar_id_tag_screen.dart';
+import 'package:respawnd1/features/collartag/collar_tag_data_model.dart';
 import 'package:respawnd1/core/models/rescue/animal_record.dart';
 import 'package:respawnd1/features/admin/animals/animal_record_detail_page.dart';
 import 'package:respawnd1/features/adoption/adoption_page.dart';
@@ -50,6 +53,29 @@ Future<bool> openScannedAnimalTag(BuildContext context, String raw) async {
     messenger.showSnackBar(appSnackBar('No animal record uses this QR tag.'));
     return true;
   }
+
+  // Every animal has a collar tag (AnimalCollarTagRepository); older
+  // printed animal QR codes open that same collar tag view.
+  final tagId = AnimalCollarTagRepository.tagIdFor(doc.id);
+  try {
+    final tagSnap = await FirebaseFirestore.instance.collection('collarTags').doc(tagId).get();
+    if (!context.mounted) return true;
+    if (tagSnap.exists) {
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => CollarIdTagCardScreen(
+            tagData: CollarTagData.fromFirestore(tagSnap.data()!, tagSnap.id),
+            readOnly: true,
+          ),
+        ),
+      );
+      return true;
+    }
+  } on FirebaseException {
+    // Fall back to the animal's page below.
+  }
+  if (!context.mounted) return true;
 
   final record = AnimalRecord.fromFirestore(doc);
   final isStaff =

@@ -384,7 +384,7 @@
             <hr class="id-divider" />
             <div class="id-row"><span>Color/Markings:</span><span>${escapeHtml(tagData?.colorMarkings || "")}</span></div>
             <hr class="id-divider" />
-            <div class="id-row"><span>Birthday: ${escapeHtml(tagData?.birthday || "")}</span><span>Sex: ${escapeHtml(tagData?.sex || "")}</span></div>
+            <div class="id-row"><span>${tagData?.animalId ? "Age" : "Birthday"}: ${escapeHtml(tagData?.birthday || "")}</span><span>Sex: ${escapeHtml(tagData?.sex || "")}</span></div>
             <hr class="id-divider" />
             <div class="id-health">
               <div>

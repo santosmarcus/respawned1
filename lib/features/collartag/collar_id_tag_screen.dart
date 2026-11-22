@@ -18,18 +18,23 @@ import 'package:respawnd1/core/constants/app.links.dart';
 import 'pet_found_chat.dart';
 import 'lost_pet_location_picker.dart';
 import 'package:respawnd1/core/widgets/app_messages.dart';
+import 'package:respawnd1/core/services/collar_tag_nfc.dart';
 
 //  Pet Identification Card Screen
 class CollarIdTagCardScreen extends StatefulWidget {
   final CollarTagData tagData;
   final bool isNewlyCreated;
   final bool readOnly;
+  /// Staff view of an animal record's tag: adds "Write NFC Chip", which
+  /// writes the tag link (the same one the QR code holds) onto a chip.
+  final bool showNfcWrite;
 
   const CollarIdTagCardScreen({
     super.key,
     required this.tagData,
     this.isNewlyCreated = false,
     this.readOnly = false,
+    this.showNfcWrite = false,
   });
 
   @override
@@ -39,6 +44,7 @@ class CollarIdTagCardScreen extends StatefulWidget {
 class _CollarIdTagCardScreenState extends State<CollarIdTagCardScreen> {
   final GlobalKey _cardKey = GlobalKey();
   bool _sharing = false;
+  bool _writingNfc = false;
   bool _updatingStatus = false;
   late CollarTagData _tag;
   StreamSubscription<DocumentSnapshot<Map<String, dynamic>>>? _tagSub;
@@ -127,6 +133,29 @@ class _CollarIdTagCardScreenState extends State<CollarIdTagCardScreen> {
       _showSnack('Share failed: $e');
     } finally {
       if (mounted) setState(() => _sharing = false);
+    }
+  }
+
+  Future<void> _writeNfc() async {
+    final tagId = _tag.tagId;
+    if (tagId == null) return;
+    if (!await CollarTagNfc.isAvailable()) {
+      _showSnack('NFC is not available on this device.');
+      return;
+    }
+    setState(() => _writingNfc = true);
+    _showSnack('Hold the phone near the collar tag chip…');
+    try {
+      await CollarTagNfc.writeTag(tagId);
+      await FirebaseFirestore.instance.collection('collarTags').doc(tagId).set({
+        'nfcWritten': true,
+        'nfcWrittenAt': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
+      _showSnack('NFC chip written. Scanning it opens this collar tag.');
+    } catch (e) {
+      _showSnack('Could not write the NFC chip: $e');
+    } finally {
+      if (mounted) setState(() => _writingNfc = false);
     }
   }
 
@@ -249,7 +278,7 @@ class _CollarIdTagCardScreenState extends State<CollarIdTagCardScreen> {
                     const Divider(thickness: 0.5, color: AppColors.textPrimary),
                     _infoRow('Color/Markings:', tag.colorMarkings),
                     const Divider(thickness: 0.5, color: AppColors.textPrimary),
-                    _infoRow('Birthday: ${tag.birthday}', 'Sex: ${tag.sex}',
+                    _infoRow('${tag.birthdayLabel}: ${tag.birthday}', 'Sex: ${tag.sex}',
                         isDouble: true),
                     const Divider(thickness: 0.5, color: AppColors.textPrimary),
                     const SizedBox(height: 8),
@@ -266,7 +295,7 @@ class _CollarIdTagCardScreenState extends State<CollarIdTagCardScreen> {
                     const SizedBox(height: 6),
                     Align(
                       alignment: Alignment.centerLeft,
-                      child: Text('Owner Information',
+                      child: Text(tag.isAnimalRecordTag ? 'Organization' : 'Owner Information',
                           style: GoogleFonts.tiltWarp(
                               fontSize: 16,
                               color: AppColors.textPrimary)),
@@ -327,6 +356,16 @@ class _CollarIdTagCardScreenState extends State<CollarIdTagCardScreen> {
                 label: _sharing ? 'Preparing…' : 'Share ID Card',
                 loading: _sharing,
                 onTap: _sharing ? null : _shareCard,
+              ),
+              const SizedBox(height: 16),
+            ],
+
+            if (widget.showNfcWrite && tag.tagId != null) ...[
+              _ActionButton(
+                icon: Icons.nfc,
+                label: _writingNfc ? 'Waiting for chip…' : 'Write NFC Chip',
+                loading: _writingNfc,
+                onTap: _writingNfc ? null : _writeNfc,
               ),
               const SizedBox(height: 16),
             ],

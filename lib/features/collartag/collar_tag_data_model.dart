@@ -40,6 +40,15 @@ class CollarTagData {
 
   String? ownerId;
   bool qrEnabled;
+
+  /// Set on tags issued for a shelter animal record
+  /// (AnimalCollarTagRepository); those tags mirror the record and are
+  /// edited from it, and [birthday] holds the animal's age.
+  String? animalId;
+  String? organizationId;
+
+  bool get isAnimalRecordTag => animalId != null && animalId!.isNotEmpty;
+  String get birthdayLabel => isAnimalRecordTag ? 'Age' : 'Birthday';
   // final bool? nfcWritten;
   // DateTime? nfcWrittenAt;
 
@@ -73,6 +82,8 @@ class CollarTagData {
     this.createdAt,
     this.ownerId,
     this.qrEnabled = false,
+    this.animalId,
+    this.organizationId,
     // this.nfcWritten,
     // this.nfcWrittenAt,
   });
@@ -145,6 +156,8 @@ class CollarTagData {
         createdAt: _parseCreatedAt(data['createdAt']),
         ownerId: data['ownerId'] as String?,
         qrEnabled: data['qrEnabled'] as bool? ?? false,
+        animalId: data['animalId'] as String?,
+        organizationId: data['organizationId'] as String?,
         // nfcWritten: data['nfcWritten'] as bool? ?? false,
         // nfcWrittenAt: data['nfcWrittenAt'] != null
         //     ? (data['nfcWrittenAt'] as Timestamp).toDate()

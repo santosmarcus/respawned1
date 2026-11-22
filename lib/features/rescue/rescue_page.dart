@@ -14,6 +14,8 @@ import 'package:image_picker/image_picker.dart';
 import 'package:respawnd1/core/constants/app.links.dart';
 import 'package:respawnd1/features/collartag/scan_tag_flow.dart';
 import 'package:respawnd1/features/collartag/pet_found_chat.dart';
+import 'package:respawnd1/features/collartag/collar_id_tag_screen.dart';
+import 'package:respawnd1/core/services/collar_tag_nfc.dart';
 import 'package:respawnd1/core/models/rescue/report_verification.dart';
 import 'package:respawnd1/features/rescue/rescue_form_controller.dart';
 import 'package:respawnd1/features/rescue/rescue_form_options.dart';
@@ -411,14 +413,13 @@ class _RescuePageState extends State<RescuePage> {
         );
       }
 
-      final tag = await FlutterNfcKit.poll(
-        timeout: const Duration(seconds: 10),
-      );
-      await FlutterNfcKit.finish();
+      // Collar tag chips hold the tag link (CollarTagNfc.writeTag), the
+      // same link the QR code carries.
+      final value = await CollarTagNfc.readTag();
 
       if (mounted) {
         ScaffoldMessenger.of(context).hideCurrentSnackBar();
-        _handleScanResult(tag.id);
+        _handleScanResult(value);
       }
     } catch (e) {
       await FlutterNfcKit.finish();
@@ -477,6 +478,21 @@ class _RescuePageState extends State<RescuePage> {
           appSnackBar(_form.isLostPetType
               ? 'Tag scanned, but no registered profile was found for it.'
               : 'Tag scanned: $result', kind: AppMessageKind.success),
+        );
+        return;
+      }
+
+      // A tag that isn't marked lost has no rescue session: show its
+      // collar ID tag, the same view a QR or NFC scan opens elsewhere.
+      if (!outcome.isLost || outcome.sessionId == null) {
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => CollarIdTagCardScreen(
+              tagData: outcome.tagData!,
+              readOnly: !outcome.isOwner,
+            ),
+          ),
         );
         return;
       }
