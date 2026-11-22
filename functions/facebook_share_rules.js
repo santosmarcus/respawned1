@@ -98,6 +98,19 @@ function recordPhotoUrl(kind, record) {
   return typeof url === 'string' && /^https:\/\//i.test(url) ? url : null;
 }
 
+/// Why [organizationId]'s Page can't carry this record, or null. A record
+/// must belong to that organization, except a referral of a report no
+/// organization owns yet (in the shared review pool): staff of any
+/// organization that can see it may post it on their own Page.
+function recordPostOrgProblem(kind, record, organizationId) {
+  const owner = (record && record.organizationId) || '';
+  if (owner === organizationId) return null;
+  if (!owner && kind === 'referral') return null;
+  return owner ?
+    `This ${kind} belongs to another organization.` :
+    `This ${kind} is not linked to an organization yet. Ask an admin to run the organization backfill.`;
+}
+
 module.exports = {
   MAX_RECORDS,
   MAX_PHOTOS,
@@ -107,5 +120,6 @@ module.exports = {
   normalizePublishItems,
   normalizeRecordPost,
   recordPostBlockedReason,
+  recordPostOrgProblem,
   recordPhotoUrl,
 };

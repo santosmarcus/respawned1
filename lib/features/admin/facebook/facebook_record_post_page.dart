@@ -208,13 +208,19 @@ class _FacebookRecordPostPageState extends ConsumerState<FacebookRecordPostPage>
   @override
   Widget build(BuildContext context) {
     final currentOrgId = ref.watch(currentOrganizationIdProvider).asData?.value;
-    final orgId = widget.recordOrganizationId?.isNotEmpty == true ? widget.recordOrganizationId : null;
+    final recordOrgId = widget.recordOrganizationId?.isNotEmpty == true ? widget.recordOrganizationId : null;
+    // A referral of a report no organization owns yet (the shared review
+    // pool) goes on the sharing staff member's own Page.
+    final orgId = recordOrgId ??
+        (widget.kind == FacebookRecordKind.referral && (currentOrgId ?? '').isNotEmpty ? currentOrgId : null);
     final canPublish = ref.watch(currentOrganizationCapabilitiesProvider).asData?.value.canPublishToFacebook ?? false;
     final page = orgId == null ? null : ref.watch(organizationFacebookIntegrationProvider(orgId)).asData?.value;
     final pageConnected = page?.isConnected ?? false;
 
     final String? postBlockedReason = orgId == null
-        ? 'This $_kindLabel is not linked to an organization, so it can only be shared through the share sheet.'
+        ? (widget.kind == FacebookRecordKind.referral
+              ? 'Your account isn\'t linked to an organization, so there is no Page to post on. Share it through the share sheet.'
+              : 'This $_kindLabel is not linked to an organization, so it can only be shared through the share sheet.')
         : currentOrgId != null && currentOrgId != orgId
         ? 'This $_kindLabel belongs to another organization.'
         : !pageConnected

@@ -23,7 +23,7 @@ const admin = require('firebase-admin');
 const {SecretManagerServiceClient} = require('@google-cloud/secret-manager');
 const {loadOrgAccess, memberPermissions, presetFor} = require('./org_access');
 const {photosOf} = require('./public_animals');
-const {normalizePublishItems, normalizeRecordPost, recordPostBlockedReason, recordPhotoUrl} = require('./facebook_share_rules');
+const {normalizePublishItems, normalizeRecordPost, recordPostBlockedReason, recordPostOrgProblem, recordPhotoUrl} = require('./facebook_share_rules');
 
 const fbAppId = defineSecret('FB_APP_ID');
 const fbAppSecret = defineSecret('FB_APP_SECRET');
@@ -680,14 +680,10 @@ exports.facebookPublishRecordPost = onCall(async (request) => {
   const recordSnap = await db().collection(post.collection).doc(post.recordId).get();
   if (!recordSnap.exists) throw new HttpsError('not-found', `This ${post.kind} no longer exists.`);
   const record = recordSnap.data();
-  if (record.organizationId !== organizationId) {
-    throw new HttpsError(
-        'permission-denied',
-        record.organizationId ?
-          `This ${post.kind} belongs to another organization.` :
-          `This ${post.kind} is not linked to an organization yet. Ask an admin to run the organization backfill.`,
-    );
-  }
+  // A referral of a report no organization owns yet may go on the poster's
+  // own Page (functions/facebook_share_rules.js recordPostOrgProblem).
+  const orgProblem = recordPostOrgProblem(post.kind, record, organizationId);
+  if (orgProblem) throw new HttpsError('permission-denied', orgProblem);
   const blocked = recordPostBlockedReason(post.kind, record);
   if (blocked) throw new HttpsError('failed-precondition', blocked);
 

@@ -1226,6 +1226,57 @@ exports.notifyTransporterCaseChanges = onDocumentUpdated(
   },
 );
 
+// New messages on a case thread, and a location the reporter shares there,
+// reach the transporter on the trip (functions/transporter_notify_rules.js).
+const transporterNotify = require('./transporter_notify_rules');
+
+exports.notifyTransporterCaseMessage = onDocumentCreated(
+  'cases/{caseId}/messages/{messageId}',
+  async (event) => {
+    const msg = event.data && event.data.data();
+    if (!msg) return;
+    const caseId = event.params.caseId;
+    const caseSnap = await db.collection('cases').doc(caseId).get();
+    if (!caseSnap.exists) return;
+    const push = transporterNotify.messagePush({
+      caseData: caseSnap.data(),
+      message: msg,
+      activeStatuses: TRANSPORTER_ACTIVE_STATUSES,
+    });
+    if (!push) return;
+    await safeNotifyUser({uid: push.uid, title: push.title, body: push.body, data: {type: push.type, caseId}});
+  },
+);
+
+// A case location change also reaches a transporter who holds a pending
+// offer for it, or who was sent to check the location (the assigned
+// transporter is told by notifyTransporterCaseChanges).
+exports.notifyPendingTransporterLocation = onDocumentUpdated(
+  'cases/{caseId}',
+  async (event) => {
+    const before = event.data.before.data();
+    const after = event.data.after.data();
+    if (!before || !after || !transporterNotify.locationChanged(before, after)) return;
+    const caseId = event.params.caseId;
+    let offer = null;
+    if (after.currentAssignmentId) {
+      const o = await db.collection('cases').doc(caseId).collection('transportAssignments').doc(after.currentAssignmentId).get();
+      offer = o.exists ? o.data() : null;
+    }
+    const recipients = transporterNotify.pendingLocationRecipients({
+      before, after, offer, offerId: after.currentAssignmentId || null, activeStatuses: TRANSPORTER_ACTIVE_STATUSES,
+    });
+    for (const {uid, data} of recipients) {
+      await safeNotifyUser({
+        uid,
+        title: 'Rescue location updated',
+        body: after.address ? `The animal's location changed to ${after.address}.` : 'The animal\'s location was updated.',
+        data: {...data, caseId},
+      });
+    }
+  },
+);
+
 // ---- Adoption follow-up reminders -----------------------------------------
 //
 // Every morning: the adopter is reminded on a follow-up's due date and again

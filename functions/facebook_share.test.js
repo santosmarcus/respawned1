@@ -132,3 +132,13 @@ test('referral posts: only referred cases, photo from the report', () => {
   assert.strictEqual(recordPhotoUrl('campaign', {imageUrl: 'https://x/c.jpg'}), 'https://x/c.jpg');
   assert.strictEqual(recordPhotoUrl('campaign', {imageUrl: 'http://x/c.jpg'}), null);
 });
+
+test('a referral of an unowned report can go on the poster\'s Page; other records must be the Page\'s own', () => {
+  const {recordPostOrgProblem} = require('./facebook_share_rules');
+  assert.equal(recordPostOrgProblem('referral', {organizationId: ''}, 'orgA'), null);
+  assert.equal(recordPostOrgProblem('referral', {}, 'orgA'), null);
+  assert.equal(recordPostOrgProblem('referral', {organizationId: 'orgA'}, 'orgA'), null);
+  assert.match(recordPostOrgProblem('referral', {organizationId: 'orgB'}, 'orgA'), /another organization/);
+  assert.match(recordPostOrgProblem('campaign', {organizationId: ''}, 'orgA'), /not linked/);
+  assert.match(recordPostOrgProblem('event', {organizationId: 'orgB'}, 'orgA'), /another organization/);
+});
