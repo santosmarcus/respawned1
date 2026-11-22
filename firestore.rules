@@ -1346,7 +1346,13 @@ service cloud.firestore {
           );
         }
 
-        allow create: if canStaffCase(get(casePath(caseId)).data) && vehicleCarriesCase();
+        // Only new offers (Assign Transporter, status 'pending') are checked
+        // for the vehicle: the intake leg (CaseIntakeRepository.confirmIntake,
+        // created 'accepted') keeps the transporter already carrying the
+        // animals, and checking it there also pushed Confirm Intake past
+        // the 1,000-expression limit. Cheap status test first.
+        allow create: if canStaffCase(get(casePath(caseId)).data) &&
+          (request.resource.data.get('status', '') != 'pending' || vehicleCarriesCase());
         allow update: if canStaffCase(get(casePath(caseId)).data) || (
                     resource.data.get('riderId', '') == request.auth.uid &&
                     changedOnly(['status', 'respondedAt', 'acceptedAt', 'rejectedAt', 'rejectionReason', 'vehicle', 'plate', 'completedAt']) &&
