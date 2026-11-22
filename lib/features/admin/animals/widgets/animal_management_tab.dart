@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -7,6 +8,9 @@ import 'package:google_fonts/google_fonts.dart';
 
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/core/models/rescue/animal_record.dart';
+import 'package:respawnd1/core/repos/animal_collar_tag_repository.dart';
+import 'package:respawnd1/features/collartag/collar_id_tag_screen.dart';
+import 'package:respawnd1/features/collartag/collar_tag_data_model.dart';
 import 'package:respawnd1/features/admin/animals/facebook_share_page.dart';
 import 'package:respawnd1/features/admin/animals/state/animal_records_providers.dart';
 import 'package:respawnd1/features/admin/animals/widgets/animal_logs_section.dart';
@@ -98,6 +102,35 @@ class _AnimalManagementTabState extends ConsumerState<AnimalManagementTab> {
         });
       }
     }
+  }
+
+  /// Opens the animal's collar ID tag: the same card a pet owner's tag
+  /// uses, generated with the record and kept in step with it. Refreshed
+  /// first, in case the record predates collar tags.
+  Future<void> _openCollarTag() async {
+    if (_busy) return;
+    final animal = widget.animal;
+    setState(() => _busy = true);
+    CollarTagData? tag;
+    try {
+      final tagId = await AnimalCollarTagRepository().sync(animal.id).timeout(_qrSaveTimeout);
+      final snap = await FirebaseFirestore.instance.collection('collarTags').doc(tagId).get();
+      if (snap.exists) tag = CollarTagData.fromFirestore(snap.data()!, snap.id);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          appSnackBar('Couldn’t open the collar tag: $e', kind: AppMessageKind.error),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+    final data = tag;
+    if (data == null || !mounted) return;
+    await Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => CollarIdTagCardScreen(tagData: data, readOnly: true)),
+    );
   }
 
   Future<void> _showQrTag() async {
@@ -445,6 +478,13 @@ class _AnimalManagementTabState extends ConsumerState<AnimalManagementTab> {
             onTap: _toggleArchive,
           ),
           _CollarTagStatus(animal: animal),
+          _ActionTile(
+            icon: Icons.badge_outlined,
+            label: 'Collar ID Tag',
+            subtitle: 'The pet ID card its QR and NFC tags open, kept in step with this record',
+            enabled: !_busy,
+            onTap: _openCollarTag,
+          ),
           _ActionTile(
             icon: Icons.qr_code_2,
             label: (animal.qrTagId ?? '').isEmpty ? 'Add QR Tag' : 'Show QR Tag',

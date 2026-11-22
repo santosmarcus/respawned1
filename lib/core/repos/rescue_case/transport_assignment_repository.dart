@@ -291,7 +291,6 @@ class TransportAssignmentRepository {
           vehicleType: vehicle['vehicleType'] as String?,
           declaredCapacity: vehicle['maxAnimals'],
           animals: animalsToTransport(caseData),
-          enclosedReasons: enclosedTransportReasons(caseData),
         );
         if (!suitability.suitable) throw UnsuitableVehicleException(suitability.reason);
       }

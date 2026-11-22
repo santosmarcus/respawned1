@@ -1422,6 +1422,18 @@ describe('collar tags and scan chats', () => {
     await assertSucceeds(as('reporter').doc('collarTags/tag1').delete());
   });
 
+  test("an animal's collar tag is written by that animal's staff only", async () => {
+    const tag = { animalId: 'animalA', source: 'animal_record', name: 'Brownie', qrEnabled: true, status: 'active' };
+    await assertSucceeds(as('staffA').doc('collarTags/animal-animalA').set(tag));
+    await assertSucceeds(as('staffA').doc('collarTags/animal-animalA').set({ ...tag, name: 'Brownie Jr' }, { merge: true }));
+    await assertFails(as('staffB').doc('collarTags/animal-animalA').set({ ...tag, name: 'x' }, { merge: true }));
+    await assertFails(as('adopter').doc('collarTags/animal-animalA').set({ ...tag, name: 'x' }, { merge: true }));
+    // The id must match the animal, and an owner can't be slipped in.
+    await assertFails(as('staffA').doc('collarTags/animal-other').set(tag));
+    await assertFails(as('staffA').doc('collarTags/animal-animalA').set({ ...tag, ownerId: 'staffA' }));
+    await assertSucceeds(as('adopter').doc('collarTags/animal-animalA').get());
+  });
+
   test('a new tag is created by its owner, without staff fields', async () => {
     await assertSucceeds(as('adopter').doc('collarTags/new1').set({ ownerId: 'adopter', name: 'Brownie' }));
     await assertFails(as('adopter').doc('collarTags/new2').set({ ownerId: 'reporter', name: 'Brownie' }));

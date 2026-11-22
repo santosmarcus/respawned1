@@ -1993,19 +1993,37 @@ service cloud.firestore {
       function isTagStaff() {
         return isPlatformStaff() || myStaffWith(['rescue']);
       }
+      // A shelter animal's collar tag (AnimalCollarTagRepository):
+      // collarTags/animal-{animalId}, a copy of the animal record with no
+      // owner, written by the animal's own staff (and the
+      // syncAnimalCollarTag function). Never carries an ownerId.
+      function isAnimalRecordTagWrite() {
+        let animalId = request.resource.data.get('animalId', '');
+        return animalId is string && animalId != '' &&
+          tagId == 'animal-' + animalId &&
+          request.resource.data.get('source', '') == 'animal_record' &&
+          !('ownerId' in request.resource.data) &&
+          exists(animalPath(animalId)) &&
+          canStaffAnimal(get(animalPath(animalId)).data);
+      }
 
       allow get: if signedIn();
       allow list: if signedIn() &&
         (resource.data.get('ownerId', '') == request.auth.uid ||
           isPlatformStaff() || myStaffWith(readKeys()));
-      allow create: if signedIn() &&
-        request.resource.data.ownerId == request.auth.uid &&
-        !request.resource.data.keys().hasAny(staffFields());
+      allow create: if signedIn() && (
+        (request.resource.data.get('ownerId', '') == request.auth.uid &&
+          !request.resource.data.keys().hasAny(staffFields())) ||
+        isAnimalRecordTagWrite()
+      );
       allow update: if signedIn() && (
         (request.auth.uid == resource.data.get('ownerId', '') &&
           request.resource.data.get('ownerId', '') == request.auth.uid &&
           !changedAny(staffFields())) ||
-        (isTagStaff() && changedOnly(staffFields()))
+        (isTagStaff() && changedOnly(staffFields())) ||
+        (resource.data.get('source', '') == 'animal_record' &&
+          resource.data.get('animalId', '') == request.resource.data.get('animalId', '') &&
+          isAnimalRecordTagWrite())
       );
       allow delete: if signedIn() &&
         (request.auth.uid == resource.data.get('ownerId', '') || isPlatformStaff());

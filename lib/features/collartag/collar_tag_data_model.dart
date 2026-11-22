@@ -50,6 +50,19 @@ class CollarTagData {
   bool nfcWritten;
   DateTime? nfcWrittenAt;
 
+  /// Set on tags issued for a shelter animal record
+  /// (AnimalCollarTagRepository); those tags mirror the record and are
+  /// edited from it, and [birthday] holds the animal's age.
+  String? animalId;
+  String? organizationId;
+  /// The animal's registered QR / NFC codes (animalTags), which its QR
+  /// code and NFC chip carry.
+  String? animalQrCode;
+  String? animalNfcCode;
+
+  bool get isAnimalRecordTag => animalId != null && animalId!.isNotEmpty;
+  String get birthdayLabel => isAnimalRecordTag ? 'Age' : 'Birthday';
+
   CollarTagData({
     this.petImagePath,
     this.petImageUrl,
@@ -83,6 +96,10 @@ class CollarTagData {
     this.qrEnabled = false,
     this.nfcWritten = false,
     this.nfcWrittenAt,
+    this.animalId,
+    this.organizationId,
+    this.animalQrCode,
+    this.animalNfcCode,
   });
 
   // Firestore serialisation
@@ -152,6 +169,10 @@ class CollarTagData {
         qrEnabled: data['qrEnabled'] as bool? ?? false,
         nfcWritten: data['nfcWritten'] as bool? ?? false,
         nfcWrittenAt: _parseCreatedAt(data['nfcWrittenAt']),
+        animalId: data['animalId'] as String?,
+        organizationId: data['organizationId'] as String?,
+        animalQrCode: data['animalQrCode'] as String?,
+        animalNfcCode: data['animalNfcCode'] as String?,
       );
 }
 

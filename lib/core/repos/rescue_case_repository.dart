@@ -168,11 +168,13 @@ class RescueCaseRepository {
     required String reportId,
     required String actorUid,
     required String actorName,
+    String? reportCaseId,
   }) => status.approveLocationUpdate(
     caseId: caseId,
     reportId: reportId,
     actorUid: actorUid,
     actorName: actorName,
+    reportCaseId: reportCaseId,
   );
 
   /// Delegates to [CaseStatusRepository.rejectLocationUpdate].
@@ -182,12 +184,14 @@ class RescueCaseRepository {
     required String actorUid,
     required String actorName,
     String? reason,
+    String? reportCaseId,
   }) => status.rejectLocationUpdate(
     caseId: caseId,
     reportId: reportId,
     actorUid: actorUid,
     actorName: actorName,
     reason: reason,
+    reportCaseId: reportCaseId,
   );
 
   /// Delegates to [TransportAssignmentRepository.streamPetTransporters].
@@ -872,9 +876,6 @@ class RescueCaseRepository {
   Future<void> endQuarantine({required String caseId, String? reason}) =>
       intake.endQuarantine(caseId: caseId, reason: reason);
 
-  /// Delegates to [CaseIntakeRepository.skipQuarantine].
-  Future<void> skipQuarantine({required String caseId}) =>
-      intake.skipQuarantine(caseId: caseId);
 
   /// Delegates to [CaseIntakeRepository.checkAndCompleteQuarantineIfDue].
   Future<void> checkAndCompleteQuarantineIfDue(RescueCase c) =>

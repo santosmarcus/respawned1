@@ -60,7 +60,6 @@ class _IntakeDetailPageState extends ConsumerState<IntakeDetailPage> {
   bool _isConfirmingReceived = false;
   bool _isStartingQuarantine = false;
   bool _isEndingQuarantine = false;
-  bool _isSkippingQuarantine = false;
   bool _isClosingCase = false;
   final _quarantineDaysController = TextEditingController(text: '7');
   bool _hasCheckedQuarantineAutoComplete = false;
@@ -360,23 +359,6 @@ class _IntakeDetailPageState extends ConsumerState<IntakeDetailPage> {
     }
   }
 
-  Future<void> _skipQuarantine() async {
-    setState(() => _isSkippingQuarantine = true);
-    try {
-      await ref
-          .read(rescueCaseRepositoryProvider)
-          .skipQuarantine(caseId: widget.caseId);
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          appSnackBar('Could not skip quarantine: $e', kind: AppMessageKind.error),
-        );
-      }
-    } finally {
-      if (mounted) setState(() => _isSkippingQuarantine = false);
-    }
-  }
-
   void _reassignTransporter(RescueCase c) => Navigator.push(
         context,
         MaterialPageRoute(
@@ -599,14 +581,14 @@ class _IntakeDetailPageState extends ConsumerState<IntakeDetailPage> {
                 [
                   ('Confirm intake', 'Check the shelter destination and transporter, then start the trip.'),
                   ('Confirm animal received', 'Confirm the animal physically arrived at the shelter.'),
-                  ('Quarantine', 'Start, finish or skip the quarantine period.'),
+                  ('Quarantine / isolation (required)', 'Start it, then let it run or end it.'),
                   ('Create animal records', '$totalAnimals ${totalAnimals == 1 ? 'animal' : 'animals'} · ${completedIndexes.length} done'),
                 ],
                 c.intakeConfirmedAt == null
                     ? 0
                     : !selectedAnimalsReceived
                         ? 1
-                        : (c.quarantineStatus != 'completed' && c.quarantineStatus != 'skipped')
+                        : !c.hasQuarantineDecision
                             ? 2
                             : completedIndexes.length < totalAnimals
                                 ? 3
@@ -718,13 +700,12 @@ class _IntakeDetailPageState extends ConsumerState<IntakeDetailPage> {
                 daysController: _quarantineDaysController,
                 isStarting: _isStartingQuarantine,
                 isEnding: _isEndingQuarantine,
-                isSkipping: _isSkippingQuarantine,
-                expanded: _quarantineExpanded,
+                // Required: open until it has been started.
+                expanded: _quarantineExpanded || !c.hasQuarantineDecision,
                 onToggleExpand: () =>
                     setState(() => _quarantineExpanded = !_quarantineExpanded),
                 onStart: _startQuarantine,
                 onEnd: _endQuarantine,
-                onSkip: _skipQuarantine,
               ),
 
               const SizedBox(height: 20),
@@ -734,6 +715,7 @@ class _IntakeDetailPageState extends ConsumerState<IntakeDetailPage> {
                 totalAnimals: totalAnimals,
                 completedCount: completedIndexes.length,
                 received: selectedAnimalsReceived,
+                quarantineStarted: c.hasQuarantineDecision,
                 sourceAnimalRecordId: sourceAnimalRecordId,
                 animalIndexes: widget.animalIndexes,
               ),
@@ -947,24 +929,20 @@ class _QuarantineSection extends StatelessWidget {
   final TextEditingController daysController;
   final bool isStarting;
   final bool isEnding;
-  final bool isSkipping;
   final bool expanded;
   final VoidCallback onToggleExpand;
   final VoidCallback onStart;
   final VoidCallback onEnd;
-  final VoidCallback onSkip;
 
   const _QuarantineSection({
     required this.rescueCase,
     required this.daysController,
     required this.isStarting,
     required this.isEnding,
-    required this.isSkipping,
     required this.expanded,
     required this.onToggleExpand,
     required this.onStart,
     required this.onEnd,
-    required this.onSkip,
   });
 
   ({String title, String subtitle}) _summary(RescueCase c) {
@@ -976,8 +954,9 @@ class _QuarantineSection extends StatelessWidget {
       );
     }
     if (c.hasQuarantineDecision) {
+      // Skipping is no longer possible; older cases may still show it.
       if (c.quarantineStatus == 'skipped') {
-        return (title: 'Quarantine', subtitle: 'Skipped');
+        return (title: 'Quarantine / Isolation', subtitle: 'Skipped (before it was required)');
       }
       final end = c.quarantineEndedAt;
       return (
@@ -985,7 +964,7 @@ class _QuarantineSection extends StatelessWidget {
         subtitle: end != null ? 'Completed ${_fmtDate(end)}' : 'Completed',
       );
     }
-    return (title: 'Quarantine — Optional', subtitle: 'Not started');
+    return (title: 'Quarantine / Isolation — Required', subtitle: 'Not started · start it before creating the animal record');
   }
 
   @override
@@ -1088,7 +1067,7 @@ class _QuarantineSection extends StatelessWidget {
     if (c.hasQuarantineDecision) {
       final isSkipped = c.quarantineStatus == 'skipped';
       final detail = isSkipped
-          ? 'Quarantine was skipped for this case.'
+          ? 'Quarantine was skipped for this case, before it was required.'
           : 'Quarantine completed'
                 '${c.quarantineEndedAt != null ? ' on ${_fmtDate(c.quarantineEndedAt!)}' : ''}.';
       return Column(
@@ -1118,7 +1097,7 @@ class _QuarantineSection extends StatelessWidget {
       );
     }
 
-    // Not yet decided — offer Start/Skip.
+    // Not started yet — required, so the only action is Start (no Skip).
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -1157,10 +1136,9 @@ class _QuarantineSection extends StatelessWidget {
           ],
         ),
         const SizedBox(height: 10),
-        Row(
-          children: [
-            Expanded(
-              child: ElevatedButton(
+        SizedBox(
+          width: double.infinity,
+          child: ElevatedButton(
                 onPressed: isStarting ? null : onStart,
                 style: ElevatedButton.styleFrom(
                   backgroundColor: AppColors.yellowrspwn,
@@ -1188,7 +1166,7 @@ class _QuarantineSection extends StatelessWidget {
                         ),
                       )
                     : Text(
-                        'Start Quarantine',
+                        'Start Quarantine / Isolation',
                         style: GoogleFonts.zain(
                           fontSize: 13,
                           fontWeight: FontWeight.w600,
@@ -1196,34 +1174,6 @@ class _QuarantineSection extends StatelessWidget {
                         ),
                       ),
               ),
-            ),
-            const SizedBox(width: 10),
-            Expanded(
-              child: OutlinedButton(
-                onPressed: isSkipping ? null : onSkip,
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: AppColors.textSecondary,
-                  side: const BorderSide(color: AppColors.slaterspwn),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(30),
-                  ),
-                ),
-                child: isSkipping
-                    ? const SizedBox(
-                        height: 18,
-                        width: 18,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : Text(
-                        'Skip',
-                        style: GoogleFonts.zain(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-              ),
-            ),
-          ],
         ),
       ],
     );
@@ -1244,6 +1194,9 @@ class _AnimalRecordsSection extends StatelessWidget {
   final int completedCount;
   final bool received;
 
+  /// Quarantine/isolation is required: records wait until it has started.
+  final bool quarantineStarted;
+
   /// Set when this case was admitted from an animal that already has an
   /// Animal Record (RescueCase.raw['sourceAnimalRecordId'] — written by
   /// RescueCaseRepository.createAdmissionCase/createReturnIntakeCase). The
@@ -1262,6 +1215,7 @@ class _AnimalRecordsSection extends StatelessWidget {
     required this.totalAnimals,
     required this.completedCount,
     required this.received,
+    required this.quarantineStarted,
     this.sourceAnimalRecordId,
     this.animalIndexes,
   });
@@ -1315,17 +1269,19 @@ class _AnimalRecordsSection extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
-          received
-              ? '$completedCount of $totalAnimals records created'
-              : 'Locked until step 2 is done: confirm the animal was received '
-                  '(the Confirm Animal Received button at the bottom).',
+          !received
+              ? 'Locked until step 2 is done: confirm the animal was received '
+                  '(the Confirm Animal Received button at the bottom).'
+              : !quarantineStarted
+                  ? 'Locked until step 3 is done: start quarantine/isolation above.'
+                  : '$completedCount of $totalAnimals records created',
           style: GoogleFonts.zain(fontSize: 13, color: AppColors.textSecondary),
         ),
         const SizedBox(height: 8),
         SizedBox(
           width: double.infinity,
           child: ElevatedButton(
-            onPressed: !received
+            onPressed: !received || !quarantineStarted
                 ? null
                 : () => Navigator.push(
                     context,

@@ -7,6 +7,9 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 /// model for the admin side; nothing here writes to this subcollection.
 class CommunityReport {
   final String id;
+  /// The case this report was filed on: the case being viewed, or a
+  /// duplicate merged into it (its reports are listed on the primary).
+  final String? caseId;
   final String? reporterId;
   final String? reporterName;
   final String type; // still_here | moved | rescued | no_animal
@@ -32,6 +35,7 @@ class CommunityReport {
 
   const CommunityReport({
     required this.id,
+    this.caseId,
     this.reporterId,
     this.reporterName,
     required this.type,
@@ -55,6 +59,7 @@ class CommunityReport {
     DateTime? asDate(dynamic v) => v is Timestamp ? v.toDate() : null;
     return CommunityReport(
       id: doc.id,
+      caseId: doc.reference.parent.parent?.id ?? data['caseId'] as String?,
       reporterId: data['reporterId'] as String?,
       reporterName: data['reporterName'] as String?,
       type: data['type'] as String? ?? '',
@@ -76,6 +81,8 @@ class CommunityReport {
   /// Matches the wording already used on the user-side
   /// track_case_page.dart's `_CommunityReportSection._typeLabel`, so admin
   /// and reporter see the same label for the same report.
+  bool get isPendingMove => type == 'moved' && approvalStatus == 'pending';
+
   String get typeLabel => switch (type) {
         'still_here' => 'Animal still here',
         'moved' => 'Animal moved',
