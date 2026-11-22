@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:respawnd1/core/utils/transporter_ranking.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 import 'package:respawnd1/app_theme.dart';
@@ -49,6 +50,8 @@ ApplicationSummary transporterSummary(TransporterApplication app) {
     lines: [
       ('Vehicle', vehicle),
       ('Carries safely', app.maxAnimals == null ? 'Not declared' : '${app.maxAnimals} animal${app.maxAnimals == 1 ? '' : 's'}'),
+      if (classifyVehicle(app.vehicleType) == VehicleCategory.motorcycle)
+        ('Animal carrier', app.hasAnimalCarrier ? 'Yes' : 'No'),
       if (app.documents.isEmpty) ('Documents', 'None uploaded')],
     submittedAt: app.submittedAt,
     reviewedAt: app.status == TransporterApplicationStatus.pending ? null : app.reviewedAt,

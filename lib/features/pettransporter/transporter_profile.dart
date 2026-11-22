@@ -11,6 +11,7 @@ import 'package:respawnd1/features/pettransporter/transporter_notif.dart';
 import 'package:respawnd1/core/utils/case_id.dart';
 import 'package:respawnd1/core/utils/transporter_trip_stats.dart';
 import 'package:respawnd1/core/utils/transport_suitability.dart';
+import 'package:respawnd1/core/utils/transporter_ranking.dart';
 import 'package:respawnd1/features/pettransporter/transporter_verification_screen.dart';
 import 'package:respawnd1/core/widgets/app_dialogs.dart';
 import 'package:respawnd1/core/widgets/delete_account.dart';
@@ -113,6 +114,8 @@ class TransporterProfile extends StatelessWidget {
             final vehicleType = verification['vehicleType'] as String?;
             final licensePlate = verification['licensePlate'] as String?;
             final maxAnimals = declaredAnimalCapacity(verification['maxAnimals']);
+            final isMotorcycle = classifyVehicle(vehicleType) == VehicleCategory.motorcycle;
+            final hasAnimalCarrier = verification['hasAnimalCarrier'] == true;
 
             final fullName = ('$firstName $lastName').trim();
 
@@ -211,6 +214,25 @@ class TransporterProfile extends StatelessWidget {
                             child: Text('Declare Capacity',
                                 style: GoogleFonts.zain(
                                     fontSize: 13, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
+                          ),
+                        ),
+                      ],
+                      // Motorcycles need an animal carrier for animals that
+                      // need enclosed transport (transport_suitability.dart).
+                      if (isMotorcycle) ...[
+                        const Divider(height: 20),
+                        SwitchListTile(
+                          value: hasAnimalCarrier,
+                          onChanged: (v) => _setAnimalCarrier(context, uid, v),
+                          contentPadding: EdgeInsets.zero,
+                          secondary: const Icon(Icons.work_outline, color: AppColors.textPrimary),
+                          title: Text('Animal Carrier',
+                              style: GoogleFonts.zain(fontSize: 14, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
+                          subtitle: Text(
+                            hasAnimalCarrier
+                                ? 'You can take animals that need enclosed transport.'
+                                : 'Without one, you are not matched to animals that need enclosed transport.',
+                            style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary),
                           ),
                         ),
                       ],
@@ -604,6 +626,19 @@ Future<void> _declareCapacity(BuildContext context, String uid) async {
   try {
     await FirebaseFirestore.instance.collection('users').doc(uid).set({
       'transporterVerification': {'maxAnimals': value},
+    }, SetOptions(merge: true));
+  } catch (e) {
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Could not save: $e')));
+    }
+  }
+}
+
+/// Motorcycles: whether the transporter has an animal carrier.
+Future<void> _setAnimalCarrier(BuildContext context, String uid, bool value) async {
+  try {
+    await FirebaseFirestore.instance.collection('users').doc(uid).set({
+      'transporterVerification': {'hasAnimalCarrier': value},
     }, SetOptions(merge: true));
   } catch (e) {
     if (context.mounted) {

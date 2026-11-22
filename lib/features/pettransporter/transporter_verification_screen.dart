@@ -60,6 +60,9 @@ class _TransporterVerificationScreenState
   // How many animals the vehicle carries safely (transporterVerification.
   // maxAnimals): used to match transporters to multi-animal trips.
   final _capacityCtrl = TextEditingController();
+  // Motorcycles only: an animal carrier (transporterVerification.
+  // hasAnimalCarrier) lets them take animals that need enclosed transport.
+  bool _hasAnimalCarrier = false;
   File? _antiRabiesRecord;
 
   bool _submitting = false;
@@ -154,6 +157,7 @@ class _TransporterVerificationScreenState
         'vehicleType': _vehicleType,
         'licensePlate': _licensePlateCtrl.text.trim(),
         'maxAnimals': capacity,
+        'hasAnimalCarrier': _vehicleType == kVehicleMotorcycle && _hasAnimalCarrier,
         'antiRabiesUrl': antiRabiesUrl,
         'status': 'pending',
         'submittedAt': FieldValue.serverTimestamp(),
@@ -365,6 +369,23 @@ class _TransporterVerificationScreenState
                         'We use this to match you with trips that fit your vehicle.',
                 style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary),
               ),
+
+              if (_vehicleType == kVehicleMotorcycle) ...[
+                const SizedBox(height: 12),
+                CheckboxListTile(
+                  value: _hasAnimalCarrier,
+                  onChanged: (v) => setState(() => _hasAnimalCarrier = v ?? false),
+                  contentPadding: EdgeInsets.zero,
+                  controlAffinity: ListTileControlAffinity.leading,
+                  title: Text('I have an animal carrier for my motorcycle',
+                      style: GoogleFonts.zain(fontSize: 14, color: AppColors.textPrimary)),
+                  subtitle: Text(
+                    'A secure carrier is required to take animals that need enclosed transport '
+                    '(large, injured, unable to walk, high bite or escape risk, critical, or with a litter).',
+                    style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary),
+                  ),
+                ),
+              ],
 
               const SizedBox(height: 20),
 
