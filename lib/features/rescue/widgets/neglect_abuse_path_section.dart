@@ -128,47 +128,6 @@ class NeglectAbuseCoverageSection extends StatelessWidget {
       children: [
         // The same "Please read before you continue" notice as before.
         const NeglectAbuseGuidanceBox(),
-        const SizedBox(height: 12),
-        Container(
-          width: double.infinity,
-          padding: const EdgeInsets.all(12),
-          decoration: BoxDecoration(
-            color: AppColors.greenrspwn.withValues(alpha: 0.12),
-            borderRadius: BorderRadius.circular(10),
-            border: Border.all(color: AppColors.greenrspwn),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  const Icon(Icons.volunteer_activism_outlined, size: 18, color: AppColors.textPrimary),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      'You can ask a partner organization for help',
-                      style: body(FontWeight.w700, 14),
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 6),
-              Text(
-                'Fill in the form below to ask for help. Your report is subject to the '
-                'organization\'s review and approval: it may coordinate with the authorities or '
-                'rescue the animal depending on its assessment, capacity and availability. '
-                'Submitting does not guarantee a rescue or a personal response.',
-                style: body(),
-              ),
-              const SizedBox(height: 6),
-              Text(
-                'Please also report it yourself to your barangay or the police (911). Only they '
-                'can act against an owner or file a case, and your report helps.',
-                style: body(FontWeight.w700),
-              ),
-            ],
-          ),
-        ),
         const SizedBox(height: 10),
         guideButton,
       ],

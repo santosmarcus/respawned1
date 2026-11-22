@@ -192,9 +192,9 @@ class NeglectAbuseFields extends _NeglectSection {
         if (form.neglectReportedToAuthorities == 'No') ...[
           const SizedBox(height: 6),
           _hint(
-            'Please report it to your barangay or the police as soon as you '
-                'can. A case can only be filed after it is reported to them, and '
-                'we can guide you through it.',
+            'Please report it to your barangay, local government unit, or the police '
+                'as soon as you can. A case can only be filed after it is reported '
+                'to them, and we can guide you through it.',
           ),
         ],
         const SizedBox(height: 20),
@@ -352,8 +352,8 @@ class NeglectAbuseGuidanceBox extends StatelessWidget {
           const SizedBox(height: 8),
           Text(
             'Hurting or neglecting an animal is against the law in the '
-                'Philippines. Please also report this to your barangay or the '
-                'police (911) as soon as possible. Posting about it on social '
+                'Philippines. Please also report this to your barangay, local government unit '
+                'or the police (911) as soon as possible. Posting about it on social '
                 'media alone is not a report and does not stop the abuse.',
             style: body(),
           ),
