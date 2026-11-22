@@ -83,6 +83,17 @@ class TransitCaseService {
       }),
     );
     unawaited(caseRef.update({'riderLastLat': lat, 'riderLastLng': lng}));
+    // Keeps the transporter's presence fresh during a transit too, so they
+    // stay listed (as busy) with a current position.
+    final uid = _au.currentUser?.uid;
+    if (uid != null) {
+      unawaited(_db.collection('users').doc(uid).set({
+        'online': true,
+        'lastSeenAt': FieldValue.serverTimestamp(),
+        'lastLat': lat,
+        'lastLng': lng,
+      }, SetOptions(merge: true)).catchError((_) {}));
+    }
   }
 
   /// Applies [fields], adds [statusLine] to what the reporter sees and logs

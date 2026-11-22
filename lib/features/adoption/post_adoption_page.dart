@@ -2569,7 +2569,28 @@ class PostAdoption extends StatelessWidget {
         ),
         child: Row(
           children: [
-            const Icon(Icons.diversity_1_outlined, color: AppColors.greenrspwn),
+            ClipRRect(
+              borderRadius: BorderRadius.circular(10),
+              child: c.photoUrl == null
+                  ? Container(
+                      width: 48,
+                      height: 48,
+                      color: AppColors.tearspwn,
+                      child: const Icon(Icons.diversity_1_outlined, color: AppColors.textPrimary),
+                    )
+                  : Image.network(
+                      c.photoUrl!,
+                      width: 48,
+                      height: 48,
+                      fit: BoxFit.cover,
+                      errorBuilder: (_, _, _) => Container(
+                        width: 48,
+                        height: 48,
+                        color: AppColors.tearspwn,
+                        child: const Icon(Icons.diversity_1_outlined, color: AppColors.textPrimary),
+                      ),
+                    ),
+            ),
             const SizedBox(width: 10),
             Expanded(
               child: Column(
@@ -2585,12 +2606,17 @@ class PostAdoption extends StatelessWidget {
                   ),
                   Text(
                     [
-                      'Community Adoption',
+                      c.rehomedByViewer ? 'Rehomed by you' : 'Community Adoption',
                       if (c.adoptedAt != null) 'adopted ${_formatDate(c.adoptedAt!)}',
                     ].join(' · '),
                     style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary),
                   ),
-                  if (windowOpen)
+                  if (c.rehomedByViewer)
+                    Text(
+                      'See the adopter\'s updates',
+                      style: GoogleFonts.zain(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.textPrimary),
+                    )
+                  else if (windowOpen)
                     Text(
                       'Share updates until ${_formatDate(c.updateWindowEnd!)}',
                       style: GoogleFonts.zain(
@@ -2755,15 +2781,24 @@ class CommunityAdoptionsForAdopter extends StatelessWidget {
   Widget build(BuildContext context) {
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid == null) return builder(context, const []);
+    // Adopted by this user, and rehomed by this user (their pet went to
+    // someone through Community Adoption): both see the adopter's updates.
     return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
       stream: communityAdoptionsRef.where('adopterId', isEqualTo: uid).snapshots(),
       builder: (context, snap) {
-        final list = [
-          for (final d in snap.data?.docs ?? const <QueryDocumentSnapshot<Map<String, dynamic>>>[])
-            if ((d.data()['status'] as String? ?? 'adopted') == 'adopted')
-              CommunityAdoptionSummary.fromDoc(d.id, d.data()),
-        ]..sort((a, b) => (b.adoptedAt ?? DateTime(0)).compareTo(a.adoptedAt ?? DateTime(0)));
-        return builder(context, list);
+        return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+          stream: communityAdoptionsRef.where('rehomedById', isEqualTo: uid).snapshots(),
+          builder: (context, rehomedSnap) {
+            const none = <QueryDocumentSnapshot<Map<String, dynamic>>>[];
+            final seen = <String>{};
+            final list = [
+              for (final d in [...?snap.data?.docs, ...?rehomedSnap.data?.docs, ...none])
+                if ((d.data()['status'] as String? ?? 'adopted') == 'adopted' && seen.add(d.id))
+                  CommunityAdoptionSummary.fromDoc(d.id, d.data(), viewerId: uid),
+            ]..sort((a, b) => (b.adoptedAt ?? DateTime(0)).compareTo(a.adoptedAt ?? DateTime(0)));
+            return builder(context, list);
+          },
+        );
       },
     );
   }
@@ -2775,19 +2810,29 @@ class CommunityAdoptionSummary {
   final DateTime? adoptedAt;
   final DateTime? updateWindowEnd;
 
+  /// The viewer rehomed this pet (it is not theirs now): they follow the
+  /// adopter's updates, they don't send them.
+  final bool rehomedByViewer;
+  final String? photoUrl;
+
   const CommunityAdoptionSummary({
     required this.id,
     required this.name,
     required this.adoptedAt,
     required this.updateWindowEnd,
+    this.rehomedByViewer = false,
+    this.photoUrl,
   });
 
-  factory CommunityAdoptionSummary.fromDoc(String id, Map<String, dynamic> d) {
+  factory CommunityAdoptionSummary.fromDoc(String id, Map<String, dynamic> d, {String? viewerId}) {
+    final photos = (d['photoUrls'] as List? ?? const []).whereType<String>();
     return CommunityAdoptionSummary(
       id: id,
       name: communityAnimalName(d, fallback: 'Pet'),
       adoptedAt: _tsDate(d['adoptedAt']) ?? _tsDate(d['createdAt']),
       updateWindowEnd: communityUpdateWindowEnd(d, null),
+      rehomedByViewer: viewerId != null && d['rehomedById'] == viewerId && d['adopterId'] != viewerId,
+      photoUrl: photos.isEmpty ? null : photos.first,
     );
   }
 }

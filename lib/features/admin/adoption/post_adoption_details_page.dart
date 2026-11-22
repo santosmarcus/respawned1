@@ -248,6 +248,10 @@ class _PostAdoptionDetailsPageState extends ConsumerState<PostAdoptionDetailsPag
           children: [
             _Header(app: app, followUps: followUps),
             const SizedBox(height: 12),
+            // Every update the adopter sent, newest first, read straight from
+            // their check-ins, so none hides inside a collapsed follow-up card.
+            _AdopterUpdatesSection(applicationId: widget.applicationId, followUps: followUps),
+            const SizedBox(height: 12),
             // Adoption gap 6.
             SignedAgreementTile(app: app, actorName: _actorName),
             const SizedBox(height: 12),
@@ -1206,8 +1210,14 @@ class _AdopterResponseViewer extends StatelessWidget {
     return StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
       stream: FirebaseFirestore.instance.collection('adoptions').doc(applicationId).collection('checkins').doc(followUpId).snapshots(),
       builder: (context, snap) {
+        if (snap.hasError) {
+          return Text('Could not load the response: ${snap.error}', style: GoogleFonts.zain(fontSize: 12, color: AppColors.error));
+        }
         final data = snap.data?.data();
-        if (data == null) return Text('Loading response…', style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary));
+        if (data == null) {
+          return Text(snap.hasData ? 'No response found.' : 'Loading response…',
+              style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary));
+        }
         final healthConcerns = List<String>.from(data['healthConcerns'] ?? const []);
         final images = List<String>.from(data['images'] ?? const []);
         return Column(
@@ -1257,3 +1267,101 @@ class _AdopterResponseViewer extends StatelessWidget {
 }
 
 
+/// The adopter's post-adoption updates (adoptions/{id}/checkins), newest
+/// first, each with its answers and photos. Read directly rather than
+/// through the follow-up cards, which only show a response once the
+/// follow-up itself is marked submitted and the card is expanded.
+class _AdopterUpdatesSection extends StatelessWidget {
+  final String applicationId;
+  final List<FollowUpRecord> followUps;
+  const _AdopterUpdatesSection({required this.applicationId, required this.followUps});
+
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+      stream: FirebaseFirestore.instance.collection('adoptions').doc(applicationId).collection('checkins').snapshots(),
+      builder: (context, snap) {
+        TextStyle small([Color c = AppColors.textSecondary]) => GoogleFonts.zain(fontSize: 12, color: c);
+        Widget body;
+        if (snap.hasError) {
+          body = Text('Could not load the adopter\'s updates: ${snap.error}', style: small(AppColors.error));
+        } else if (!snap.hasData) {
+          body = const Padding(padding: EdgeInsets.all(8), child: Center(child: CircularProgressIndicator(strokeWidth: 2)));
+        } else {
+          DateTime? at(Map<String, dynamic> d) => (d['submittedAt'] as Timestamp?)?.toDate();
+          final docs = [...snap.data!.docs]
+            ..sort((a, b) => (at(b.data()) ?? DateTime(0)).compareTo(at(a.data()) ?? DateTime(0)));
+          if (docs.isEmpty) {
+            body = Text('The adopter has not sent any updates yet.', style: small());
+          } else {
+            body = Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                for (final d in docs) ...[
+                  _UpdateTile(data: d.data(), submittedAt: at(d.data())),
+                  if (d != docs.last) const Divider(height: 20),
+                ],
+              ],
+            );
+          }
+        }
+        return SectionCard(
+          title: 'Adopter updates${snap.hasData ? ' (${snap.data!.docs.length})' : ''}',
+          child: body,
+        );
+      },
+    );
+  }
+}
+
+class _UpdateTile extends StatelessWidget {
+  final Map<String, dynamic> data;
+  final DateTime? submittedAt;
+  const _UpdateTile({required this.data, required this.submittedAt});
+
+  @override
+  Widget build(BuildContext context) {
+    final concerns = List<String>.from(data['healthConcerns'] ?? const []);
+    final other = (data['healthConcernsOther'] as String?)?.trim() ?? '';
+    final images = List<String>.from(data['images'] ?? const []);
+    final notes = (data['notes'] as String?)?.trim() ?? '';
+    Widget line(String label, String? value) => (value == null || value.isEmpty)
+        ? const SizedBox.shrink()
+        : Padding(
+            padding: const EdgeInsets.only(top: 2),
+            child: Text.rich(TextSpan(children: [
+              TextSpan(text: '$label: ', style: GoogleFonts.zain(fontSize: 12.5, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
+              TextSpan(text: value, style: GoogleFonts.zain(fontSize: 12.5, color: AppColors.textPrimary)),
+            ])),
+          );
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          [data['label'] as String? ?? 'Update', if (submittedAt != null) _fmtDateTime(submittedAt)].join(' · '),
+          style: GoogleFonts.zain(fontSize: 13.5, fontWeight: FontWeight.w800, color: AppColors.textPrimary),
+        ),
+        line('How the pet is doing', data['howIsPetDoing'] as String?),
+        line('Health concerns', concerns.isEmpty ? null : concerns.join(', ') + (other.isEmpty ? '' : ' ($other)')),
+        line('Vaccinations', data['vaccinated'] as String?),
+        line('Notes', notes),
+        if (images.isNotEmpty) ...[
+          const SizedBox(height: 6),
+          SizedBox(
+            height: 72,
+            child: ListView.separated(
+              scrollDirection: Axis.horizontal,
+              itemCount: images.length,
+              separatorBuilder: (_, _) => const SizedBox(width: 6),
+              itemBuilder: (context, i) => ClipRRect(
+                borderRadius: BorderRadius.circular(8),
+                child: Image.network(images[i], width: 72, height: 72, fit: BoxFit.cover,
+                    errorBuilder: (_, _, _) => Container(width: 72, height: 72, color: AppColors.slaterspwn)),
+              ),
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+}

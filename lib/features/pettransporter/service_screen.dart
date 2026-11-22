@@ -25,7 +25,7 @@ class ServiceScreen extends StatefulWidget{
       _ServiceScreenState();
 }
 
-class _ServiceScreenState extends State<ServiceScreen> {
+class _ServiceScreenState extends State<ServiceScreen> with WidgetsBindingObserver {
   bool _isOnline = false;
 
   GoogleMapController? _mapController;
@@ -45,11 +45,20 @@ class _ServiceScreenState extends State<ServiceScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _loadSavedServiceRange();
+  }
+
+  /// Back in the foreground: refresh presence at once, since timers may not
+  /// have run while the app was in the background.
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed && _isOnline) unawaited(_heartbeat());
   }
 
   @override
   void dispose(){
+    WidgetsBinding.instance.removeObserver(this);
     _presenceHeartbeat?.cancel();
     // Best-effort — this screen going away (backgrounded/killed) doesn't
     // guarantee the write lands, which is exactly why isOnline also checks

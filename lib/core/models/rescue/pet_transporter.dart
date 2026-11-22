@@ -16,7 +16,10 @@ import 'package:respawnd1/core/utils/transport_suitability.dart';
 /// online/availability check in the app (assign_rider_page.dart's rider
 /// list, and RescueCaseRepository.createAssignmentOffer's own
 /// revalidation) — never hardcode a second number elsewhere.
-const Duration kTransporterPresenceThreshold = Duration(minutes: 5);
+// 10 minutes: several 2-minute heartbeats can be missed (a slow network, the
+// phone briefly in the background, a few minutes of clock difference
+// between phones) before an online transporter drops out of the lists.
+const Duration kTransporterPresenceThreshold = Duration(minutes: 10);
 
 class PetTransporter {
   final String uid;
