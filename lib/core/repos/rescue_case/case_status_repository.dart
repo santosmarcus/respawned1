@@ -168,13 +168,18 @@ class CaseStatusRepository {
   /// `proposedAddress`/`proposedLat`/`proposedLng` fields — same data,
   /// no duplication. One transaction so the report's approval state and
   /// the case's location update can never diverge.
+  ///
+  /// [reportCaseId] is the case the report was filed on when it differs
+  /// from [caseId] (a duplicate merged into it); the location always
+  /// updates [caseId].
   Future<void> approveLocationUpdate({
     required String caseId,
     required String reportId,
     required String actorUid,
     required String actorName,
+    String? reportCaseId,
   }) async {
-    final reportRef = _store.communityReportsOf(caseId).doc(reportId);
+    final reportRef = _store.communityReportsOf(reportCaseId ?? caseId).doc(reportId);
     final caseRef = _store.caseDoc(caseId);
     await _store.db.runTransaction((tx) async {
       final reportSnap = await tx.get(reportRef);
@@ -192,14 +197,18 @@ class CaseStatusRepository {
         throw StateError('This location update has already been reviewed.');
       }
 
-      final newAddress = data['newAddress'] as String?;
       final newLat = (data['newLat'] as num?)?.toDouble();
       final newLng = (data['newLng'] as num?)?.toDouble();
-      if (newAddress == null || newLat == null || newLng == null) {
+      if (newLat == null || newLng == null) {
         throw StateError(
-          'This report is missing a resolved location and cannot be approved.',
+          'This report has no map pin, so the new location can\'t be confirmed.',
         );
       }
+      // A pin whose address lookup failed is still a verified location.
+      final reportedAddress = (data['newAddress'] as String?)?.trim();
+      final newAddress = (reportedAddress == null || reportedAddress.isEmpty)
+          ? '${newLat.toStringAsFixed(5)}, ${newLng.toStringAsFixed(5)}'
+          : reportedAddress;
 
       final now = Timestamp.now();
       tx.update(reportRef, {
@@ -219,7 +228,7 @@ class CaseStatusRepository {
         statusLine: 'Location updated to "$newAddress" (community report approved by $actorName).',
         actorUid: actorUid,
         actorName: actorName,
-        details: {'reportId': reportId},
+        details: {'reportId': reportId, 'reportCaseId': ?reportCaseId},
         fields: {
           'address': newAddress,
           'lat': newLat,
@@ -250,8 +259,9 @@ class CaseStatusRepository {
     required String actorUid,
     required String actorName,
     String? reason,
+    String? reportCaseId,
   }) async {
-    final reportRef = _store.communityReportsOf(caseId).doc(reportId);
+    final reportRef = _store.communityReportsOf(reportCaseId ?? caseId).doc(reportId);
     await _store.db.runTransaction((tx) async {
       final reportSnap = await tx.get(reportRef);
       if (!reportSnap.exists) throw StateError('This report no longer exists.');

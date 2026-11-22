@@ -148,7 +148,7 @@ class RescueCase {
   final DateTime? intakeConfirmedAt;
   final DateTime? intakeReceivedAt;
 
-  // ---- Quarantine (optional) -----------------------------------------
+  // ---- Quarantine / isolation (required) -----------------------------------------
   // 'active' | 'completed' | null (never started / skipped).
   final String? quarantineStatus;
   final DateTime? quarantineStartedAt;
@@ -446,9 +446,8 @@ class RescueCase {
     return false;
   }
 
-  /// True once the organization has made *any* decision about quarantine
-  /// (started it, or explicitly skipped it) — used to stop re-prompting
-  /// "Start Quarantine / Skip" on every visit to Intake Details once a
-  /// choice has been made.
+  /// True once quarantine/isolation has been started (or, on cases from
+  /// before it was required, skipped). Intake Details requires it before
+  /// the animal record can be created.
   bool get hasQuarantineDecision => quarantineStatus != null;
 }

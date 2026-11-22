@@ -11,6 +11,7 @@ import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:geolocator/geolocator.dart';
 
 import 'package:respawnd1/core/repos/directions_repository.dart';
+import 'package:respawnd1/core/widgets/transit_route.dart';
 
 /// The transporter's in-app map: the driving route from where they are to
 /// the current stop (pick up, clinic or shelter), drawn from Google
@@ -207,50 +208,19 @@ class _TrackingMapState extends State<TransitTrackingMap> {
         };
 
         final route = _route;
+        // Same lines as the admin Track Case map (TransitRouteStyle): the
+        // trail already driven, and Google's driving route still ahead,
+        // trimmed at the transporter so it shrinks as they drive.
         final polylines = <Polyline>{
-          // Where the transporter has already been.
-          if (trail.length >= 2)
-            Polyline(
-              polylineId: const PolylineId('route_trail'),
-              points: trail,
-              color: AppColors.textPrimary.withValues(alpha: 0.35),
-              width: 3,
-              zIndex: 0,
-            ),
-          // Google's driving route to the stop, styled like Google Maps.
-          if (route != null && route.points.length >= 2) ...{
-            Polyline(
-              polylineId: const PolylineId('directions_casing'),
-              points: route.points,
-              color: const Color(0xFF1A5DC8),
-              width: 9,
-              zIndex: 1,
-              jointType: JointType.round,
-              startCap: Cap.roundCap,
-              endCap: Cap.roundCap,
-            ),
-            Polyline(
-              polylineId: const PolylineId('directions_route'),
-              points: route.points,
-              color: const Color(0xFF4285F4),
-              width: 6,
-              zIndex: 2,
-              jointType: JointType.round,
-              startCap: Cap.roundCap,
-              endCap: Cap.roundCap,
-            ),
-          }
+          if (trail.length >= 2) TransitRouteStyle.trail(trail),
+          if (route != null && route.points.length >= 2)
+            ...TransitRouteStyle.route(
+              origin == null ? route.points : remainingRoute(route.points, origin).points,
+            )
           // No route from Google yet: a dashed straight line so the stop's
           // direction is still clear.
           else if (origin != null && widget.destination != null)
-            Polyline(
-              polylineId: const PolylineId('straight_line'),
-              points: [origin, widget.destination!],
-              color: const Color(0xFF4285F4).withValues(alpha: 0.7),
-              width: 4,
-              zIndex: 1,
-              patterns: [PatternItem.dash(20), PatternItem.gap(12)],
-            ),
+            ...TransitRouteStyle.straightLine([origin, widget.destination!]),
         };
 
         final banner = widget.destination == null

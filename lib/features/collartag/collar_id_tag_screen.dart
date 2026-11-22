@@ -15,6 +15,7 @@ import 'package:respawnd1/core/widgets/tag_qr_image.dart';
 import 'collar_tag_data_model.dart';
 import 'collar_tag_form_screen.dart';
 import 'package:respawnd1/core/constants/app.links.dart';
+import 'package:respawnd1/core/utils/animal_tag_codes.dart';
 import 'pet_found_chat.dart';
 import 'lost_pet_location_picker.dart';
 import 'package:respawnd1/core/widgets/app_messages.dart';
@@ -96,8 +97,20 @@ class _CollarIdTagCardScreenState extends State<CollarIdTagCardScreen> {
 
   // Null (no QR drawn) rather than a link with no tag id in it, which
   // no scanner can resolve.
-  String? get _qrData =>
-      (_tag.tagId ?? '').isEmpty ? null : AppLinks.tagUrl(_tag.tagId!);
+  /// A shelter animal's card shows its registered QR code (animalTags), the
+  /// one printed on its tag and written to its NFC chip, so scanning any of
+  /// them opens this card. A pet owner's card shows its tag link.
+  String? get _qrData {
+    final animalCode = _tag.animalQrCode?.trim() ?? '';
+    if (_tag.isAnimalRecordTag && animalCode.isNotEmpty) {
+      try {
+        return animalTagPayload(animalCode);
+      } catch (_) {
+        // Malformed code: fall back to the tag link.
+      }
+    }
+    return (_tag.tagId ?? '').isEmpty ? null : AppLinks.tagUrl(_tag.tagId!);
+  }
 
   Future<Uint8List?> _captureCard() async {
     try {
@@ -215,7 +228,7 @@ class _CollarIdTagCardScreenState extends State<CollarIdTagCardScreen> {
                     const Divider(thickness: 0.5, color: AppColors.textPrimary),
                     _infoRow('Color/Markings:', tag.colorMarkings),
                     const Divider(thickness: 0.5, color: AppColors.textPrimary),
-                    _infoRow('Birthday: ${tag.birthday}', 'Sex: ${tag.sex}',
+                    _infoRow('${tag.birthdayLabel}: ${tag.birthday}', 'Sex: ${tag.sex}',
                         isDouble: true),
                     const Divider(thickness: 0.5, color: AppColors.textPrimary),
                     const SizedBox(height: 8),
@@ -232,7 +245,7 @@ class _CollarIdTagCardScreenState extends State<CollarIdTagCardScreen> {
                     const SizedBox(height: 6),
                     Align(
                       alignment: Alignment.centerLeft,
-                      child: Text('Owner Information',
+                      child: Text(tag.isAnimalRecordTag ? 'Organization' : 'Owner Information',
                           style: GoogleFonts.tiltWarp(
                               fontSize: 16,
                               color: AppColors.textPrimary)),

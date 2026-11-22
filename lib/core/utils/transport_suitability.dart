@@ -8,8 +8,11 @@
 /// * 2 animals: a vehicle whose declared capacity is at least 2.
 /// * More than 2: a sedan or larger (never a motorcycle) whose declared
 ///   capacity covers every animal.
-/// * A motorcycle carries one animal, and never one that needs enclosed,
-///   stable transport ([enclosedTransportReasons]).
+/// * A motorcycle carries one animal.
+///
+/// Only the number of passengers (animals riding) decides suitability; an
+/// "enclosed vehicle" requirement (from size, injury, risk or urgency) was
+/// removed at the organization's request.
 ///
 /// Capacity is what the transporter declared (`transporterVerification.
 /// maxAnimals`), never assumed from the vehicle's name. A transporter who
@@ -17,8 +20,6 @@
 /// until they declare it.
 library;
 
-import 'package:respawnd1/core/utils/animal_health_assessment.dart';
-import 'package:respawnd1/core/utils/rescue_risk.dart';
 import 'package:respawnd1/core/utils/transporter_ranking.dart';
 
 /// The vehicle types offered at registration
@@ -40,26 +41,6 @@ int? declaredAnimalCapacity(Object? value) {
 int animalsToTransport(Map<String, dynamic> caseData) {
   final animals = caseData['animals'];
   return animals is List && animals.isNotEmpty ? animals.length : 1;
-}
-
-/// Why the case's animals need an enclosed, stable vehicle (so not a
-/// motorcycle). Empty when nothing says so.
-List<String> enclosedTransportReasons(Map<String, dynamic> caseData) {
-  final reasons = <String>{};
-  if (caseData['urgency'] == 'Critical') reasons.add('critical urgency');
-  final animals = caseData['animals'];
-  final list = animals is List && animals.isNotEmpty ? animals.whereType<Map>().toList() : [caseData];
-  for (final a in list) {
-    if (a['size'] == 'Large') reasons.add('a large animal');
-    if (a['mobility'] == kMobilityOptions[2]) reasons.add('an animal that cannot walk');
-    if (a['alertness'] == kAlertnessOptions[2]) reasons.add('an unresponsive or collapsed animal');
-    if (a['injury'] == kInjurySevere || a['injury'] == kInjuryLifeThreatening) reasons.add('a serious injury');
-    if (isHighBiteRisk(a['biteRisk'] as String?) || isHighEscapeRisk(a['escapeRisk'] as String?)) {
-      reasons.add('a high bite or escape risk');
-    }
-    if (a['litter'] is Map) reasons.add('a mother with a litter');
-  }
-  return reasons.toList();
 }
 
 /// Whether one transporter's vehicle suits the trip, and why.
@@ -86,7 +67,6 @@ VehicleSuitability vehicleSuitability({
   required String? vehicleType,
   required Object? declaredCapacity,
   required int animals,
-  List<String> enclosedReasons = const [],
 }) {
   final type = (vehicleType ?? '').trim();
   final declared = declaredAnimalCapacity(declaredCapacity);
@@ -105,14 +85,6 @@ VehicleSuitability vehicleSuitability({
       return VehicleSuitability(
         suitable: false,
         reason: 'A motorcycle carries one animal; this trip has $animals',
-        effectiveCapacity: 1,
-        declaredCapacity: declared,
-      );
-    }
-    if (enclosedReasons.isNotEmpty) {
-      return VehicleSuitability(
-        suitable: false,
-        reason: 'Needs an enclosed vehicle (${enclosedReasons.join(', ')})',
         effectiveCapacity: 1,
         declaredCapacity: declared,
       );

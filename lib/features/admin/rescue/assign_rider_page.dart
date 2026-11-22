@@ -623,8 +623,9 @@ class _AssignRiderPageState extends ConsumerState<AssignRiderPage> {
       pendingFor = d.inMinutes < 1 ? 'Waiting ${d.inSeconds}s' : 'Waiting ${d.inMinutes}m ${d.inSeconds % 60}s';
     }
     final expiry = assignment.expiryLabel();
-    return Expanded(
-      child: SingleChildScrollView(
+    // Part of the page's single scroll (no Expanded), so it can never
+    // overflow under the banners above it.
+    return Padding(
         padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
         child: Container(
           width: double.infinity,
@@ -681,8 +682,7 @@ class _AssignRiderPageState extends ConsumerState<AssignRiderPage> {
             ],
           ),
         ),
-      ),
-    );
+      );
   }
 
   /// A declined or expired offer: why, then Retry that transporter or
@@ -781,7 +781,6 @@ class _AssignRiderPageState extends ConsumerState<AssignRiderPage> {
       Map<String, TransportAssignmentStatus> activeByRider,
       AnimalTransportProfile animalProfile, {
       required int tripAnimals,
-      required List<String> enclosedReasons,
       }) {
     // Unverified transporters can't take transits (firestore.rules
     // isVerifiedResponder), so they are never offered one.
@@ -823,7 +822,6 @@ class _AssignRiderPageState extends ConsumerState<AssignRiderPage> {
           vehicleType: vehicle,
           declaredCapacity: null,
           animals: tripAnimals,
-          enclosedReasons: enclosedReasons,
         ),
       );
     }
@@ -872,7 +870,6 @@ class _AssignRiderPageState extends ConsumerState<AssignRiderPage> {
           vehicleType: t.vehicleType,
           declaredCapacity: t.maxAnimals,
           animals: tripAnimals,
-          enclosedReasons: enclosedReasons,
         ),
       );
     }).toList();
@@ -1382,29 +1379,15 @@ class _AssignRiderPageState extends ConsumerState<AssignRiderPage> {
         ref.watch(activeAssignmentsByRiderProvider).asData?.value ?? const <String, TransportAssignmentStatus>{};
 
     final animals = (d['animals'] as List?) ?? const [];
-    // A transporter's own "requires specialized transport" End Reason
-    // (transit_progress_page.dart) means this case needs a bigger/better-
-    // equipped vehicle even if the animals[] data alone wouldn't suggest
-    // it — factored into ranking the same way a large animal or high-risk
-    // behavior already is, so a van/truck transporter is preferred for
-    // the reassignment.
-    final requiresSpecializedTransport =
-        (d['endReasonServiceType'] as String?)?.isNotEmpty ?? false;
+    // Ranking and suitability need only the number of passengers (animals
+    // riding); no "enclosed vehicle" requirement.
     final animalProfile = AnimalTransportProfile(
-      hasLargeAnimal: animals.any((a) => a is Map && a['size'] == 'Large'),
       animalCount: animals.isEmpty ? 1 : animals.length,
-      needsSpecialHandling: requiresSpecializedTransport ||
-          highRiskAnimalsIn(
-            animals: d['animals'] as List?,
-            legacyBiteRisk: d['biteRisk'] as String?,
-            legacyEscapeRisk: d['escapeRisk'] as String?,
-          ).isNotEmpty,
     );
     // What the trip needs from a vehicle (transport_suitability.dart).
     final tripAnimals = animalsToTransport(d);
-    final enclosedReasons = enclosedTransportReasons(d);
     final riders = _buildRiderVms(riderCenter, caseLocation, transporters, activeByRider, animalProfile,
-        tripAnimals: tripAnimals, enclosedReasons: enclosedReasons);
+        tripAnimals: tripAnimals);
 
     // Progressive Search Radius spec — only riders within the current
     // radius are actually shown/selectable; the underlying compatibility/
@@ -1538,7 +1521,14 @@ class _AssignRiderPageState extends ConsumerState<AssignRiderPage> {
             style: GoogleFonts.tiltWarp(
                 fontSize: 18, color: AppColors.background)),
       ),
-      body: Column(
+      // One scroll for the whole page: banners, the map, notices and the
+      // transporter list. A fixed column used to overflow on phones when
+      // several banners showed, leaving a striped error block and a list
+      // that couldn't be reached.
+      body: CustomScrollView(
+        slivers: [
+          SliverToBoxAdapter(
+            child: Column(
         children: [
           // Case header
           Padding(
@@ -1596,38 +1586,6 @@ class _AssignRiderPageState extends ConsumerState<AssignRiderPage> {
               ),
             ),
           ),
-          if (requiresSpecializedTransport)
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
-              child: Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: AppColors.lavenderrspwn.withValues(alpha: 0.2),
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: AppColors.lavenderrspwn),
-                ),
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Icon(Icons.local_shipping_outlined, color: AppColors.textPrimary, size: 20),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text('Specialized transport required',
-                              style: GoogleFonts.zain(fontSize: 13, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
-                          Text(d['endReasonServiceType'] as String,
-                              style: GoogleFonts.zain(fontSize: 12, color: AppColors.textPrimary)),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-
           // Real map: case marker + transporter markers (real-or-demo positions).
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -1755,9 +1713,8 @@ class _AssignRiderPageState extends ConsumerState<AssignRiderPage> {
                     children: [
                       Text(
                         hasUnsuitableOnly
-                            ? 'No available vehicle meets this trip\'s needs ($tripAnimals '
-                                'animal${tripAnimals == 1 ? '' : 's'}${enclosedReasons.isEmpty ? '' : ', enclosed vehicle needed'}). '
-                                'The transporters online can\'t carry it safely.'
+                            ? 'No available vehicle has room for this trip\'s $tripAnimals '
+                                'passenger${tripAnimals == 1 ? '' : 's'}.'
                             : atMaxRadius
                             ? (hasAvailableAnywhere
                         // Shouldn't happen (max radius should contain
@@ -1824,9 +1781,8 @@ class _AssignRiderPageState extends ConsumerState<AssignRiderPage> {
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
               child: Text(
-                'This trip: $tripAnimals animal${tripAnimals == 1 ? '' : 's'}'
-                '${enclosedReasons.isEmpty ? '' : ' · needs an enclosed vehicle (${enclosedReasons.join(', ')})'}. '
-                'Transporters whose vehicle can\'t carry it safely are listed but can\'t be selected.',
+                'Passengers: $tripAnimals animal${tripAnimals == 1 ? '' : 's'}. '
+                'Transporters without room for them are listed but can\'t be selected.',
                 style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary),
               ),
             ),
@@ -1839,9 +1795,10 @@ class _AssignRiderPageState extends ConsumerState<AssignRiderPage> {
             // the current search radius (Progressive Search Radius spec) —
             // scroll position/list identity otherwise untouched by radius
             // changes since this is the same ListView, just fewer/more items.
-            Expanded(
+            Padding(
+              padding: const EdgeInsets.only(bottom: 16),
               child: transportersLoading
-                  ? const Center(child: CircularProgressIndicator())
+                  ? const Padding(padding: EdgeInsets.all(24), child: Center(child: CircularProgressIndicator()))
                   : visibleRiders.isEmpty
                   ? Center(
                 child: Padding(
@@ -1855,6 +1812,8 @@ class _AssignRiderPageState extends ConsumerState<AssignRiderPage> {
               )
                   : ListView.separated(
                 key: const PageStorageKey('assign_rider_list'),
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
                 padding: const EdgeInsets.symmetric(horizontal: 16),
                 itemCount: visibleRiders.length,
                 separatorBuilder: (_, _) => const SizedBox(height: 12),
@@ -1872,7 +1831,16 @@ class _AssignRiderPageState extends ConsumerState<AssignRiderPage> {
               ),
             ),
 
-            // Fixed bottom action — always visible; "Send offer" stays
+          ],
+        ],
+            ),
+          ),
+        ],
+      ),
+      // Fixed bottom action, outside the scroll so it stays reachable.
+      bottomNavigationBar: blockingOffer != null
+          ? null
+          : // Fixed bottom action — always visible; "Send offer" stays
             // disabled until a clinic (rescue pickup), an available
             // transporter and, for high-risk animals, the risk
             // acknowledgement are all in place.
@@ -1925,9 +1893,6 @@ class _AssignRiderPageState extends ConsumerState<AssignRiderPage> {
                 ),
               ),
             ),
-          ],
-        ],
-      ),
     );
   }
 }

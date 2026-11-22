@@ -1,10 +1,9 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:respawnd1/core/utils/animal_health_assessment.dart';
 import 'package:respawnd1/core/utils/transport_suitability.dart';
 
 void main() {
-  VehicleSuitability check(String? type, Object? capacity, int animals, [List<String> enclosed = const []]) =>
-      vehicleSuitability(vehicleType: type, declaredCapacity: capacity, animals: animals, enclosedReasons: enclosed);
+  VehicleSuitability check(String? type, Object? capacity, int animals) =>
+      vehicleSuitability(vehicleType: type, declaredCapacity: capacity, animals: animals);
 
   test('one animal: a motorcycle or any registered vehicle', () {
     expect(check('Motorcycle', null, 1).suitable, isTrue);
@@ -25,11 +24,9 @@ void main() {
     expect(check('scooter', 10, 3).suitable, isFalse);
   });
 
-  test('a motorcycle never takes an animal that needs an enclosed vehicle', () {
-    final r = check('Motorcycle', 1, 1, ['a large animal']);
-    expect(r.suitable, isFalse);
-    expect(r.reason, contains('enclosed'));
-    expect(check('Sedan', 1, 1, ['a large animal']).suitable, isTrue);
+  test('only the number of passengers matters (no enclosed-vehicle rule)', () {
+    expect(check('Motorcycle', 1, 1).suitable, isTrue);
+    expect(check('Motorcycle', 1, 1).reason, 'Suitable for one animal');
   });
 
   test('declared capacity is validated, never assumed', () {
@@ -40,18 +37,8 @@ void main() {
     expect(declaredAnimalCapacity('two'), isNull);
   });
 
-  test('trip size and enclosed-transport reasons come from the case', () {
+  test('trip size comes from the case', () {
     expect(animalsToTransport({}), 1);
     expect(animalsToTransport({'animals': [{}, {}, {}]}), 3);
-    expect(enclosedTransportReasons({'animals': [{'size': 'Small'}]}), isEmpty);
-    final reasons = enclosedTransportReasons({
-      'urgency': 'Critical',
-      'animals': [
-        {'size': 'Large'},
-        {'mobility': kMobilityOptions[2]},
-        {'litter': {'count': 4}},
-      ],
-    });
-    expect(reasons, containsAll(['critical urgency', 'a large animal', 'an animal that cannot walk', 'a mother with a litter']));
   });
 }
