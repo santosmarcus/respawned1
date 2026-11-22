@@ -1422,6 +1422,21 @@ describe('collar tags and scan chats', () => {
     await assertSucceeds(as('reporter').doc('collarTags/tag1').delete());
   });
 
+  test("a shelter animal's tag chat is answered by its organization's staff", async () => {
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      const db = ctx.firestore();
+      await db.doc('collarTags/animal-animalA').set({ animalId: 'animalA', organizationId: 'orgA', source: 'animal_record', status: 'lost' });
+      await db.doc('rescueSessions/sA').set({ tagId: 'animal-animalA', organizationId: 'orgA', status: 'active', chatEnabledByOwner: false });
+    });
+    await assertSucceeds(as('staffA').doc('rescueSessions/sA').get());
+    await assertSucceeds(as('staffA').doc('rescueSessions/sA').update({ chatEnabledByOwner: true }));
+    await assertFails(as('staffB').doc('rescueSessions/sA').update({ status: 'resolved' }));
+    await assertSucceeds(as('staffA').collection('rescueSessions/sA/messages').add({ sender: 'owner', senderId: 'staffA', text: 'Thank you!', sentAt: new Date() }));
+    await assertFails(as('staffB').collection('rescueSessions/sA/messages').add({ sender: 'owner', senderId: 'staffB', text: 'x', sentAt: new Date() }));
+    // The finder (anyone, on a session from this scan flow) replies as finder.
+    await assertSucceeds(as('adopter').collection('rescueSessions/sA/messages').add({ sender: 'finder', senderId: 'adopter', text: 'Found him', sentAt: new Date() }));
+  });
+
   test("an animal's collar tag is written by that animal's staff only", async () => {
     const tag = { animalId: 'animalA', source: 'animal_record', name: 'Brownie', qrEnabled: true, status: 'active' };
     await assertSucceeds(as('staffA').doc('collarTags/animal-animalA').set(tag));

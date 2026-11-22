@@ -19,6 +19,7 @@ import 'package:respawnd1/core/utils/animal_tag_codes.dart';
 import 'pet_found_chat.dart';
 import 'lost_pet_location_picker.dart';
 import 'package:respawnd1/core/widgets/app_messages.dart';
+import 'package:respawnd1/features/admin/collarTags/nfc_service.dart';
 
 //  Pet Identification Card Screen
 class CollarIdTagCardScreen extends StatefulWidget {
@@ -26,11 +27,18 @@ class CollarIdTagCardScreen extends StatefulWidget {
   final bool isNewlyCreated;
   final bool readOnly;
 
+  /// Staff of the organization viewing a shelter animal's tag: they act as
+  /// its owner (Mark as Lost / Found, the finders' chats with their
+  /// location, writing its NFC chip). The card itself is edited from the
+  /// animal record, so there is no Edit.
+  final bool staffOwner;
+
   const CollarIdTagCardScreen({
     super.key,
     required this.tagData,
     this.isNewlyCreated = false,
     this.readOnly = false,
+    this.staffOwner = false,
   });
 
   @override
@@ -40,6 +48,7 @@ class CollarIdTagCardScreen extends StatefulWidget {
 class _CollarIdTagCardScreenState extends State<CollarIdTagCardScreen> {
   final GlobalKey _cardKey = GlobalKey();
   bool _sharing = false;
+  bool _writingNfc = false;
   bool _updatingStatus = false;
   late CollarTagData _tag;
   StreamSubscription<DocumentSnapshot<Map<String, dynamic>>>? _tagSub;
@@ -146,6 +155,31 @@ class _CollarIdTagCardScreenState extends State<CollarIdTagCardScreen> {
     }
   }
 
+  /// Writes the animal's registered QR code onto an NFC chip, so tapping
+  /// the chip opens this same card (animal_tag_scan.dart).
+  Future<void> _writeAnimalNfc() async {
+    final code = _tag.animalQrCode;
+    if (code == null || code.isEmpty) return;
+    final nfc = NfcService();
+    if (!await nfc.isAvailable()) {
+      _showSnack('NFC is not available or is turned off on this device.');
+      return;
+    }
+    setState(() => _writingNfc = true);
+    try {
+      await nfc.writeAnimalTag(code);
+      _showSnack('NFC chip written. Scanning it opens this collar tag.');
+    } on NfcChipInUseException catch (e) {
+      _showSnack('This chip already holds another animal\'s tag (${e.existingCode}). Use a blank chip.');
+    } on NfcCancelledException {
+      // Cancelled: nothing written.
+    } catch (e) {
+      _showSnack('Could not write the NFC chip: $e');
+    } finally {
+      if (mounted) setState(() => _writingNfc = false);
+    }
+  }
+
   void _showSnack(String msg) {
     if (mounted) {
       ScaffoldMessenger.of(context)
@@ -171,7 +205,7 @@ class _CollarIdTagCardScreenState extends State<CollarIdTagCardScreen> {
           onPressed: () => Navigator.pop(context),
         ),
         actions: [
-          if (!widget.readOnly)
+          if (!widget.readOnly && !widget.staffOwner)
             TextButton(
               onPressed: () => _editTag(context),
               child: Text('Edit',
@@ -186,7 +220,7 @@ class _CollarIdTagCardScreenState extends State<CollarIdTagCardScreen> {
           children: [
             // Each person who scanned the lost pet's tag has their own chat
             // with the owner (getOrCreateRescueSession in functions/index.js).
-            if (!widget.readOnly && tag.tagId != null)
+            if ((!widget.readOnly || widget.staffOwner) && tag.tagId != null)
               _ScanChatsList(tag: tag),
             Text(
               'Pet Identification\nCard',
@@ -310,7 +344,17 @@ class _CollarIdTagCardScreenState extends State<CollarIdTagCardScreen> {
               const SizedBox(height: 16),
             ],
 
-            if (!widget.readOnly &&
+            if (widget.staffOwner && tag.isAnimalRecordTag && (tag.animalQrCode ?? '').isNotEmpty) ...[
+              _ActionButton(
+                icon: Icons.nfc,
+                label: _writingNfc ? 'Hold the chip near the phone…' : 'Write NFC Chip',
+                loading: _writingNfc,
+                onTap: _writingNfc ? null : _writeAnimalNfc,
+              ),
+              const SizedBox(height: 16),
+            ],
+
+            if ((!widget.readOnly || widget.staffOwner) &&
                 (widget.isNewlyCreated || tag.qrEnabled))
               SizedBox(
                 width: double.infinity,

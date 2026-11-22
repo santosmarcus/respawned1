@@ -262,7 +262,8 @@ class CollarTagLostFound {
       }) async {
     final uid = FirebaseAuth.instance.currentUser!.uid;
     final tagId = tag.tagId!;
-    final ownerId = tag.ownerId ?? uid;
+    // A shelter animal's tag has no owner account: no users/{uid} copy.
+    final ownerId = tag.isAnimalRecordTag ? null : (tag.ownerId ?? uid);
 
     // Chats left over from an earlier lost cycle start fresh.
     await resolveScanChats(tagId, legacySessionId: tag.activeRescueSessionId);
@@ -332,7 +333,7 @@ class CollarTagLostFound {
       }) async {
     final tagId = tag.tagId!;
     await resolveScanChats(tagId, legacySessionId: tag.activeRescueSessionId);
-    await _setTagLost(tagId, tag.ownerId ?? FirebaseAuth.instance.currentUser!.uid,
+    await _setTagLost(tagId, tag.isAnimalRecordTag ? null : (tag.ownerId ?? FirebaseAuth.instance.currentUser!.uid),
         alertId: alertId, lat: lat, lng: lng, address: address);
   }
 
@@ -366,7 +367,7 @@ class CollarTagLostFound {
 
     await resolveScanChats(tagId, legacySessionId: tag.activeRescueSessionId);
 
-    await _writeTag(tagId, tag.ownerId ?? uid, {
+    await _writeTag(tagId, tag.isAnimalRecordTag ? null : (tag.ownerId ?? uid), {
       'status': 'active',
       'lastSeenLat': FieldValue.delete(),
       'lastSeenLng': FieldValue.delete(),

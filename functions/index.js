@@ -102,6 +102,9 @@ exports.getOrCreateRescueSession = onCall(async (request) => {
     tagId,
     status: 'active',
     chatEnabledByOwner: false,
+    // A shelter animal's tag (collarTags/animal-{id}) has no owner account:
+    // its organization's staff answer the finder (firestore.rules).
+    ...(tagData.organizationId ? {organizationId: tagData.organizationId} : {}),
     createdAt: admin.firestore.FieldValue.serverTimestamp(),
     ...(lat !== null ? {lat} : {}),
     ...(lng !== null ? {lng} : {}),
@@ -774,6 +777,22 @@ async function notifyTagScan({tagId, tagData, sessionId, scannerUid, lat, lng, a
         : `Someone scanned ${petName}'s tag. Tap to open the chat.`,
       data: {type: 'tag_scanned', tagId, sessionId},
     });
+  } else if (!ownerId && tagData.organizationId) {
+    // A shelter animal's tag: its organization's rescue and records staff.
+    const uids = new Set([
+      ...(await orgMemberUids(db, tagData.organizationId, {anyOf: ['rescue', 'animals']})),
+    ]);
+    uids.delete(scannerUid);
+    for (const uid of uids) {
+      await safeNotifyUser({
+        uid,
+        title: `${petName} (lost) was just scanned!`,
+        body: address
+          ? `Someone scanned ${petName}'s collar tag near ${address}. Tap to open the chat.`
+          : `Someone scanned ${petName}'s collar tag. Tap to open the chat.`,
+        data: {type: 'tag_scanned', tagId, sessionId},
+      });
+    }
   }
 
   if (isNewSession && lat !== null && lng !== null) {

@@ -2040,10 +2040,18 @@ service cloud.firestore {
       function isLegacy(data) {
         return !('finderId' in data);
       }
+      // A shelter animal's tag (collarTags/animal-{id}) has no owner account:
+      // its organization's rescue and records staff act as the owner.
+      function isOrgTagStaff(data) {
+        let orgId = data.get('organizationId',
+          get(/databases/$(database)/documents/collarTags/$(data.tagId)).data.get('organizationId', ''));
+        return orgId != '' && staffWith(orgId, ['rescue', 'animals']);
+      }
       function isSessionOwner(data) {
         return signedIn() &&
           (data.get('ownerId', '') == request.auth.uid ||
-            (isLegacy(data) && tagOwner(data) == request.auth.uid));
+            (isLegacy(data) && tagOwner(data) == request.auth.uid) ||
+            isOrgTagStaff(data));
       }
       function isSessionFinder(data) {
         return signedIn() &&

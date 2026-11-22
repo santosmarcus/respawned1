@@ -7,6 +7,8 @@ import 'package:respawnd1/core/repos/animal_record_repository.dart';
 import 'package:respawnd1/core/repos/animal_collar_tag_repository.dart';
 import 'package:respawnd1/features/collartag/collar_id_tag_screen.dart';
 import 'package:respawnd1/features/collartag/collar_tag_data_model.dart';
+import 'package:respawnd1/features/collartag/pet_found_chat.dart';
+import 'package:respawnd1/features/collartag/scan_tag_flow.dart' show fetchBestEffortScanLocation, resolveScannedTagId;
 import 'package:respawnd1/core/models/rescue/animal_record.dart';
 import 'package:respawnd1/features/admin/animals/animal_record_detail_page.dart';
 import 'package:respawnd1/features/adoption/adoption_page.dart';
@@ -87,13 +89,35 @@ Future<bool> openScannedAnimalTag(BuildContext context, String raw) async {
     final tagSnap = await FirebaseFirestore.instance.collection('collarTags').doc(tagId).get();
     if (!context.mounted) return true;
     if (tagSnap.exists) {
+      final tag = CollarTagData.fromFirestore(tagSnap.data()!, tagSnap.id);
+      // Marked lost by its organization: the finder gets the same scan chat
+      // as for a lost owned pet, with where they found it.
+      if (tag.status == 'lost') {
+        final location = await fetchBestEffortScanLocation();
+        final outcome = await resolveScannedTagId(tagSnap.id, location: location);
+        if (!context.mounted) return true;
+        if (outcome.isLost && outcome.sessionId != null) {
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (_) => PetFoundChatScreen(
+                tagId: tagSnap.id,
+                sessionId: outcome.sessionId!,
+                petName: tag.name,
+                isOwner: false,
+              ),
+            ),
+          );
+          return true;
+        }
+      }
+      // Staff of the animal's organization get the owner's view.
+      final staff = await isStaffOfOrganization(tag.organizationId);
+      if (!context.mounted) return true;
       Navigator.push(
         context,
         MaterialPageRoute(
-          builder: (_) => CollarIdTagCardScreen(
-            tagData: CollarTagData.fromFirestore(tagSnap.data()!, tagSnap.id),
-            readOnly: true,
-          ),
+          builder: (_) => CollarIdTagCardScreen(tagData: tag, readOnly: !staff, staffOwner: staff),
         ),
       );
       return true;
