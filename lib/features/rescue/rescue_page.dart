@@ -779,9 +779,7 @@ class _RescuePageState extends State<RescuePage> {
   /// The notice above the Submit button, worded for the selected type.
   String _submissionNoticeText() {
     if (_form.isPetSurrenderType) {
-      return 'Thank you for thinking ahead for your pet. The organization '
-          'does not take in surrendered pets directly, so surrender requests '
-          'have the lowest priority in its work. Instead, your pet will be '
+      return 'Thank you for thinking ahead for your pet. Your pet will be '
           'listed in Community Adoption, where people looking to adopt can '
           'contact you, and you choose who adopts. Until then, '
           '$kSurrenderNoticeHighlight. Listing your pet does not guarantee a '
@@ -792,16 +790,13 @@ class _RescuePageState extends State<RescuePage> {
       if (_form.isOwner == false) {
         return 'Thank you for looking out for this animal. Your report is '
             'shared with the community and matched against lost pet alerts so '
-            'its owner can find it. It is not handled by the organization, so '
-            'no one is sent out because of it. If the animal is hurt or in '
-            'danger, switch to a rescue report instead.';
+            'its owner can find it. If the animal is hurt or in '
+            'danger, switch to a rescue report.';
       }
       return 'We are sorry your pet is missing, and we hope you are together '
           'again soon. Your alert is shared with people nearby and matched '
           'against found pet reports, so someone who sees your pet can '
-          'recognize it and reach you. Lost pet reports are not handled by '
-          'the organization, so submitting one does not mean anyone will '
-          'search for your pet or that it will be found. Please keep '
+          'recognize it and reach you. Please keep '
           'searching nearby, check with local shelters and your barangay, '
           'and share your alert as widely as you can.';
     }

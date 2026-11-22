@@ -301,12 +301,11 @@ const List<Map<String, String>> kRescueTypeOptions = [
   {
     'label': kRescueTypePetSurrender,
     'description': 'Rehoming your own pet through Community Adoption. '
-        'Not facilitated by the organization.',
   },
   {
     'label': kRescueTypeLostPet,
     'description': 'Owner or finder of a missing pet. Shared with the community '
-        'for matching; not handled by the organization.',
+        'for matching.',
   },
   {
     'label': 'Abandonment',
