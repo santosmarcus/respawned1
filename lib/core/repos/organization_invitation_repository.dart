@@ -1,12 +1,15 @@
 import 'dart:math';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
 
 import 'package:respawnd1/core/models/audit/audit_log_entry.dart';
 import 'package:respawnd1/core/models/organization/org_permission.dart';
 import 'package:respawnd1/core/models/rescue/org_role.dart';
 import 'package:respawnd1/core/repos/audit_log_repository.dart';
+import 'package:respawnd1/core/utils/stream_combine.dart';
+import 'package:respawnd1/core/utils/validators.dart';
 
 enum InvitationStatus {
   pending,
@@ -25,6 +28,11 @@ class OrganizationInvitation {
   final String organizationName;
   final String email;
   final String normalizedEmail;
+
+  /// Set instead of [email] for an invitation by mobile number; matched
+  /// against the invitee's verified sign-in number (+639XXXXXXXXX).
+  final String phone;
+  final String normalizedPhone;
   final OrgRole role;
 
   /// What the invited Staff member will be able to do (every permission
@@ -52,6 +60,8 @@ class OrganizationInvitation {
     required this.organizationName,
     required this.email,
     required this.normalizedEmail,
+    this.phone = '',
+    this.normalizedPhone = '',
     required this.role,
     this.permissions = const {},
     this.preset,
@@ -70,9 +80,17 @@ class OrganizationInvitation {
 
   bool get isExpired => expiresAt != null && DateTime.now().isAfter(expiresAt!);
 
-  /// "Organization Admin" or "Staff · Treasurer".
+  bool get isPhoneInvite => normalizedEmail.isEmpty && normalizedPhone.isNotEmpty;
+
+  /// Who it was sent to: the email, or the mobile number.
+  String get contactLabel => isPhoneInvite ? (phone.isNotEmpty ? phone : normalizedPhone) : email;
+
+  /// One key per invitee, for de-duplicating lists.
+  String get contactKey => isPhoneInvite ? 'phone:$normalizedPhone' : 'email:$normalizedEmail';
+
+  /// "Organization Admin", "Staff" or "Staff · Custom access".
   String get accessLabel =>
-      role == OrgRole.admin ? OrgRole.admin.memberTitle : 'Staff · ${(preset ?? OrgPreset.custom).label}';
+      role == OrgRole.admin ? OrgRole.admin.memberTitle : staffTitle(preset);
 
   factory OrganizationInvitation.fromFirestore(DocumentSnapshot<Map<String, dynamic>> doc) {
     final data = doc.data() ?? const <String, dynamic>{};
@@ -88,6 +106,8 @@ class OrganizationInvitation {
       // normalizing `email` on read rather than losing the ability to
       // match/display those legacy documents.
       normalizedEmail: (data['normalizedEmail'] as String?) ?? email.trim().toLowerCase(),
+      phone: data['phone'] as String? ?? '',
+      normalizedPhone: data['normalizedPhone'] as String? ?? '',
       role: OrgRole.fromName(data['role'] as String?),
       permissions: OrgRole.fromName(data['role'] as String?) == OrgRole.admin
           ? OrgPermission.values.toSet()
@@ -135,6 +155,14 @@ class OrganizationInvitationRepository {
   CollectionReference<Map<String, dynamic>> get _users => _db.collection('users');
   CollectionReference<Map<String, dynamic>> get _organizations => _db.collection('organizations');
 
+  /// Whether an invitation doc is for this account: its email, or its
+  /// verified phone number. An empty side never matches.
+  static bool _addressedTo(Map<String, dynamic> data, {required String email, required String phone}) {
+    final invitedEmail = (data['normalizedEmail'] as String? ?? '').trim();
+    final invitedPhone = (data['normalizedPhone'] as String? ?? '').trim();
+    return (invitedEmail.isNotEmpty && invitedEmail == email) || (invitedPhone.isNotEmpty && invitedPhone == phone);
+  }
+
   String _generateToken() => List.generate(32, (_) => _rng.nextInt(36).toRadixString(36)).join();
 
   /// Parses each doc individually rather than via a bare `.map(...)` —
@@ -178,6 +206,57 @@ class OrganizationInvitationRepository {
         .map(_parseInvitations);
   }
 
+  /// Pending invitations sent to this verified mobile number (+639…).
+  Stream<List<OrganizationInvitation>> streamInvitationsForPhone(String normalizedPhone) {
+    return _invitations
+        .where('normalizedPhone', isEqualTo: normalizedPhone)
+        .where('status', isEqualTo: InvitationStatus.pending.name)
+        .snapshots()
+        .map(_parseInvitations);
+  }
+
+  /// Pending invitations for the signed-in account, by its email and/or its
+  /// verified phone number.
+  Stream<List<OrganizationInvitation>> streamMyInvitations({String? email, String? phone}) {
+    final e = email?.trim().toLowerCase() ?? '';
+    final p = phone?.trim() ?? '';
+    final streams = [
+      if (e.isNotEmpty) streamInvitationsForEmail(e),
+      if (p.isNotEmpty) streamInvitationsForPhone(p),
+    ];
+    if (streams.isEmpty) return Stream.value(const []);
+    if (streams.length == 1) return streams.first;
+    return combineLatest(streams).map((lists) {
+      final seen = <String>{};
+      return [for (final l in lists) ...l].where((i) => seen.add(i.id)).toList();
+    });
+  }
+
+  Future<bool> isAlreadyActiveMemberByPhone({required String organizationId, required String normalizedPhone}) async {
+    final snap = await _db
+        .collection('organizations')
+        .doc(organizationId)
+        .collection('members')
+        .where('normalizedPhone', isEqualTo: normalizedPhone)
+        .limit(1)
+        .get();
+    return snap.docs.isNotEmpty;
+  }
+
+  Future<OrganizationInvitation?> findActiveInvitationByPhone({
+    required String organizationId,
+    required String normalizedPhone,
+  }) async {
+    final snap = await _invitations
+        .where('organizationId', isEqualTo: organizationId)
+        .where('normalizedPhone', isEqualTo: normalizedPhone)
+        .where('status', isEqualTo: InvitationStatus.pending.name)
+        .limit(1)
+        .get();
+    if (snap.docs.isEmpty) return null;
+    return OrganizationInvitation.fromFirestore(snap.docs.first);
+  }
+
   Future<bool> isAlreadyActiveMember({required String organizationId, required String email}) async {
     final normalized = email.trim().toLowerCase();
     final snap = await _db.collection('organizations').doc(organizationId).collection('members').where('email', isEqualTo: normalized).limit(1).get();
@@ -211,44 +290,63 @@ class OrganizationInvitationRepository {
   Future<String> createInvitation({
     required String organizationId,
     required String organizationName,
-    required String email,
+    String email = '',
+    /// Instead of [email]: a PH mobile number, matched against the
+    /// invitee's verified phone sign-in.
+    String phone = '',
     required OrgRole role,
     Set<OrgPermission> permissions = const {},
     required String invitedBy,
     String invitedByName = '',
   }) async {
     final normalizedEmail = email.trim().toLowerCase();
-    final ref = _invitations.doc(_invitationDocId(organizationId: organizationId, normalizedEmail: normalizedEmail));
+    final byPhone = normalizedEmail.isEmpty;
+    final normalizedPhone = byPhone ? normalizePhPhone(phone) : null;
+    if (byPhone && normalizedPhone == null) {
+      throw ArgumentError('Enter a valid Philippine mobile number.');
+    }
+    final ref = _invitations.doc(byPhone
+        ? '${organizationId}_phone_${normalizedPhone!.substring(1)}'
+        : _invitationDocId(organizationId: organizationId, normalizedEmail: normalizedEmail));
 
-    await _db.runTransaction((tx) async {
-      final snap = await tx.get(ref);
-      if (snap.exists) {
-        final status = InvitationStatus.fromName(snap.data()?['status'] as String?);
-        final expiresAt = snap.data()?['expiresAt'];
-        final expired = expiresAt is Timestamp && DateTime.now().isAfter(expiresAt.toDate());
-        if (status == InvitationStatus.pending && !expired) {
-          throw StateError('An invitation is already pending for this email.');
-        }
-      }
-      tx.set(ref, {
-        'organizationId': organizationId,
-        'organizationName': organizationName,
-        'email': email.trim(),
-        'normalizedEmail': normalizedEmail,
-        'role': role.name,
-        ..._accessFields(role, permissions),
-        'status': InvitationStatus.pending.name,
-        'invitedBy': invitedBy,
-        'invitedByName': invitedByName,
-        'createdAt': FieldValue.serverTimestamp(),
-        'expiresAt': Timestamp.fromDate(DateTime.now().add(const Duration(days: 7))),
-        'acceptedAt': null,
-        'acceptedBy': null,
-        'rejectedAt': null,
-        'rejectedBy': null,
-        'token': _generateToken(),
-      });
+    // No transactional read first: for a first invite the doc doesn't exist
+    // yet, and reading a missing invitation used to be denied by the rules
+    // (permission-denied for every org admin). The friendly duplicate checks
+    // run before this call (findActiveInvitation / isAlreadyActiveMember);
+    // the deterministic id still keeps one doc per org+email, so a racing
+    // duplicate only refreshes the same pending invitation.
+    await ref.set({
+      'organizationId': organizationId,
+      'organizationName': organizationName,
+      'email': email.trim(),
+      'normalizedEmail': normalizedEmail,
+      if (byPhone) ...{
+        'phone': phone.trim(),
+        'normalizedPhone': normalizedPhone,
+      },
+      'role': role.name,
+      ..._accessFields(role, permissions),
+      'status': InvitationStatus.pending.name,
+      'invitedBy': invitedBy,
+      'invitedByName': invitedByName,
+      'createdAt': FieldValue.serverTimestamp(),
+      'expiresAt': Timestamp.fromDate(DateTime.now().add(const Duration(days: 7))),
+      'acceptedAt': null,
+      'acceptedBy': null,
+      'rejectedAt': null,
+      'rejectedBy': null,
+      'token': _generateToken(),
     });
+    await _auditLog.log(
+      category: AuditCategory.organizationStaff,
+      action: 'Invitation sent',
+      actorId: invitedBy,
+      actorName: invitedByName,
+      organizationId: organizationId,
+      targetType: 'Invitation',
+      targetId: ref.id,
+      newValues: {if (byPhone) 'phone': normalizedPhone else 'email': email.trim(), 'role': role.name},
+    );
     return ref.id;
   }
 
@@ -280,8 +378,20 @@ class OrganizationInvitationRepository {
     });
   }
 
-  Future<void> revokeInvitation(String invitationId) async {
-    await _invitations.doc(invitationId).update({'status': InvitationStatus.revoked.name});
+  Future<void> revokeInvitation(String invitationId, {String? actorId, String? actorName}) async {
+    final ref = _invitations.doc(invitationId);
+    final before = (await ref.get()).data();
+    await ref.update({'status': InvitationStatus.revoked.name});
+    await _auditLog.log(
+      category: AuditCategory.organizationStaff,
+      action: 'Invitation revoked',
+      actorId: actorId ?? FirebaseAuth.instance.currentUser?.uid,
+      actorName: actorName,
+      organizationId: before?['organizationId'] as String?,
+      targetType: 'Invitation',
+      targetId: invitationId,
+      oldValues: {'email': ?before?['email'], 'role': ?before?['role']},
+    );
   }
 
   /// Development-only acceptance path (spec §12's explicit allowance when no
@@ -301,9 +411,13 @@ class OrganizationInvitationRepository {
   Future<void> acceptInvitation({
     required String invitationId,
     required String uid,
-    required String signedInEmail,
+    String? signedInEmail,
+    /// The account's verified phone sign-in number (User.phoneNumber).
+    String? signedInPhone,
     bool preserveAccountRole = false,
   }) async {
+    final myEmail = signedInEmail?.trim().toLowerCase() ?? '';
+    final myPhone = signedInPhone?.trim() ?? '';
     final ref = _invitations.doc(invitationId);
     late String grantedRole;
     Object? grantedPermissions;
@@ -322,9 +436,8 @@ class OrganizationInvitationRepository {
       if (expiresAt is Timestamp && DateTime.now().isAfter(expiresAt.toDate())) {
         throw StateError('This invitation has expired.');
       }
-      final invitedEmail = (data['normalizedEmail'] as String? ?? '').trim();
-      if (invitedEmail != signedInEmail.trim().toLowerCase()) {
-        throw StateError('This invitation was sent to a different email address.');
+      if (!_addressedTo(data, email: myEmail, phone: myPhone)) {
+        throw StateError('This invitation was sent to a different email address or mobile number.');
       }
 
       organizationId = data['organizationId'] as String? ?? '';
@@ -347,7 +460,6 @@ class OrganizationInvitationRepository {
       // compares role, permissions and preset with the invitation).
       grantedRole = (data['role'] as String?) ?? OrgRole.staff.name;
       grantedPermissions = data['permissions'];
-      final normalizedSignedInEmail = signedInEmail.trim().toLowerCase();
       final displayName = userSnap.data()?['name'] as String?;
 
       tx.update(ref, {'status': InvitationStatus.accepted.name, 'acceptedAt': FieldValue.serverTimestamp(), 'acceptedBy': uid});
@@ -358,8 +470,12 @@ class OrganizationInvitationRepository {
           'role': grantedRole,
           if (data.containsKey('permissions')) 'permissions': data['permissions'],
           if (data.containsKey('preset')) 'preset': data['preset'],
-          'email': signedInEmail.trim(),
-          'normalizedEmail': normalizedSignedInEmail,
+          'email': signedInEmail?.trim() ?? '',
+          'normalizedEmail': myEmail,
+          if (myPhone.isNotEmpty) ...{
+            'phone': myPhone,
+            'normalizedPhone': myPhone,
+          },
           if (displayName != null && displayName.isNotEmpty) 'displayName': displayName,
           'status': 'active',
           'joinedAt': FieldValue.serverTimestamp(),
@@ -376,7 +492,7 @@ class OrganizationInvitationRepository {
       category: AuditCategory.organizationStaff,
       action: 'Staff added',
       actorId: uid,
-      actorEmail: signedInEmail,
+      actorEmail: (signedInEmail?.isNotEmpty ?? false) ? signedInEmail : (myPhone.isEmpty ? null : myPhone),
       organizationId: organizationId,
       targetType: 'OrgMember',
       targetId: uid,
@@ -392,9 +508,13 @@ class OrganizationInvitationRepository {
   Future<void> rejectInvitation({
     required String invitationId,
     required String uid,
-    required String signedInEmail,
+    String? signedInEmail,
+    String? signedInPhone,
   }) async {
+    final myEmail = signedInEmail?.trim().toLowerCase() ?? '';
+    final myPhone = signedInPhone?.trim() ?? '';
     final ref = _invitations.doc(invitationId);
+    String? organizationId;
     await _db.runTransaction((tx) async {
       final snap = await tx.get(ref);
       if (!snap.exists) throw StateError('This invitation no longer exists.');
@@ -403,16 +523,25 @@ class OrganizationInvitationRepository {
       if (status != InvitationStatus.pending) {
         throw StateError('This invitation is no longer pending.');
       }
-      final invitedEmail = (data['normalizedEmail'] as String? ?? '').trim();
-      if (invitedEmail != signedInEmail.trim().toLowerCase()) {
-        throw StateError('This invitation was sent to a different email address.');
+      if (!_addressedTo(data, email: myEmail, phone: myPhone)) {
+        throw StateError('This invitation was sent to a different email address or mobile number.');
       }
+      organizationId = data['organizationId'] as String?;
       tx.update(ref, {
         'status': InvitationStatus.rejected.name,
         'rejectedAt': FieldValue.serverTimestamp(),
         'rejectedBy': uid,
       });
     });
+    await _auditLog.log(
+      category: AuditCategory.organizationStaff,
+      action: 'Invitation declined',
+      actorId: uid,
+      actorEmail: (signedInEmail?.isNotEmpty ?? false) ? signedInEmail : (myPhone.isEmpty ? null : myPhone),
+      organizationId: organizationId,
+      targetType: 'Invitation',
+      targetId: invitationId,
+    );
   }
 
   /// Blocks removing the final active Admin — every organization must keep
@@ -428,11 +557,12 @@ class OrganizationInvitationRepository {
     String? actorId,
     String? actorName,
   }) async {
-    await _db.collection('organizations').doc(organizationId).collection('members').doc(uid).delete();
-    // Clears the account's org association so access is revoked on the
-    // next auth/provider refresh — never deletes the Firebase Auth account
-    // itself.
+    // Unlink the account FIRST: an org-linked account with no members doc is
+    // treated as legacy full staff (app and firestore.rules), so deleting
+    // the members doc first gave a removed member full access in between.
+    // Never deletes the Firebase Auth account itself.
     await _users.doc(uid).update({'organizationId': FieldValue.delete()});
+    await _db.collection('organizations').doc(organizationId).collection('members').doc(uid).delete();
     await _auditLog.log(
       category: AuditCategory.organizationStaff,
       action: 'Staff removed',

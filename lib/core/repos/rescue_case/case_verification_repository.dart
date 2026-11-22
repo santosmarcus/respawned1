@@ -5,6 +5,7 @@ import 'package:respawnd1/core/models/rescue/report_verification.dart';
 import 'package:respawnd1/core/models/rescue/rescue_case.dart';
 import 'package:respawnd1/core/models/rescue/rescue_status.dart';
 import 'package:respawnd1/core/repos/rescue_case/rescue_case_store.dart';
+import 'case_message_sender.dart';
 
 /// Report verification before a case is accepted: asking the reporter for a
 /// fresh photo, recording the desk check result, sending a rider, and what
@@ -27,7 +28,8 @@ class CaseVerificationRepository {
     required String actorUid,
     required String actorName,
     String? note,
-  }) {
+  }) async {
+    final sender = await CaseMessageSender.staffFields(firestore: _store.db);
     final batch = _store.db.batch();
     _store.recordActionInBatch(
       batch,
@@ -46,8 +48,7 @@ class CaseVerificationRepository {
       },
     );
     batch.set(_store.caseDoc(caseId).collection('messages').doc(), {
-      'senderId': 'admin',
-      'senderName': 'Loved by the Gapz',
+      ...sender,
       'text': 'Please send a new photo or short video of the animal from where it is now. '
           'Open this case and tap "Take a photo now".${note == null ? '' : '\n\n$note'}',
       'timestamp': FieldValue.serverTimestamp(),

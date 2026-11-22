@@ -19,22 +19,30 @@ void main() {
   });
 
   group('Staff', () {
-    test('a Treasurer handles money but not rescues or members', () {
-      final c = OrganizationCapabilities.forAccess(ResolvedOrgRole.member, permissions: OrgPreset.treasurer.permissions);
+    test('Staff with money ticked by hand handles money but not members', () {
+      final c = OrganizationCapabilities.forAccess(ResolvedOrgRole.member, permissions: {
+        OrgPermission.campaigns,
+        OrgPermission.financeManage,
+        OrgPermission.insights,
+      });
       expect(c.canManageFinances, isTrue);
       expect(c.canViewFinances, isTrue);
       expect(c.canRunCampaigns, isTrue);
       expect(c.canManageRescues, isFalse);
       expect(c.canManageMembers, isFalse);
       expect(c.canManageTeam, isFalse);
-      expect(c.preset, OrgPreset.treasurer);
+      expect(c.preset, OrgPreset.custom);
     });
 
-    test('Full staff sees money but cannot manage it', () {
-      final c = OrganizationCapabilities.forAccess(ResolvedOrgRole.member, permissions: OrgPreset.fullStaff.permissions);
-      expect(c.canViewFinances, isTrue);
+    test('default Staff: rescues and daily care, no money until ticked', () {
+      final c = OrganizationCapabilities.forAccess(ResolvedOrgRole.member, permissions: OrgPreset.staff.permissions);
+      expect(c.canViewFinances, isFalse);
       expect(c.canManageFinances, isFalse);
+      expect(c.canRunCampaigns, isFalse);
       expect(c.canManageRescues, isTrue);
+      expect(c.canGiveCare, isTrue);
+      expect(c.canOpenCareTasks, isTrue);
+      expect(c.preset, OrgPreset.staff);
       expect(c.canPublishToFacebook, isFalse);
       expect(c.isCareOnly, isFalse);
     });
@@ -63,10 +71,10 @@ void main() {
       expect(c.isAdmin, isTrue);
     });
 
-    test('no members doc: Full staff, never Admin', () {
+    test('no members doc: the default Staff set, never Admin', () {
       final c = capabilitiesFrom(uid: 'u', ownerId: 'o', member: null);
       expect(c.isAdmin, isFalse);
-      expect(c.preset, OrgPreset.fullStaff);
+      expect(c.preset, OrgPreset.staff);
     });
 
     test('inactive members get nothing', () {
@@ -74,17 +82,18 @@ void main() {
       expect(c.isActive, isFalse);
     });
 
-    test('legacy carers are Animal care', () {
+    test('legacy carers were merged into Staff', () {
       final c = capabilitiesFrom(uid: 'u', ownerId: 'o', member: {'role': 'carer'});
-      expect(c.isCareOnly, isTrue);
-      expect(c.preset, OrgPreset.animalCare);
+      expect(c.isCareOnly, isFalse);
+      expect(c.canOpenCareTasks, isTrue);
+      expect(c.preset, OrgPreset.staff);
     });
   });
 
   group('which home a member opens', () {
     test('admin shell, care tasks or no access', () {
       expect(orgHomeFor(capabilitiesFrom(uid: 'u', ownerId: 'o', member: {'role': 'admin'})), OrgHome.admin);
-      expect(orgHomeFor(capabilitiesFrom(uid: 'u', ownerId: 'o', member: {'role': 'carer'})), OrgHome.care);
+      expect(orgHomeFor(capabilitiesFrom(uid: 'u', ownerId: 'o', member: {'role': 'carer'})), OrgHome.admin);
       expect(
         orgHomeFor(capabilitiesFrom(uid: 'u', ownerId: 'o', member: {'role': 'staff', 'permissions': ['care']})),
         OrgHome.care,

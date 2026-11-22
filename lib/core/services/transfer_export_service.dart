@@ -138,6 +138,11 @@ class TransferExportService {
                 field('Appetite and hydration', _s(a['appetiteHydration'])),
                 field('Behavior', _s(a['behavior'])),
                 field('Environment and safety', _s(a['environmentSafety'])),
+                field('Visible injury (reported)', _s(a['injury'])),
+                if (a['sex'] == 'Female') ...[
+                  field('Has a litter (reported)', _s(a['hasLitter'])),
+                  field('Suspected pregnancy (reporter, not vet-confirmed)', _s(a['suspectedPregnancy'])),
+                ],
               ]);
             }(),
             pw.SizedBox(height: 6),

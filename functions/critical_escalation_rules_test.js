@@ -31,3 +31,12 @@ test('alerts the owner, or every organization covering the area', () => {
   assert.deepEqual(r.escalationOrgIds({organizationId: '', areaOrgIds: ['b', 'c']}), ['b', 'c']);
   assert.deepEqual(r.escalationOrgIds({}), []);
 });
+
+test('a reporter-led critical report is not escalated while in review', () => {
+  const {escalationDue} = require('./critical_escalation_rules');
+  const base = {urgency: 'Critical', status: 'pending'};
+  const args = {createdAtMs: 1, nowMs: 1 + 60 * 60 * 1000, thresholdMinutes: 30};
+  assert.ok(escalationDue(base, args));
+  assert.ok(!escalationDue({...base, orgInvolvement: 'independent_report'}, args));
+  assert.ok(escalationDue({...base, orgInvolvement: 'org_assist'}, args));
+});

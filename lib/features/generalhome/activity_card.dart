@@ -137,7 +137,7 @@ class ActivityCard extends StatelessWidget{
           // no admin-only actions for the reporter to begin with.
           Navigator.push(context,
             MaterialPageRoute(
-              builder: (_) => item.isRejected && item.communityAdoptionEligible
+              builder: (_) => item.communityAdoptionEligible
                   ? CommunityAdoptionTrackPage(caseId: item.docId)
                   : TrackCasePage(caseId: item.docId),
             ),
@@ -318,7 +318,7 @@ class ActivityCard extends StatelessWidget{
                                 item.type == ActivityType.adoption ||
                                 item.type == ActivityType.lostFoundPet)
                               Text(
-                                item.isRejected && item.communityAdoptionEligible
+                                item.communityAdoptionEligible
                                     ? 'View Community Adoption →'
                                     : 'View details →',
                                 style: GoogleFonts.zain(

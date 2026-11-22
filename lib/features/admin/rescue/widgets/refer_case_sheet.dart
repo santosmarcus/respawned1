@@ -1,20 +1,18 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
-import 'package:respawnd1/core/constants/feature_flags.dart';
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/core/models/rescue/referral_type.dart';
 import 'package:respawnd1/core/models/rescue/rescue_case.dart';
 import 'package:respawnd1/core/repos/organization_directory_repository.dart';
 import 'package:respawnd1/core/repos/rescue_case_repository.dart';
-import 'package:respawnd1/features/admin/rescue/widgets/refer_to_lgu_sheet.dart';
-import 'package:respawnd1/features/admin/rescue/widgets/refer_to_organization_sheet.dart';
-import 'package:respawnd1/features/admin/rescue/widgets/refer_to_volunteer_sheet.dart';
+import 'package:respawnd1/features/admin/rescue/widgets/share_referral_sheet.dart';
 
-/// Refer Case selection modal — the entry point for the Refer action. Picks
-/// a referral type, then opens the matching type-specific modal. Returns
-/// true if a referral was actually sent (false for volunteer, which is a
-/// UI-only stub for now).
+/// Refer Case selection modal — the entry point for the Refer action.
+///
+/// Refer: a shared link anyone outside the app can open and take
+/// (showShareReferralSheet). Rescue Volunteer is listed but not available
+/// yet. Returns true if a referral was actually created.
 Future<bool> showReferCaseSheet(
   BuildContext context, {
   required RescueCase rescueCase,
@@ -49,22 +47,17 @@ Future<bool> showReferCaseSheet(
           Text('Refer Case',
               style: GoogleFonts.tiltWarp(fontSize: 18, color: AppColors.textPrimary)),
           const SizedBox(height: 12),
-          if (FeatureFlags.multiOrganizationEnabled)
-            _TypeOption(
-              icon: Icons.apartment_outlined,
-              label: ReferralType.anotherOrganization.label,
-              onTap: () => Navigator.pop(context, ReferralType.anotherOrganization),
-            ),
+          _TypeOption(
+            icon: Icons.ios_share,
+            label: 'Refer',
+            subtitle: 'Share a link; whoever takes it fills in their contact',
+            onTap: () => Navigator.pop(context, ReferralType.localGovernmentUnit),
+          ),
           _TypeOption(
             icon: Icons.volunteer_activism_outlined,
             label: ReferralType.rescueVolunteer.label,
-            comingSoon: true,
-            onTap: () => Navigator.pop(context, ReferralType.rescueVolunteer),
-          ),
-          _TypeOption(
-            icon: Icons.account_balance_outlined,
-            label: ReferralType.localGovernmentUnit.label,
-            onTap: () => Navigator.pop(context, ReferralType.localGovernmentUnit),
+            subtitle: 'Not available yet',
+            enabled: false,
           ),
         ],
       ),
@@ -72,52 +65,36 @@ Future<bool> showReferCaseSheet(
   );
 
   if (type == null || !context.mounted) return false;
-
-  switch (type) {
-    case ReferralType.anotherOrganization:
-      return showReferToOrganizationSheet(
-        context,
-        rescueCase: rescueCase,
-        directory: organizationDirectory,
-        caseRepository: caseRepository,
-        actorUid: actorUid,
-        actorName: actorName,
-      );
-    case ReferralType.rescueVolunteer:
-      await showReferToVolunteerSheet(context);
-      return false;
-    case ReferralType.localGovernmentUnit:
-      return showReferToLguSheet(
-        context,
-        rescueCase: rescueCase,
-        caseRepository: caseRepository,
-        actorUid: actorUid,
-        actorName: actorName,
-      );
-  }
+  return showShareReferralSheet(
+    context,
+    rescueCase: rescueCase,
+    caseRepository: caseRepository,
+    actorUid: actorUid,
+    actorName: actorName,
+  );
 }
 
 class _TypeOption extends StatelessWidget {
   final IconData icon;
   final String label;
-  final VoidCallback onTap;
-  /// Shown muted with a "Coming soon" note; still tappable so the sheet
-  /// behind it can explain.
-  final bool comingSoon;
-  const _TypeOption({required this.icon, required this.label, required this.onTap, this.comingSoon = false});
+  final String? subtitle;
+  final bool enabled;
+  final VoidCallback? onTap;
+  const _TypeOption({required this.icon, required this.label, this.subtitle, this.enabled = true, this.onTap});
 
   @override
   Widget build(BuildContext context) {
-    final color = comingSoon ? AppColors.textSecondary : AppColors.textPrimary;
+    final color = enabled ? AppColors.textPrimary : AppColors.textSecondary.withValues(alpha: 0.6);
     return ListTile(
       contentPadding: EdgeInsets.zero,
+      enabled: enabled,
       leading: Icon(icon, color: color),
-      title: Text(label, style: GoogleFonts.zain(fontSize: 15, color: color)),
-      subtitle: comingSoon
-          ? Text('Coming soon', style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary))
-          : null,
-      trailing: const Icon(Icons.chevron_right, color: AppColors.textSecondary),
-      onTap: onTap,
+      title: Text(label, style: GoogleFonts.zain(fontSize: 15, fontWeight: FontWeight.w700, color: color)),
+      subtitle: subtitle == null
+          ? null
+          : Text(subtitle!, style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary.withValues(alpha: enabled ? 1 : 0.6))),
+      trailing: enabled ? const Icon(Icons.chevron_right, color: AppColors.textSecondary) : null,
+      onTap: enabled ? onTap : null,
     );
   }
 }

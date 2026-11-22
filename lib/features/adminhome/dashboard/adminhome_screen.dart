@@ -1,13 +1,21 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:respawnd1/app_theme.dart';
+import 'package:respawnd1/core/widgets/welcome_greeting.dart';
+import 'package:respawnd1/core/repos/organization_repository.dart';
+import 'package:respawnd1/core/widgets/app_dialogs.dart';
+import 'package:respawnd1/core/widgets/app_messages.dart';
+import 'package:respawnd1/features/admin/rescue/state/rescue_reports_providers.dart';
 import 'package:respawnd1/features/admin/widgets/admin_drawer.dart';
 import 'package:respawnd1/features/admin/widgets/admin_tab_bar.dart';
 import 'package:respawnd1/features/adminhome/dashboard/analytics_view.dart';
-import 'package:respawnd1/features/adminhome/dashboard/dashboard_alerts.dart';
+import 'package:respawnd1/features/adminhome/dashboard/admin_notifications.dart';
+import 'package:respawnd1/features/adminhome/dashboard/dashboard_cache.dart';
 import 'package:respawnd1/core/models/dashboard/dashboard_model.dart';
 import 'package:respawnd1/features/adminhome/dashboard/dashboard_ui.dart';
+import 'package:respawnd1/features/adminhome/dashboard/independent_area_card.dart';
 import 'package:respawnd1/features/adminhome/dashboard/today_view.dart';
 
 class AdminHomeScreen extends StatefulWidget {
@@ -27,22 +35,10 @@ enum _DashTab {
 
 class _AdminHomeScreenState extends State<AdminHomeScreen> {
   _DashTab _tab = _DashTab.today;
-  final _priorityKey = GlobalKey();
 
-  /// Bell: switch to Today and scroll to Priority actions.
-  void _openPriorityActions() {
-    setState(() => _tab = _DashTab.today);
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      final ctx = _priorityKey.currentContext;
-      if (ctx != null) {
-        Scrollable.ensureVisible(
-          ctx,
-          duration: const Duration(milliseconds: 350),
-          curve: Curves.easeOut,
-          alignment: 0.02,
-        );
-      }
-    });
+  /// Bell: notices sent to this account and the recent activity.
+  void _openNotifications() {
+    Navigator.push(context, MaterialPageRoute(builder: (_) => const AdminNotificationsPage()));
   }
 
   @override
@@ -64,17 +60,16 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
         actions: [
           Consumer(
             builder: (context, ref, _) {
-              final alerts = ref.watch(dashboardAlertsProvider);
-              final open = alerts.count(DashSeverity.critical) + alerts.count(DashSeverity.warning);
+              final count = ref.watch(adminBellCountProvider);
               return IconButton(
-                tooltip: open == 0 ? 'Priority actions' : '$open priority actions',
+                tooltip: count == 0 ? 'Notifications' : '$count new notifications',
                 icon: Badge(
-                  isLabelVisible: open > 0,
+                  isLabelVisible: count > 0,
                   backgroundColor: DashSeverity.critical.color,
-                  label: Text(open > 99 ? '99+' : '$open'),
+                  label: Text(count > 99 ? '99+' : '$count'),
                   child: const Icon(Icons.notifications_outlined, color: AppColors.background),
                 ),
-                onPressed: _openPriorityActions,
+                onPressed: _openNotifications,
               );
             },
           ),
@@ -93,8 +88,9 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
                   alignment: Alignment.centerLeft,
                   child: Padding(
                     padding: const EdgeInsets.fromLTRB(48, 0, 16, 14),
-                    child:
-                        Text('Welcome, Admin', style: GoogleFonts.tiltWarp(fontSize: 22, color: AppColors.background)),
+                    child: WelcomeGreeting(
+                      style: GoogleFonts.tiltWarp(fontSize: 22, color: AppColors.background),
+                    ),
                   ),
                 ),
               ),
@@ -107,7 +103,11 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
           ),
         ),
       ),
-      body: SingleChildScrollView(
+      // Keeps the Today data loaded while module screens cover the
+      // dashboard and while the Analytics tab is open.
+      body: DashboardKeepAlive(
+        child: SingleChildScrollView(
+        key: PageStorageKey('admin-dashboard-${_tab.name}'),
         padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
         child: Center(
           // Mobile-first single column; capped width on tablets/web.
@@ -133,24 +133,68 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
                     child: Align(alignment: Alignment.centerLeft, child: AnalyticsPeriodButton()),
                   ),
                 const SizedBox(height: 14),
-                if (_tab == _DashTab.today) TodayView(priorityKey: _priorityKey) else const AnalyticsView(),
+                // Independent rescuers: their area map, availability and
+                // capacity first (nothing for shelters).
+                if (_tab == _DashTab.today) const IndependentAreaCard(),
+                if (_tab == _DashTab.today) const TodayView() else const AnalyticsView(),
               ],
             ),
           ),
         ),
       ),
+      ),
     );
   }
 }
 
-/// Today's figures are live (current state), not a reporting period — so
-/// this is a label, not a button.
-class _LivePill extends StatelessWidget {
+/// Whether the organization is taking new rescue reports
+/// (`organizations/{id}.acceptingCases`, default true), plus its id.
+final _orgAcceptingProvider = StreamProvider.autoDispose<({String? orgId, bool accepting})>((ref) async* {
+  final orgId = await ref.watch(currentOrganizationIdProvider.future);
+  if (orgId == null) {
+    yield (orgId: null, accepting: true);
+    return;
+  }
+  yield* FirebaseFirestore.instance
+      .collection('organizations')
+      .doc(orgId)
+      .snapshots()
+      .map((s) => (orgId: orgId, accepting: s.data()?['acceptingCases'] as bool? ?? true));
+});
+
+/// "Live" while the organization takes new rescue reports, "Paused" when an
+/// admin turned that off. Admins tap it to switch; others just see it.
+class _LivePill extends ConsumerWidget {
   const _LivePill();
 
+  Future<void> _toggle(BuildContext context, String orgId, bool accepting) async {
+    final turnOff = accepting;
+    final ok = await showConfirmActionDialog(
+      context,
+      title: turnOff ? 'Pause new rescue reports?' : 'Go live again?',
+      message: turnOff
+          ? 'New reports in your service areas will go to other organizations until you turn this back on. '
+              'Cases you already have are not affected.'
+          : 'New rescue reports in your service areas will come to your organization again.',
+      confirmLabel: turnOff ? 'Pause' : 'Go live',
+    );
+    if (!ok) return;
+    try {
+      await OrganizationRepository().setAcceptingCases(organizationId: orgId, accepting: !accepting);
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(appSnackBar('Could not update: $e', kind: AppMessageKind.error));
+      }
+    }
+  }
+
   @override
-  Widget build(BuildContext context) {
-    return Container(
+  Widget build(BuildContext context, WidgetRef ref) {
+    final state = ref.watch(_orgAcceptingProvider).value;
+    final accepting = state?.accepting ?? true;
+    final isAdmin = ref.watch(isOrgAdminProvider).value ?? false;
+    final orgId = state?.orgId;
+    final pill = Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       decoration: BoxDecoration(
         color: const Color(0xFFFFFDF8),
@@ -160,10 +204,23 @@ class _LivePill extends StatelessWidget {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(Icons.circle, size: 9, color: DashSeverity.ok.color),
+          Icon(Icons.circle, size: 9, color: accepting ? DashSeverity.ok.color : DashSeverity.warning.color),
           const SizedBox(width: 6),
-          Text('Live', style: dashBody(size: 14, weight: FontWeight.w700)),
+          Text(accepting ? 'Live' : 'Paused', style: dashBody(size: 14, weight: FontWeight.w700)),
+          if (isAdmin && orgId != null) ...[
+            const SizedBox(width: 4),
+            const Icon(Icons.expand_more, size: 16, color: AppColors.textSecondary),
+          ],
         ],
+      ),
+    );
+    if (!isAdmin || orgId == null) return pill;
+    return Tooltip(
+      message: accepting ? 'Taking new rescue reports. Tap to pause.' : 'New reports paused. Tap to go live.',
+      child: InkWell(
+        borderRadius: BorderRadius.circular(20),
+        onTap: () => _toggle(context, orgId, accepting),
+        child: pill,
       ),
     );
   }

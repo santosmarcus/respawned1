@@ -13,6 +13,7 @@ import 'donation_admin_service.dart';
 import 'donation_admin_sheets.dart';
 import 'package:respawnd1/features/admin/widgets/donation_admin.dart';
 import 'package:respawnd1/core/widgets/app_dialogs.dart';
+import 'package:respawnd1/features/admin/facebook/facebook_record_post_page.dart';
 
 class DonationAdminInfoPage extends ConsumerWidget {
   final String campaignId;
@@ -26,7 +27,7 @@ class DonationAdminInfoPage extends ConsumerWidget {
       body: Column(
         children: [
           const DonationAdminHeader(
-            title: 'Donation/Sponsorship',
+            title: 'Donations',
             helpText: 'Total Received counts only verified money: PayMongo payments confirmed by the server and offline '
                 'payments recorded by a financial administrator. Available Balance = received + transfers in − '
                 'allocations − transfers out.',
@@ -85,12 +86,14 @@ class _InfoBodyState extends ConsumerState<_InfoBody> {
     return ListView(
       padding: const EdgeInsets.fromLTRB(20, 20, 20, 32),
       children: [
+        CampaignCover(url: c.imageUrl, background: c.backgroundColor),
+        const SizedBox(height: 14),
         Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Expanded(child: Text(c.title, style: GoogleFonts.tiltWarp(fontSize: 19, color: AppColors.textPrimary))),
             const SizedBox(width: 8),
-            StatusChip(c.status),
+            CampaignStatusChip(c.status),
           ],
         ),
         const SizedBox(height: 4),
@@ -103,6 +106,20 @@ class _InfoBodyState extends ConsumerState<_InfoBody> {
           ].join(' · '),
           style: GoogleFonts.zain(fontSize: 13, color: AppColors.textSecondary),
         ),
+        // Sponsorship funding: available balance against the monthly amount
+        // (functions/sponsorship_funding_rules.js). Reopens on its own when
+        // spending brings it back under.
+        if (isSponsorship && !c.isEnded)
+          Padding(
+            padding: const EdgeInsets.only(top: 6),
+            child: _tag(
+              c.isFullyFunded
+                  ? 'Fully funded · ${formatPesoExact(c.availableBalance)} available'
+                  : 'Open for sponsorship · ${formatPesoExact(c.availableBalance)} of '
+                      '${c.monthlyAmount != null ? formatPesoExact(c.monthlyAmount!) : '—'} a month',
+              c.isFullyFunded ? AppColors.lavenderrspwn : AppColors.greenrspwn,
+            ),
+          ),
         if (c.purposeTags.isNotEmpty || c.restricted)
           Padding(
             padding: const EdgeInsets.only(top: 6),
@@ -363,6 +380,8 @@ class _InfoBodyState extends ConsumerState<_InfoBody> {
             : () => showAdminSheet(context, ResolveDeadlineSheet(campaign: c, mode: 'relaunch'))),
       if (!c.isDraft && !c.isArchived)
         _ActionChip('Post update', Icons.campaign_outlined, _busy ? null : () => showAdminSheet(context, PostUpdateSheet(campaign: c))),
+      if (!c.isDraft && !c.isArchived)
+        _ActionChip('Share to Facebook', Icons.facebook, _busy ? null : () => openCampaignFacebookShare(context, c)),
     ];
 
     return [

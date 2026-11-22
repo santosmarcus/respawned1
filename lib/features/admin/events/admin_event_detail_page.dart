@@ -8,6 +8,7 @@ import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/core/models/volunteer/volunteer_event.dart';
 import 'package:respawnd1/core/widgets/event_cover_image.dart';
 import 'package:respawnd1/features/admin/events/admin_events_page.dart';
+import 'package:respawnd1/features/admin/facebook/facebook_record_post_page.dart';
 import 'package:respawnd1/features/admin/events/event_form_page.dart';
 import 'package:respawnd1/features/admin/events/state/event_providers.dart';
 import 'package:respawnd1/core/widgets/app_messages.dart';
@@ -63,6 +64,12 @@ class AdminEventDetailPage extends ConsumerWidget {
         iconTheme: const IconThemeData(color: AppColors.background),
         title: Text('Event', style: GoogleFonts.tiltWarp(fontSize: 18, color: AppColors.background)),
         actions: [
+          if (event != null && !event.isCancelled)
+            IconButton(
+              tooltip: 'Share to Facebook',
+              icon: const Icon(Icons.facebook, color: AppColors.background),
+              onPressed: () => openEventFacebookShare(context, event),
+            ),
           if (event != null && !event.isCancelled && !event.isPast)
             PopupMenuButton<String>(
               icon: const Icon(Icons.more_vert, color: AppColors.background),
@@ -118,8 +125,8 @@ class AdminEventDetailPage extends ConsumerWidget {
               _info(
                 Icons.people_outline,
                 event.capacity == null
-                    ? '${event.goingCount} signed up · no limit'
-                    : '${event.goingCount} of ${event.capacity} spots taken',
+                    ? '${event.goingCount} event volunteers · no limit'
+                    : '${event.goingCount} of ${event.capacity} volunteer spots taken',
               ),
               const SizedBox(height: 12),
               Text(event.description,
@@ -127,7 +134,7 @@ class AdminEventDetailPage extends ConsumerWidget {
               const SizedBox(height: 20),
               const Divider(height: 1),
               const SizedBox(height: 16),
-              Text('Sign-ups', style: GoogleFonts.tiltWarp(fontSize: 16, color: AppColors.textPrimary)),
+              Text('Event volunteers', style: GoogleFonts.tiltWarp(fontSize: 16, color: AppColors.textPrimary)),
               const SizedBox(height: 8),
               _RegistrationsList(event: event),
             ],

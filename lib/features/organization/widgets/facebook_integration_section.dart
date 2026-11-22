@@ -1,13 +1,17 @@
 import 'package:flutter/material.dart';
-//import 'package:flutter_facebook_auth/flutter_facebook_auth.dart'; // disabled: dependency commented out in pubspec.yaml
+import 'package:flutter_facebook_auth/flutter_facebook_auth.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import 'package:respawnd1/app_theme.dart';
+import 'package:respawnd1/core/constants/facebook_config.dart';
+import 'package:respawnd1/core/models/organization/adoption_promotion_schedule.dart';
 import 'package:respawnd1/core/models/organization/facebook_integration.dart';
 import 'package:respawnd1/core/repos/facebook_integration_repository.dart';
+import 'package:respawnd1/features/admin/animals/promote_adoptions_page.dart';
 import 'package:respawnd1/features/admin/rescue/state/rescue_reports_providers.dart';
+import 'package:respawnd1/features/organization/widgets/adoption_promotion_schedule_sheet.dart';
 import 'package:respawnd1/core/widgets/app_messages.dart';
 import 'package:respawnd1/core/widgets/app_dialogs.dart';
 
@@ -43,7 +47,6 @@ class _FacebookIntegrationSectionState extends ConsumerState<FacebookIntegration
     );
   }
 
-/*
   String? _friendlyLoginError(LoginStatus status) => switch (status) {
         LoginStatus.cancelled => null, // user backed out — not an error to report
         LoginStatus.failed => 'Facebook login failed. Please try again.',
@@ -51,18 +54,14 @@ class _FacebookIntegrationSectionState extends ConsumerState<FacebookIntegration
         LoginStatus.success => null,
       };
 
-*/
-
   Future<void> _connect() async {
     setState(() => _busy = true);
     try {
-      // Facebook login is disabled while flutter_facebook_auth is commented out
-      // in pubspec.yaml. Restore the dependency + the block below to re-enable.
-      _showMessage('Facebook integration is temporarily disabled.', isError: true);
-      return;
-      /*
+      // Classic login (tracking enabled): Limited Login on iOS returns an
+      // ID token that can't list or post to Pages.
       final result = await FacebookAuth.instance.login(
-        permissions: const ['pages_show_list', 'pages_read_engagement', 'pages_manage_posts'],
+        permissions: FacebookConfig.pagePermissions,
+        loginTracking: LoginTracking.enabled,
       );
       if (result.status != LoginStatus.success) {
         final message = _friendlyLoginError(result.status);
@@ -76,9 +75,6 @@ class _FacebookIntegrationSectionState extends ConsumerState<FacebookIntegration
         return;
       }
 
-      */
-      // ignore: dead_code
-      const tokenString = '';
       final connectResult = await ref.read(facebookIntegrationRepositoryProvider).connect(
             organizationId: widget.organizationId,
             userAccessToken: tokenString,
@@ -239,6 +235,42 @@ class _FacebookIntegrationSectionState extends ConsumerState<FacebookIntegration
       );
     }
     // connected
+    final canPublish =
+        ref.watch(currentOrganizationCapabilitiesProvider).asData?.value.canPublishToFacebook ?? false;
+    final schedule = ref.watch(organizationAdoptionPromotionProvider(widget.organizationId)).asData?.value ??
+        AdoptionPromotionSchedule.initial;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _connectedRow(integration),
+        const SizedBox(height: 12),
+        Text('Adoption posts',
+            style: GoogleFonts.zain(fontSize: 14, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
+        Text(schedule.summary, style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary)),
+        const SizedBox(height: 8),
+        Wrap(spacing: 8, runSpacing: 8, children: [
+          if (widget.canManage)
+            _actionButton(
+              schedule.isOff ? 'Set Post Schedule' : 'Edit Post Schedule',
+              () => showAdoptionPromotionScheduleSheet(
+                context,
+                organizationId: widget.organizationId,
+                current: schedule,
+              ),
+            ),
+          _actionButton(
+            canPublish ? 'Create Adoption Post' : 'View Post Schedule',
+            () => Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => PromoteAdoptionsPage(organizationId: widget.organizationId)),
+            ),
+          ),
+        ]),
+      ],
+    );
+  }
+
+  Widget _connectedRow(FacebookIntegration integration) {
     return _row(
       title: integration.pageName,
       subtitle: 'Connected',

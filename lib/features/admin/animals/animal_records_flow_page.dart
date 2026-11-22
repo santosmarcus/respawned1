@@ -11,6 +11,32 @@ import 'package:respawnd1/features/admin/animals/create_animal_record_page.dart'
 import 'package:respawnd1/features/admin/animals/state/animal_records_providers.dart';
 import 'package:respawnd1/features/admin/rescue/state/rescue_reports_providers.dart';
 
+/// Create Animal Record's prefill for one animal of a rescue case — used by
+/// the intake flow and by linking an intaked case from Animal Records.
+Map<String, dynamic> animalRecordPrefillFor(RescueCase c, Map<String, dynamic> animal) {
+  return {
+    'species': animal['species'] ?? c.animalType,
+    'breed': animal['breed'],
+    'sex': animal['sex'],
+    'size': animal['size'],
+    'colorMarkings': animal['colorMarkings'],
+    'reporterName': c.reporterName,
+    'vetClinicName': c.vetClinicName,
+    // Every photo from the case; staff remove any that don't fit.
+    'photoUrls': [...c.photoUrls],
+    'rescueDate': c.raw['createdAt'],
+    'scannedTagId': c.scannedTagId,
+    // A female dog's litter as reported (count, places, condition, linked
+    // puppy reports), kept on the animal record as litterAtIntake.
+    if (animal['litter'] is Map)
+      'litter': {
+        ...Map<String, dynamic>.from(animal['litter'] as Map),
+        if ((c.raw['litterReportCaseIds'] as List?)?.isNotEmpty ?? false)
+          'puppyReportCaseIds': List<String>.from(c.raw['litterReportCaseIds'] as List),
+      },
+  };
+}
+
 /// Drives one animal-record creation per entry in `case.animals[]` (or a
 /// single legacy entry for older single-animal cases), reusing
 /// CreateAnimalRecordPage unchanged — this is a thin controller, not a
@@ -55,22 +81,6 @@ class AnimalRecordsFlowPage extends ConsumerWidget {
     ];
   }
 
-  Map<String, dynamic> _prefillFor(RescueCase c, Map<String, dynamic> animal) {
-    return {
-      'species': animal['species'] ?? c.animalType,
-      'breed': animal['breed'],
-      'sex': animal['sex'],
-      'size': animal['size'],
-      'colorMarkings': animal['colorMarkings'],
-      'description': c.condition,
-      'reporterName': c.reporterName,
-      'vetClinicName': c.vetClinicName,
-      'photoUrl': c.photoUrls.isNotEmpty ? c.photoUrls.first : null,
-      'rescueDate': c.raw['createdAt'],
-      'scannedTagId': c.scannedTagId,
-      'rescuedBy': 'Loved by the Gapz',
-    };
-  }
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -101,7 +111,7 @@ class AnimalRecordsFlowPage extends ConsumerWidget {
         final stepCurrent = entries.indexWhere((e) => e.$1 == originalIndex) + 1;
         return CreateAnimalRecordPage(
           key: ValueKey('animal-record-$caseId-$originalIndex'),
-          prefillData: _prefillFor(c, animal),
+          prefillData: animalRecordPrefillFor(c, animal),
           linkedCaseId: caseId,
           sourceAnimalIndex: originalIndex,
           stepCurrent: stepCurrent,

@@ -23,16 +23,19 @@ test('normalize: known keys only, sorted, financeManage brings financeView', () 
   assert.throws(() => normalizePerms('rescue'));
 });
 
-test('presets match exactly, anything else is custom', () => {
-  assert.strictEqual(presetFor(PRESETS.treasurer), 'treasurer');
-  assert.strictEqual(presetFor([...PRESETS.animalCare]), 'animalCare');
-  assert.strictEqual(presetFor(['care', 'rescue']), 'custom');
+test('the default Staff set matches exactly, anything else is custom', () => {
+  assert.strictEqual(presetFor(PRESETS.staff), 'staff');
+  assert.strictEqual(presetFor([...PRESETS.staff, 'financeView']), 'custom');
+  assert.strictEqual(presetFor(['care']), 'custom');
   assert.strictEqual(presetFor([]), 'custom');
 });
 
-test('legacy members: carer is Animal care, staff is Full staff (+ Facebook when granted)', () => {
-  assert.deepStrictEqual(memberPermissions({role: 'carer'}), ['care']);
-  assert.deepStrictEqual(memberPermissions({role: 'staff'}), PERMISSIONS.filter((k) => PRESETS.fullStaff.includes(k)));
+test('legacy members: staff and former carers get the default Staff set (+ Facebook when granted)', () => {
+  const defaults = PERMISSIONS.filter((k) => PRESETS.staff.includes(k));
+  assert.deepStrictEqual(memberPermissions({role: 'carer'}), defaults);
+  assert.deepStrictEqual(memberPermissions({role: 'staff'}), defaults);
+  assert.ok(!memberPermissions({role: 'staff'}).includes('financeView'));
+  assert.ok(!memberPermissions({role: 'staff'}).includes('campaigns'));
   assert.ok(memberPermissions({role: 'staff', facebookPublisher: true}).includes('facebookPublish'));
   assert.ok(!memberPermissions({role: 'staff'}).includes('financeManage'));
   // An explicit list wins over the role, ignores unknown keys, adds financeView.
@@ -44,19 +47,20 @@ test('owner and Admins have everything; Staff what they were given', () => {
   assert.strictEqual(access('owner', null).isAdmin, true);
   assert.deepStrictEqual(access('owner', null).permissions, [...PERMISSIONS]);
   assert.strictEqual(access('a', {role: 'admin'}).has('financeManage'), true);
-  const treasurer = access('t', {role: 'staff', permissions: PRESETS.treasurer});
+  const treasurer = access('t', {role: 'staff', permissions: ['campaigns', 'financeView', 'financeManage', 'insights']});
   assert.strictEqual(treasurer.isAdmin, false);
-  assert.strictEqual(treasurer.preset, 'treasurer');
+  assert.strictEqual(treasurer.preset, 'custom');
   assert.strictEqual(treasurer.has('financeManage'), true);
   assert.strictEqual(treasurer.has('rescue'), false);
-  assert.strictEqual(access('c', {role: 'carer'}).preset, 'animalCare');
+  assert.strictEqual(access('c', {role: 'carer'}).preset, 'staff');
+  assert.strictEqual(access('c', {role: 'carer'}).has('rescue'), true);
 });
 
-test('no members doc but linked: Full staff', () => {
+test('no members doc but linked: the default Staff set', () => {
   const a = access('linked', null);
   assert.strictEqual(a.active, true);
   assert.strictEqual(a.isAdmin, false);
-  assert.strictEqual(a.preset, 'fullStaff');
+  assert.strictEqual(a.preset, 'staff');
   assert.strictEqual(a.has('financeManage'), false);
 });
 
@@ -72,7 +76,7 @@ test('inactive members, other organizations and unapproved organizations get not
 test('notification audience: owner, Admins, and Staff holding the permission', () => {
   const members = new Map([
     ['adm', {role: 'admin'}],
-    ['treasurer', {role: 'staff', permissions: PRESETS.treasurer}],
+    ['treasurer', {role: 'staff', permissions: ['campaigns', 'financeView', 'financeManage', 'insights']}],
     ['carer', {role: 'carer'}],
     ['legacy', {role: 'staff'}],
     ['gone', {role: 'admin', status: 'removed'}],
@@ -81,20 +85,23 @@ test('notification audience: owner, Admins, and Staff holding the permission', (
   assert.deepStrictEqual(sort(selectAudience({ownerId: 'owner', members, anyOf: ['financeManage']})),
     ['adm', 'owner', 'treasurer']);
   assert.deepStrictEqual(sort(selectAudience({ownerId: 'owner', members, anyOf: ['rescue'], linkedUids: ['noDoc']})),
-    ['adm', 'legacy', 'noDoc', 'owner']);
+    ['adm', 'carer', 'legacy', 'noDoc', 'owner']);
   assert.deepStrictEqual(sort(selectAudience({ownerId: 'owner', members, adminsOnly: true})), ['adm', 'owner']);
   assert.deepStrictEqual(sort(selectAudience({ownerId: null, members})), ['adm', 'carer', 'legacy', 'treasurer']);
 });
 
 const {planAccessChange} = require('./org_access');
 
-test('access change: Staff with a preset, normalized and named', () => {
+test('access change: Staff with money ticked by hand, normalized', () => {
   const members = new Map([['owner', {role: 'admin'}], ['s', {role: 'staff'}]]);
   const plan = planAccessChange({ownerId: 'owner', memberUid: 's', member: {role: 'staff'}, members,
     role: 'staff', permissions: ['financeManage', 'insights', 'campaigns']});
-  assert.deepStrictEqual(plan.after, {role: 'staff', preset: 'treasurer',
+  assert.deepStrictEqual(plan.after, {role: 'staff', preset: 'custom',
     permissions: ['campaigns', 'financeView', 'financeManage', 'insights']});
-  assert.strictEqual(plan.before.preset, 'fullStaff');
+  assert.strictEqual(plan.before.preset, 'staff');
+  const back = planAccessChange({ownerId: 'owner', memberUid: 's', member: {role: 'staff'}, members,
+    role: 'staff', permissions: [...PRESETS.staff]});
+  assert.strictEqual(back.after.preset, 'staff');
 });
 
 test('access change: the owner stays Admin, and one Admin must remain', () => {
@@ -118,5 +125,5 @@ test('access change: rejects unknown roles, keys and missing members', () => {
     role: 'staff', permissions: ['god']}).error, /Unknown permission/);
   const toAdmin = planAccessChange({ownerId: 'o', memberUid: 'x', member: {role: 'carer'}, members, role: 'admin'});
   assert.deepStrictEqual(toAdmin.after, {role: 'admin', preset: null, permissions: []});
-  assert.strictEqual(toAdmin.before.preset, 'animalCare');
+  assert.strictEqual(toAdmin.before.preset, 'staff');
 });

@@ -8,6 +8,7 @@ import 'package:respawnd1/features/donation/models.dart';
 import 'package:respawnd1/core/models/donation/donation_model.dart';
 import 'donation_admin_providers.dart';
 import 'donation_admin_service.dart';
+import 'package:respawnd1/features/admin/widgets/admin_search_bar.dart';
 import 'package:respawnd1/features/admin/widgets/donation_admin.dart';
 import 'package:respawnd1/core/services/donation_acknowledgment_service.dart';
 import 'package:respawnd1/core/widgets/app_dialogs.dart';
@@ -23,6 +24,13 @@ class DonationRecordsPage extends ConsumerStatefulWidget {
 class _DonationRecordsPageState extends ConsumerState<DonationRecordsPage> {
   String _query = '';
   int _tab = 0;
+  final _searchController = TextEditingController();
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -40,9 +48,11 @@ class _DonationRecordsPageState extends ConsumerState<DonationRecordsPage> {
                 'or a financial administrator records an offline payment. In-kind pledges stay "Pending" until you '
                 'confirm the items were received.',
           ),
-          Padding(
+          AdminSearchBar(
+            controller: _searchController,
+            hintText: 'Search donor, campaign or reference…',
+            onChanged: (v) => setState(() => _query = v.trim().toLowerCase()),
             padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
-            child: _SearchField(onChanged: (v) => setState(() => _query = v.trim().toLowerCase())),
           ),
           _Tabs(labels: tabs, selected: _tab, onSelect: (i) => setState(() => _tab = i)),
           Expanded(child: tabs[_tab] == 'Payments' ? const _PaymentAttemptsList() : _recordsList()),
@@ -79,28 +89,6 @@ class _DonationRecordsPageState extends ConsumerState<DonationRecordsPage> {
           children: [for (final d in items) DonationRecordCard(record: d)],
         );
       },
-    );
-  }
-}
-
-class _SearchField extends StatelessWidget {
-  final ValueChanged<String> onChanged;
-  const _SearchField({required this.onChanged});
-
-  @override
-  Widget build(BuildContext context) {
-    return TextField(
-      onChanged: onChanged,
-      style: GoogleFonts.zain(fontSize: 15, color: AppColors.textPrimary),
-      decoration: InputDecoration(
-        hintText: 'Search',
-        hintStyle: GoogleFonts.zain(fontSize: 15, color: AppColors.textSecondary),
-        prefixIcon: const Icon(Icons.search, color: AppColors.textPrimary),
-        filled: true,
-        fillColor: const Color(0xFFFFF1C7),
-        contentPadding: const EdgeInsets.symmetric(vertical: 10),
-        border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide.none),
-      ),
     );
   }
 }
@@ -188,15 +176,16 @@ class DonationRecordCard extends StatelessWidget {
                             overflow: TextOverflow.ellipsis,
                             style: GoogleFonts.zain(fontSize: 16, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
                       ),
-                      if (r.isManual) ...[const SizedBox(width: 6), const _Badge('OFFLINE', AppColors.lavenderrspwn)],
-                      if (r.isReversed) ...[const SizedBox(width: 6), const _Badge('REFUNDED', Colors.redAccent)],
-                      if (r.type == 'sponsorship') ...[const SizedBox(width: 6), const _Badge('SPONSOR', AppColors.pinkrspwn)],
+                      if (r.isManual) ...[const SizedBox(width: 6), const DonationPill('Offline', AppColors.lavenderrspwn)],
+                      if (r.isReversed) ...[const SizedBox(width: 6), const DonationPill('Refunded', AppColors.error)],
+                      if (r.type == 'sponsorship') ...[const SizedBox(width: 6), const DonationPill('Sponsor', AppColors.pinkrspwn)],
                       if (r.isInKind) ...[
                         const SizedBox(width: 6),
-                        _Badge(
-                          r.isCompletedInKind ? 'RECEIVED' : (r.status == 'cancelled' ? 'CANCELLED' : 'PENDING'),
-                          r.isCompletedInKind ? AppColors.greenrspwn : AppColors.yellowrspwn,
-                        ),
+                        r.isCompletedInKind
+                            ? const DonationPill('Received', AppColors.success)
+                            : r.status == 'cancelled'
+                                ? const DonationPill('Cancelled', Color(0xFF9E9E9E))
+                                : const DonationPill('Pending', AppColors.yellowrspwn),
                       ],
                     ],
                   ),
@@ -212,23 +201,6 @@ class DonationRecordCard extends StatelessWidget {
       ),
     );
   }
-}
-
-class _Badge extends StatelessWidget {
-  final String text;
-  final Color color;
-  const _Badge(this.text, this.color);
-
-  @override
-  Widget build(BuildContext context) => Container(
-    padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
-    decoration: BoxDecoration(
-      color: color.withValues(alpha: 0.25),
-      border: Border.all(color: color, width: 0.6),
-      borderRadius: BorderRadius.circular(4),
-    ),
-    child: Text(text, style: GoogleFonts.zain(fontSize: 10, fontWeight: FontWeight.w800, color: AppColors.textPrimary)),
-  );
 }
 
 /// Record details + in-kind actions (confirm received / cancel / follow up).

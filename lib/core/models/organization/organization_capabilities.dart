@@ -23,13 +23,19 @@ class OrganizationCapabilities {
   /// The Staff member's preset, or null for Admins.
   final OrgPreset? preset;
 
+  /// A shelter, or an independent rescuer (fewer modules, capacity limits).
+  final OrgKind kind;
+
   const OrganizationCapabilities._({
     required this.isActive,
     required this.role,
     required this.isAdmin,
     required this.permissions,
     required this.preset,
+    this.kind = OrgKind.shelter,
   });
+
+  bool get isIndependent => kind == OrgKind.independent;
 
   /// No active organization relationship — a regular user, a pending
   /// invitee, or an inactive/removed member.
@@ -42,16 +48,25 @@ class OrganizationCapabilities {
   );
 
   /// [permissions] only matter for Staff ([ResolvedOrgRole.member]); the
-  /// owner and Admins get every permission.
-  factory OrganizationCapabilities.forAccess(ResolvedOrgRole role, {Set<OrgPermission> permissions = const {}}) {
+  /// owner and Admins get every permission. Either way nobody gets more than
+  /// [enabled], what the organization has at all (orgEnabledPermissions:
+  /// everything for a shelter, less for an independent rescuer).
+  factory OrganizationCapabilities.forAccess(
+    ResolvedOrgRole role, {
+    Set<OrgPermission> permissions = const {},
+    Set<OrgPermission>? enabled,
+    OrgKind kind = OrgKind.shelter,
+  }) {
     final admin = role != ResolvedOrgRole.member;
-    final perms = admin ? OrgPermission.values.toSet() : normalizePermissions(permissions);
+    final all = enabled ?? OrgPermission.values.toSet();
+    final perms = (admin ? OrgPermission.values.toSet() : normalizePermissions(permissions)).intersection(all);
     return OrganizationCapabilities._(
       isActive: true,
       role: role,
       isAdmin: admin,
       permissions: perms,
       preset: admin ? null : OrgPreset.matching(perms),
+      kind: kind,
     );
   }
 
@@ -78,8 +93,14 @@ class OrganizationCapabilities {
   bool get canManageFacebookConnection => isActive && isAdmin;
   bool get canPublishToFacebook => has(OrgPermission.facebookPublish);
 
-  /// Staff whose only permission is daily care: they get the care-tasks
-  /// screen instead of the admin shell.
+  /// The care-tasks screen (doses, care updates, rounds) from the admin
+  /// shell: any Staff with daily care, which the default set includes —
+  /// carers were merged into Staff.
+  bool get canOpenCareTasks => has(OrgPermission.care);
+
+  /// Staff whose only permission is daily care (an Admin can still untick
+  /// everything else): they get the care-tasks screen instead of the admin
+  /// shell.
   bool get isCareOnly =>
       isActive && !isAdmin && permissions.length == 1 && permissions.contains(OrgPermission.care);
 
@@ -89,22 +110,26 @@ class OrganizationCapabilities {
 
 /// Capabilities from an organization's owner id and the account's members
 /// doc (null when it has none). Pure, shared by the service and tests:
-/// owner → Admin; no members doc (a legacy linked account) → Full staff;
+/// owner → Admin; no members doc (a legacy linked account) → default Staff;
 /// inactive → none; role 'admin' → Admin; anything else → Staff with
-/// [staffPermissionsFrom].
+/// [staffPermissionsFrom]. [org] (the organization doc) limits everyone to
+/// what the organization has (an independent rescuer has fewer modules).
 OrganizationCapabilities capabilitiesFrom({
   required String uid,
   required String? ownerId,
   required Map<String, dynamic>? member,
+  Map<String, dynamic>? org,
 }) {
-  if (ownerId != null && ownerId == uid) return OrganizationCapabilities.forAccess(ResolvedOrgRole.owner);
-  if (member == null) {
-    return OrganizationCapabilities.forAccess(ResolvedOrgRole.member, permissions: staffPermissionsFrom(null));
-  }
+  final enabled = orgEnabledPermissions(org);
+  final kind = OrgKind.fromName(org?['kind'] as String?);
+  OrganizationCapabilities as(ResolvedOrgRole role, [Set<OrgPermission> perms = const {}]) =>
+      OrganizationCapabilities.forAccess(role, permissions: perms, enabled: enabled, kind: kind);
+  if (ownerId != null && ownerId == uid) return as(ResolvedOrgRole.owner);
+  if (member == null) return as(ResolvedOrgRole.member, staffPermissionsFrom(null));
   final status = member['status'] as String?;
   if (const {'inactive', 'removed', 'disabled'}.contains(status)) return OrganizationCapabilities.none;
-  if (member['role'] == 'admin') return OrganizationCapabilities.forAccess(ResolvedOrgRole.admin);
-  return OrganizationCapabilities.forAccess(ResolvedOrgRole.member, permissions: staffPermissionsFrom(member));
+  if (member['role'] == 'admin') return as(ResolvedOrgRole.admin);
+  return as(ResolvedOrgRole.member, staffPermissionsFrom(member));
 }
 
 /// Which home an approved organization's member opens (lib/main.dart).

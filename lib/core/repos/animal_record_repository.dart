@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:math' as math;
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -11,6 +10,7 @@ import 'package:respawnd1/core/models/rescue/medical_episode.dart';
 import 'package:respawnd1/core/models/rescue/vaccination_record.dart';
 import 'package:respawnd1/core/repos/animal_collar_tag_repository.dart';
 import 'package:respawnd1/core/repos/rescue_case_repository.dart';
+import 'package:respawnd1/core/utils/animal_tag_codes.dart';
 import 'package:respawnd1/core/utils/stream_combine.dart';
 
 /// Firestore access for the `animals` collection and its
@@ -464,8 +464,206 @@ class AnimalRecordRepository {
 
   // ---- Management tab ---------------------------------------------------
 
-  /// Assigns a QR tag id to the animal if it has none, and returns it
-  /// (P3-23). Ids are random, so they can't be guessed from the animal id.
+  // ---- Collar tags (QR and NFC) ------------------------------------------
+  //
+  // One registry for both types: animalTags/{code}, the document id being
+  // the code itself, so a code belongs to at most one animal (firestore.rules
+  // never lets a registration move to another animal). The animal keeps its
+  // current code per type in qrTagId / nfcTagId; the rules only accept a
+  // code there that is registered to that animal. See
+  // core/utils/animal_tag_codes.dart for the shared code and payload.
+
+  CollectionReference<Map<String, dynamic>> get _tags => _db.collection('animalTags');
+
+  /// A code that is not registered yet. Codes are random, so a collision is
+  /// very unlikely; [registerTag] re-checks inside its transaction.
+  Future<String> newUnusedTagCode() async {
+    for (var i = 0; i < 5; i++) {
+      final code = newAnimalTagCode();
+      if (!(await _tags.doc(code).get()).exists) return code;
+    }
+    throw StateError('Could not find an unused tag code. Try again.');
+  }
+
+  /// Registers [code] (or a new one) as the animal's [type] tag in one
+  /// transaction: the registry entry, the animal's field, and retiring the
+  /// code it replaces. Throws [DuplicateTagException] if the code already
+  /// belongs to an animal (another one, or this one under the other type).
+  /// Returns the registered code.
+  Future<String> registerTag({
+    required String animalId,
+    required AnimalTagType type,
+    String? code,
+    String? actorId,
+    String? actorName,
+    String? actorEmail,
+  }) async {
+    final animalRef = _animalDoc(animalId);
+    var chosen = (code ?? await newUnusedTagCode()).trim().toUpperCase();
+    animalTagPayload(chosen); // throws on an empty or malformed code
+    String? previous;
+    await _db.runTransaction((tx) async {
+      final animalSnap = await tx.get(animalRef);
+      if (!animalSnap.exists) throw StateError('This animal record no longer exists.');
+      final data = animalSnap.data()!;
+      previous = (data[type.animalField] as String?)?.trim();
+      final regSnap = await tx.get(_tags.doc(chosen));
+      if (regSnap.exists) {
+        final owner = regSnap.data()?['animalId'];
+        throw DuplicateTagException(code: chosen, sameAnimal: owner == animalId);
+      }
+      final prevSnap = (previous ?? '').isNotEmpty ? await tx.get(_tags.doc(previous)) : null;
+
+      tx.set(_tags.doc(chosen), {
+        'code': chosen,
+        'animalId': animalId,
+        'organizationId': data['organizationId'] ?? '',
+        'type': type.name,
+        'active': true,
+        'createdAt': FieldValue.serverTimestamp(),
+        'createdBy': ?actorId,
+      });
+      tx.update(animalRef, {type.animalField: chosen, 'updatedAt': FieldValue.serverTimestamp()});
+      if (prevSnap != null && prevSnap.exists && prevSnap.data()?['animalId'] == animalId) {
+        tx.update(prevSnap.reference, {'active': false, 'deactivatedAt': FieldValue.serverTimestamp()});
+      }
+    });
+    await _addManagementLog(
+      animalId: animalId,
+      eventType: '${type.name}${(previous ?? '').isEmpty ? 'Assigned' : 'Regenerated'}',
+      action: '${type.label} ${(previous ?? '').isEmpty ? 'registered' : 'replaced'}',
+      details: (previous ?? '').isEmpty ? null : 'Tags carrying the old code no longer open this animal.',
+      actorId: actorId,
+      actorName: actorName,
+      actorEmail: actorEmail,
+      previousValues: {if ((previous ?? '').isNotEmpty) type.animalField: previous},
+      newValues: {type.animalField: chosen},
+    );
+    _refreshCollarTag(animalId);
+    return chosen;
+  }
+
+  /// Removes the animal's [type] tag: retires its registry entry and clears
+  /// the field. If that leaves an adoptable animal without any registered
+  /// tag, it goes back to 'not_ready' in the same write (the collar tag is
+  /// required to be adoptable). Returns true when that happened.
+  Future<bool> removeTag({
+    required String animalId,
+    required AnimalTagType type,
+    String? actorId,
+    String? actorName,
+    String? actorEmail,
+  }) async {
+    final animalRef = _animalDoc(animalId);
+    String? previous;
+    var unlisted = false;
+    await _db.runTransaction((tx) async {
+      final animalSnap = await tx.get(animalRef);
+      if (!animalSnap.exists) return;
+      final data = animalSnap.data()!;
+      previous = (data[type.animalField] as String?)?.trim();
+      final prevSnap = (previous ?? '').isNotEmpty ? await tx.get(_tags.doc(previous)) : null;
+      final other = type == AnimalTagType.qr ? AnimalTagType.nfc : AnimalTagType.qr;
+      final otherCode = (data[other.animalField] as String?)?.trim() ?? '';
+      unlisted = data['adoptionStatus'] == 'adoptable' && otherCode.isEmpty;
+
+      if (prevSnap != null && prevSnap.exists && prevSnap.data()?['animalId'] == animalId) {
+        tx.update(prevSnap.reference, {'active': false, 'deactivatedAt': FieldValue.serverTimestamp()});
+      }
+      tx.update(animalRef, {
+        type.animalField: FieldValue.delete(),
+        if (unlisted) 'adoptionStatus': 'not_ready',
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+    });
+    await _addManagementLog(
+      animalId: animalId,
+      eventType: '${type.name}Removed',
+      action: '${type.label} removed',
+      details: [
+        'Tags carrying this code no longer open this animal.',
+        if (unlisted) 'No registered collar tag is left, so the animal is no longer listed as adoptable.',
+      ].join(' '),
+      actorId: actorId,
+      actorName: actorName,
+      actorEmail: actorEmail,
+      previousValues: {
+        if ((previous ?? '').isNotEmpty) type.animalField: previous,
+        if (unlisted) 'adoptionStatus': 'adoptable',
+      },
+      newValues: {if (unlisted) 'adoptionStatus': 'not_ready'},
+    );
+    _refreshCollarTag(animalId);
+    return unlisted;
+  }
+
+  /// QR codes assigned before the registry existed live only on the
+  /// animal's qrTagId. Registers such a code so it counts as a registered
+  /// tag (adoption eligibility, scanning). Does nothing when it is already
+  /// registered; never takes over a code registered to another animal.
+  Future<void> ensureLegacyQrRegistered(AnimalRecord animal) => _ensureLegacyQrRegistered(
+        animalId: animal.id,
+        qrTagId: animal.qrTagId,
+        organizationId: animal.raw['organizationId'] as String?,
+      );
+
+  Future<void> _ensureLegacyQrRegistered({
+    required String animalId,
+    required String? qrTagId,
+    required String? organizationId,
+  }) async {
+    final code = (qrTagId ?? '').trim();
+    if (code.isEmpty || animalTagFromScan('$kAnimalTagPrefix$code') == null) return;
+    final ref = _tags.doc(code);
+    await _db.runTransaction((tx) async {
+      final snap = await tx.get(ref);
+      if (snap.exists) return;
+      tx.set(ref, {
+        'code': code,
+        'animalId': animalId,
+        'organizationId': organizationId ?? '',
+        'type': AnimalTagType.qr.name,
+        'active': true,
+        'createdAt': FieldValue.serverTimestamp(),
+        'legacy': true,
+      });
+    });
+  }
+
+  /// The registry entry for [code] (animalId, active, type), or null.
+  Future<Map<String, dynamic>?> tagRegistration(String code) async =>
+      (await _tags.doc(code.trim().toUpperCase()).get()).data();
+
+  /// Whether [code] is registered to [animalId] and active.
+  Future<bool> isTagRegisteredTo(String animalId, String? code) async {
+    if ((code ?? '').isEmpty) return false;
+    final snap = await _tags.doc(code).get();
+    return snap.exists && snap.data()?['animalId'] == animalId && snap.data()?['active'] == true;
+  }
+
+  /// Whether the animal has at least one registered collar tag (QR or NFC).
+  /// Registers a legacy QR code first, so older animals aren't blocked.
+  /// [data] is the animal document (qrTagId, nfcTagId, organizationId).
+  Future<bool> hasRegisteredCollarTag(String animalId, Map<String, dynamic> data) async {
+    final qr = data['qrTagId'] as String?;
+    if ((qr ?? '').isNotEmpty) {
+      try {
+        await _ensureLegacyQrRegistered(
+          animalId: animalId,
+          qrTagId: qr,
+          organizationId: data['organizationId'] as String?,
+        );
+      } catch (_) {
+        // Fall through to the check below.
+      }
+      if (await isTagRegisteredTo(animalId, qr)) return true;
+    }
+    return isTagRegisteredTo(animalId, data['nfcTagId'] as String?);
+  }
+
+  // Kept for existing callers (Management tab): the QR case of the above.
+
+  /// Assigns a QR tag if the animal has none, and returns it.
   Future<String> ensureQrTag({
     required String animalId,
     required String? existing,
@@ -474,20 +672,48 @@ class AnimalRecordRepository {
     String? actorEmail,
   }) async {
     if (existing != null && existing.isNotEmpty) return existing;
-    final rng = math.Random.secure();
-    const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-    final tag = List.generate(8, (_) => alphabet[rng.nextInt(alphabet.length)]).join();
-    await _animalDoc(animalId).update({'qrTagId': tag, 'updatedAt': FieldValue.serverTimestamp()});
-    await _addManagementLog(
+    return registerTag(
       animalId: animalId,
-      eventType: 'qrAssigned',
-      action: 'QR tag assigned',
+      type: AnimalTagType.qr,
       actorId: actorId,
       actorName: actorName,
       actorEmail: actorEmail,
     );
-    return tag;
   }
+
+  /// Replaces the animal's QR tag with a new code and returns it. Tags
+  /// printed with the old code stop opening this animal.
+  Future<String> regenerateQrTag({
+    required String animalId,
+    required String? previous,
+    String? actorId,
+    String? actorName,
+    String? actorEmail,
+  }) =>
+      registerTag(
+        animalId: animalId,
+        type: AnimalTagType.qr,
+        actorId: actorId,
+        actorName: actorName,
+        actorEmail: actorEmail,
+      );
+
+  /// Removes the animal's QR tag. Returns true when the animal was taken
+  /// off adoption because no registered tag is left.
+  Future<bool> removeQrTag({
+    required String animalId,
+    required String? previous,
+    String? actorId,
+    String? actorName,
+    String? actorEmail,
+  }) =>
+      removeTag(
+        animalId: animalId,
+        type: AnimalTagType.qr,
+        actorId: actorId,
+        actorName: actorName,
+        actorEmail: actorEmail,
+      );
 
   /// Hides or shows the animal on public adoption listings (P2-12).
   Future<void> setPublicProfileHidden({
@@ -703,4 +929,18 @@ class AnimalRecordRepository {
       newValues: {'transferTargetType': targetType, 'transferTargetName': targetName},
     );
   }
+}
+
+/// A collar tag code that is already registered to an animal.
+class DuplicateTagException implements Exception {
+  const DuplicateTagException({required this.code, required this.sameAnimal});
+  final String code;
+
+  /// Registered to this same animal (e.g. as its other tag type).
+  final bool sameAnimal;
+
+  @override
+  String toString() => sameAnimal
+      ? 'This tag ($code) is already registered to this animal.'
+      : 'This tag ($code) is already registered to another animal. Remove it there first, or use a new tag.';
 }

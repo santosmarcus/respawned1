@@ -18,4 +18,10 @@ class FeatureFlags {
   /// admin drawer (system admins approve sign-ups from their own console).
   /// The code, data and rules stay; set to true to bring them back.
   static const bool multiOrganizationEnabled = false;
+
+  /// Independent rescuers (organizations with kind 'independent'). On shows
+  /// Refer → Rescue Volunteer to shelters, and lets an independent rescuer
+  /// refer a case on to a shelter or rescue group (their way to hand over a
+  /// case they can't finish), even while [multiOrganizationEnabled] is off.
+  static const bool independentRescuersEnabled = true;
 }

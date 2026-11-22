@@ -32,9 +32,9 @@ describe('users', () => {
   });
 
   test('cannot approve themselves', async () => {
-    await assertFails(as('rider').doc('users/rider').update({ isVerified: true }));
-    await assertFails(as('rider').doc('users/rider').update({ transporterVerificationStatus: 'approved' }));
-    await assertSucceeds(as('rider').doc('users/rider').update({ transporterVerificationStatus: 'pending' }));
+    await assertFails(as('rider2').doc('users/rider2').update({ isVerified: true }));
+    await assertFails(as('rider2').doc('users/rider2').update({ transporterVerificationStatus: 'approved' }));
+    await assertSucceeds(as('rider2').doc('users/rider2').update({ transporterVerificationStatus: 'pending' }));
   });
 
   test("cannot edit someone else's profile", async () => {
@@ -259,6 +259,39 @@ describe('cases', () => {
     await assertFails(as('reporter').collection('cases').add({ reporterId: 'stranger', status: 'pending' }));
   });
 
+  test('reporters cannot re-rate the assessed urgency of their report', async () => {
+    await env.withSecurityRulesDisabled((ctx) => ctx.firestore().doc('cases/rated').set({
+      reporterId: 'reporter', organizationId: '', status: 'pending', urgency: 'Low',
+      urgencyAssessment: { level: 'Low' }, orgInvolvement: 'org_assist',
+    }));
+    await assertFails(as('reporter').doc('cases/rated').update({ urgency: 'Critical' }));
+    await assertFails(as('reporter').doc('cases/rated').update({ urgencyAssessment: { level: 'Critical' } }));
+    await assertSucceeds(as('reporter').doc('cases/rated').update({ condition: 'More detail' }));
+  });
+
+  test('a reporter-led abuse report can only become a request for organization help', async () => {
+    await env.withSecurityRulesDisabled((ctx) => ctx.firestore().doc('cases/selfReported').set({
+      reporterId: 'reporter', organizationId: '', status: 'pending', rescueType: 'Neglect or Abuse',
+      orgInvolvement: 'independent_report', abuseReportPath: 'independent',
+    }));
+    // Updating what they filed with the authorities is fine.
+    await assertSucceeds(as('reporter').doc('cases/selfReported').update({
+      independentReport: { alreadyReported: true, reportedTo: 'Barangay hall' },
+    }));
+    // Any other involvement change is refused.
+    await assertFails(as('reporter').doc('cases/selfReported').update({ orgInvolvement: 'not_org_facilitated' }));
+    await assertFails(as('stranger').doc('cases/selfReported').update({
+      orgInvolvement: 'org_assist', abuseReportPath: 'org_assistance',
+    }));
+    await assertSucceeds(as('reporter').doc('cases/selfReported').update({
+      orgInvolvement: 'org_assist', abuseReportPath: 'org_assistance',
+    }));
+    // ...and it can't be turned back once the organization is asked.
+    await assertFails(as('reporter').doc('cases/selfReported').update({
+      orgInvolvement: 'independent_report', abuseReportPath: 'independent',
+    }));
+  });
+
   test('reporters cannot stamp a new report with an organization', async () => {
     await assertFails(as('reporter').collection('cases').add({ reporterId: 'reporter', organizationId: 'orgA', status: 'pending' }));
     await assertFails(as('reporter').collection('cases').add({ reporterId: 'reporter', organizationId: 'orgB', status: 'pending' }));
@@ -313,6 +346,16 @@ describe('cases', () => {
     await assertFails(as('stranger').doc('cases/pending1').update({ status: 'accepted', assignedVolunteerId: 'stranger' }));
   });
 
+  test('an unverified transporter cannot claim or accept a transit', async () => {
+    // rider2 is a pet transporter whose application isn't approved yet.
+    await assertFails(as('rider2').doc('cases/pending1').update({
+      status: 'accepted', assignedVolunteerId: 'rider2', assignedVolunteerName: 'R2',
+    }));
+    await assertFails(as('rider2').doc('cases/pending1').update({ riderId: 'rider2' }));
+    // Declining still works.
+    await assertSucceeds(as('rider2').doc('cases/pending1').update({ declinedBy: FieldValue.arrayUnion('rider2') }));
+  });
+
   test('one person registers adoption interest; nobody can replace them', async () => {
     const interest = (uid) => as(uid).doc('cases/ownedA').update({
       willingAdopterId: uid, willingAdopterName: uid, willingAdopterType: 'adopt',
@@ -334,6 +377,62 @@ describe('cases', () => {
 
   test('platform staff can act on any case', async () => {
     await assertSucceeds(as('admin').doc('cases/ownedA').update({ status: 'completed' }));
+  });
+});
+
+describe('withdrawing a referral (CaseReferralRepository.withdraw)', () => {
+  // The writes withdraw makes, in one batch.
+  const withdraw = (uid, caseId, referralId) => {
+    const db = as(uid);
+    const batch = db.batch();
+    batch.update(db.doc(`cases/${caseId}`), {
+      status: 'pending',
+      referredToOrgId: FieldValue.delete(),
+      referralOutcome: { status: 'withdrawn', referralId, reason: 'Handling it ourselves', byUid: uid },
+      statusHistory: FieldValue.arrayUnion({ status: 'Referral withdrawn. The case is open again.' }),
+    });
+    batch.update(db.doc(`cases/${caseId}/referrals/${referralId}`), {
+      status: 'withdrawn', respondedByUid: uid, withdrawReason: 'Handling it ourselves',
+    });
+    batch.set(db.collection(`cases/${caseId}/activityLogs`).doc(), {
+      action: 'referral_withdrawn', actorUid: uid, details: { referralId },
+    });
+    return batch.commit();
+  };
+
+  beforeEach(async () => {
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      const db = ctx.firestore();
+      await db.doc('cases/refOrg').set({
+        reporterId: 'reporter', status: 'referred', organizationId: 'orgA', referredToOrgId: 'orgB',
+        referral: { referralId: 'r1', targetOrgId: 'orgB', fromOrgId: 'orgA', previousStatus: 'pending' },
+      });
+      await db.doc('cases/refOrg/referrals/r1').set({ type: 'anotherOrganization', status: 'referredPending', fromOrgId: 'orgA', targetOrgId: 'orgB' });
+      await db.doc('cases/refLgu').set({ reporterId: 'reporter', status: 'referred', organizationId: 'orgA' });
+      await db.doc('cases/refLgu/referrals/l1').set({ type: 'localGovernmentUnit', status: 'notified', barangay: 'San Isidro' });
+    });
+  });
+
+  test("the referring organization's rescue staff reopen an organization referral", async () => {
+    await assertSucceeds(withdraw('rescueA', 'refOrg', 'r1'));
+  });
+
+  test('an LGU referral can be withdrawn too', async () => {
+    await assertSucceeds(withdraw('staffA', 'refLgu', 'l1'));
+  });
+
+  test('staff without rescue, other organizations and the reporter cannot', async () => {
+    await assertFails(withdraw('careA', 'refOrg', 'r1'));
+    await assertFails(withdraw('stranger', 'refOrg', 'r1'));
+    await assertFails(withdraw('reporter', 'refOrg', 'r1'));
+  });
+
+  test('the organization it was referred to declines instead of withdrawing', async () => {
+    await assertFails(withdraw('staffB', 'refOrg', 'r1'));
+    await assertSucceeds(as('staffB').doc('cases/refOrg').update({
+      status: 'pending', referredToOrgId: FieldValue.delete(),
+      referralOutcome: { status: 'declined', reason: 'No space' },
+    }));
   });
 });
 
@@ -406,6 +505,89 @@ describe('animals', () => {
     await assertFails(as('staffB').doc('animals/animalA/vaccinations/v1').set({ name: 'Rabies' }));
     await assertSucceeds(as('staffA').doc('animals/animalA/vaccinations/v1').set({ name: 'Rabies' }));
   });
+
+  // Collar tags (QR and NFC): animalTags/{code} registry + the animal's
+  // qrTagId / nfcTagId (AnimalRecordRepository.registerTag / removeTag).
+  const reg = (code, animalId = 'animalA', type = 'qr', organizationId = 'orgA') =>
+    ({ code, animalId, organizationId, type, active: true, createdAt: FieldValue.serverTimestamp() });
+
+  async function registerAs(uid, animalId, code, type = 'qr', extra = {}) {
+    const db = as(uid);
+    const batch = db.batch();
+    batch.set(db.doc(`animalTags/${code}`), reg(code, animalId, type));
+    batch.update(db.doc(`animals/${animalId}`), { [type === 'qr' ? 'qrTagId' : 'nfcTagId']: code, ...extra });
+    return batch.commit();
+  }
+
+  test("the owning organization's records staff register, replace and remove QR and NFC tags", async () => {
+    const log = (eventType) => ({ animalId: 'animalA', eventType, action: eventType, timestamp: FieldValue.serverTimestamp() });
+    await assertSucceeds(registerAs('staffA', 'animalA', 'ABCD2345', 'qr'));
+    await assertSucceeds(as('staffA').collection('animals/animalA/managementLogs').add(log('qrAssigned')));
+    await assertSucceeds(registerAs('staffA', 'animalA', 'NFCC2345', 'nfc'));
+    // Replace: new code registered, old one retired.
+    const db = as('staffA');
+    const batch = db.batch();
+    batch.set(db.doc('animalTags/WXYZ6789'), reg('WXYZ6789'));
+    batch.update(db.doc('animals/animalA'), { qrTagId: 'WXYZ6789' });
+    batch.update(db.doc('animalTags/ABCD2345'), { active: false, deactivatedAt: FieldValue.serverTimestamp() });
+    await assertSucceeds(batch.commit());
+    for (const uid of ['carerA', 'staffB', 'stranger']) {
+      await assertFails(registerAs(uid, 'animalA', 'EFGH2345'));
+      await assertFails(as(uid).collection('animals/animalA/managementLogs').add(log('qrAssigned')));
+    }
+  });
+
+  test('a tag code on an animal must be registered to that animal', async () => {
+    await assertFails(as('staffA').doc('animals/animalA').update({ qrTagId: 'ABCD2345' }));
+    await assertFails(as('staffA').doc('animals/animalA').update({ nfcTagId: 'ABCD2345' }));
+    await env.withSecurityRulesDisabled((ctx) => ctx.firestore().doc('animalTags/OTHR2345').set(reg('OTHR2345', 'animalB', 'qr', 'orgB')));
+    await assertFails(as('staffA').doc('animals/animalA').update({ qrTagId: 'OTHR2345' }));
+  });
+
+  test('a code belongs to one animal: no duplicates, no moving, no reuse', async () => {
+    await assertSucceeds(registerAs('staffA', 'animalA', 'ABCD2345'));
+    await env.withSecurityRulesDisabled((ctx) => ctx.firestore().doc('animals/animalA2').set({ name: 'Two', organizationId: 'orgA' }));
+    // Registering the same code again for another animal is an update of the existing doc: refused.
+    await assertFails(registerAs('staffA', 'animalA2', 'ABCD2345'));
+    await assertFails(as('staffA').doc('animalTags/ABCD2345').update({ animalId: 'animalA2' }));
+    await assertSucceeds(as('staffA').doc('animalTags/ABCD2345').update({ active: false, deactivatedAt: FieldValue.serverTimestamp() }));
+    await assertFails(as('staffA').doc('animalTags/ABCD2345').update({ active: true }));
+    await assertFails(as('staffA').doc('animalTags/ABCD2345').delete());
+    // Anyone signed in can resolve a scanned code; nobody signed out.
+    await assertSucceeds(as('stranger').doc('animalTags/ABCD2345').get());
+  });
+
+  test('adoptable needs a registered collar tag', async () => {
+    await env.withSecurityRulesDisabled((ctx) =>
+      ctx.firestore().doc('animals/notReady').set({ name: 'N', organizationId: 'orgA', adoptionStatus: 'not_ready' }));
+    const ready = { adoptionStatus: 'adoptable', adoptionReadiness: { checked: true } };
+    await assertFails(as('staffA').doc('animals/notReady').update(ready));
+    await assertSucceeds(registerAs('staffA', 'notReady', 'NFCA2345', 'nfc'));
+    await assertSucceeds(as('staffA').doc('animals/notReady').update(ready));
+    // A new record can't be created adoptable or with a tag.
+    await assertFails(as('staffA').collection('animals').add({ name: 'K', organizationId: 'orgA', ...ready }));
+    await assertFails(as('staffA').collection('animals').add({ name: 'K', organizationId: 'orgA', qrTagId: 'NFCA2345' }));
+  });
+
+  test('removing the only tag takes the animal off adoption', async () => {
+    await env.withSecurityRulesDisabled((ctx) =>
+      ctx.firestore().doc('animals/tagged').set({ name: 'T', organizationId: 'orgA', adoptionStatus: 'not_ready' }));
+    await assertSucceeds(registerAs('staffA', 'tagged', 'QRQR2345', 'qr', { adoptionStatus: 'adoptable', adoptionReadiness: { checked: true } }));
+    const db = as('staffA');
+    const keepListed = db.batch();
+    keepListed.update(db.doc('animalTags/QRQR2345'), { active: false, deactivatedAt: FieldValue.serverTimestamp() });
+    keepListed.update(db.doc('animals/tagged'), { qrTagId: FieldValue.delete() });
+    await assertFails(keepListed.commit());
+    const unlist = db.batch();
+    unlist.update(db.doc('animalTags/QRQR2345'), { active: false, deactivatedAt: FieldValue.serverTimestamp() });
+    unlist.update(db.doc('animals/tagged'), { qrTagId: FieldValue.delete(), adoptionStatus: 'not_ready' });
+    await assertSucceeds(unlist.commit());
+  });
+
+  test('an animal listed before the tag rule can still be re-saved without touching tags', async () => {
+    // animalA is seeded adoptable with no tag.
+    await assertSucceeds(as('staffA').doc('animals/animalA').update({ name: 'Mochi B' }));
+  });
 });
 
 describe('animal records and public profiles', () => {
@@ -443,6 +625,25 @@ describe('animal records and public profiles', () => {
     await assertFails(as('stranger').collection('animals').where('adoptionStatus', '==', 'adoptable').get());
   });
 
+  test('nobody suspends or un-suspends an account from the client', async () => {
+    // Only adminSetUserDisabled (Admin SDK) writes these.
+    await env.withSecurityRulesDisabled((ctx) => ctx.firestore().doc('users/stranger').update({ disabled: true }));
+    await assertFails(as('stranger').doc('users/stranger').update({ disabled: false }));
+    await assertFails(as('reporter').doc('users/reporter').update({ disabled: true }));
+    await assertFails(as('reporter').doc('users/reporter').update({ disabledReason: 'x' }));
+    await assertSucceeds(as('reporter').doc('users/reporter').update({ firstName: 'Rey' }));
+  });
+
+    test('records for one case: allowed when scoped to the organization', async () => {
+    // AnimalRecordRepository.streamRecordsForCase (Create Animal Records
+    // from intake) — the unscoped form was permission-denied.
+    await env.withSecurityRulesDisabled((ctx) =>
+      ctx.firestore().doc('animals/fromCase').set({ name: 'C', organizationId: 'orgA', linkedCaseId: 'ownedA' }));
+    await assertFails(as('staffA').collection('animals').where('linkedCaseId', '==', 'ownedA').get());
+    await assertSucceeds(as('staffA').collection('animals')
+      .where('organizationId', '==', 'orgA').where('linkedCaseId', '==', 'ownedA').get());
+  });
+
   test('public profiles are readable by any signed-in user and written by no client', async () => {
     await env.withSecurityRulesDisabled((ctx) =>
       ctx.firestore().doc('publicAnimals/animalA').set({ name: 'Mochi', organizationId: 'orgA', adoptionStatus: 'adoptable' }));
@@ -457,21 +658,33 @@ describe('animal records and public profiles', () => {
 describe('adoption readiness gate', () => {
   const readiness = { confirmedBy: 'staffA', items: ['health'] };
 
-  test('a new adoptable record needs the readiness checklist', async () => {
+  const tag = (animalId, code) => env.withSecurityRulesDisabled(async (ctx) => {
+    const db = ctx.firestore();
+    await db.doc(`animalTags/${code}`).set({ code, animalId, organizationId: 'orgA', type: 'qr', active: true });
+    await db.doc(`animals/${animalId}`).update({ qrTagId: code });
+  });
+
+  // A new record has no registered collar tag yet, so it is never created
+  // adoptable, checklist or not.
+  test('a new record is created not ready, never adoptable', async () => {
     await assertFails(as('staffA').doc('animals/n1').set({ organizationId: 'orgA', adoptionStatus: 'adoptable' }));
-    await assertSucceeds(as('staffA').doc('animals/n2').set({ organizationId: 'orgA', adoptionStatus: 'adoptable', adoptionReadiness: readiness }));
+    await assertFails(as('staffA').doc('animals/n2').set({ organizationId: 'orgA', adoptionStatus: 'adoptable', adoptionReadiness: readiness }));
     await assertSucceeds(as('staffA').doc('animals/n3').set({ organizationId: 'orgA', adoptionStatus: 'not_ready' }));
   });
 
-  test('flipping not_ready to adoptable needs it; re-saves and releases do not', async () => {
+  test('flipping not_ready to adoptable needs the checklist and a tag; re-saves do not', async () => {
     await env.withSecurityRulesDisabled(async (ctx) => {
       const db = ctx.firestore();
       await db.doc('animals/nr').set({ organizationId: 'orgA', adoptionStatus: 'not_ready' });
       await db.doc('animals/res').set({ organizationId: 'orgA', adoptionStatus: 'reserved' });
     });
+    await tag('nr', 'NRNR2345');
     await assertFails(as('staffA').doc('animals/nr').update({ adoptionStatus: 'adoptable' }));
     await assertSucceeds(as('staffA').doc('animals/nr').update({ adoptionStatus: 'adoptable', adoptionReadiness: readiness }));
     await assertSucceeds(as('staffA').doc('animals/animalA').update({ name: 'Mochi II' }));
+    // A released reservation skips the checklist but still needs a tag.
+    await assertFails(as('staffA').doc('animals/res').update({ adoptionStatus: 'adoptable' }));
+    await tag('res', 'RESR2345');
     await assertSucceeds(as('staffA').doc('animals/res').update({ adoptionStatus: 'adoptable' }));
   });
 });
@@ -553,6 +766,50 @@ describe('community adoption check-ins (Adoption gap 10)', () => {
   });
 });
 
+describe('community adoption requests', () => {
+  test("the reporter can't request their own report; only the two people involved read it", async () => {
+    await env.withSecurityRulesDisabled((ctx) => ctx.firestore().doc('cases/ca1').set({
+      reporterId: 'reporter', status: 'rejected', rejectionReason: 'healthyAnimalLowUrgency', organizationId: '',
+    }));
+    const request = (uid, data) => as(uid).collection('communityAdoptionRequests').doc('r1').set({
+      caseId: 'ca1', listerId: 'reporter', adopterId: uid, status: 'pending', animalIndexes: [0], ...data,
+    });
+    await assertFails(request('reporter'));
+    await assertFails(request('adopter', { listerId: 'stranger' }));
+    await assertFails(request('adopter', { status: 'selected' }));
+    await assertSucceeds(request('adopter'));
+
+    const doc = (uid) => as(uid).doc('communityAdoptionRequests/r1');
+    await assertSucceeds(doc('reporter').get());
+    await assertSucceeds(doc('adopter').get());
+    await assertFails(doc('stranger').get());
+
+    const msg = (uid, senderId) => doc(uid).collection('messages').add({ senderId, text: 'Hi' });
+    await assertSucceeds(msg('adopter', 'adopter'));
+    await assertSucceeds(msg('reporter', 'reporter'));
+    await assertFails(msg('adopter', 'reporter'));
+    await assertFails(msg('stranger', 'stranger'));
+    await assertFails(doc('stranger').collection('messages').get());
+  });
+
+  test('the reporter chooses, each side signs their own part, then it completes', async () => {
+    await env.withSecurityRulesDisabled((ctx) => ctx.firestore().doc('communityAdoptionRequests/r2').set({
+      caseId: 'ca1', listerId: 'reporter', adopterId: 'adopter', status: 'pending', animalIndexes: [0],
+    }));
+    const doc = (uid) => as(uid).doc('communityAdoptionRequests/r2');
+    const sig = { name: 'Full Name', signedAt: firebase.firestore.FieldValue.serverTimestamp() };
+    await assertFails(doc('adopter').update({ status: 'selected' }));
+    await assertFails(doc('adopter').update({ adopterSignature: sig }));
+    await assertSucceeds(doc('reporter').update({ status: 'selected' }));
+    await assertFails(doc('adopter').update({ listerSignature: sig }));
+    await assertFails(doc('adopter').update({ status: 'completed' }));
+    await assertSucceeds(doc('adopter').update({ adopterSignature: sig }));
+    await assertSucceeds(doc('reporter').update({ listerSignature: sig }));
+    await assertFails(doc('adopter').update({ adopterId: 'stranger' }));
+    await assertSucceeds(doc('adopter').update({ status: 'completed' }));
+  });
+});
+
 describe('adoption audit entries (Adoption gap 7)', () => {
   test("an entry carries the application's organization so its staff see it", async () => {
     const entry = (uid, data) => as(uid).collection('auditLogs').add({
@@ -585,6 +842,9 @@ describe('adoptions', () => {
     await assertFails(as('adopter').doc('adoptions/appA').update({ fitAtDecision: { decision: 'approved' } }));
     // Nor reset their missed-interview count.
     await assertFails(as('adopter').doc('adoptions/appA').update({ noShowCount: 0 }));
+    // Link ID Tag (post_adoption_page.dart) saves the adopter's collar tag.
+    await assertSucceeds(as('adopter').doc('adoptions/appA').update({ collarTagId: 'tag1' }));
+    await assertFails(as('stranger').doc('adoptions/appA').update({ collarTagId: 'tag1' }));
     await assertSucceeds(as('staffA').doc('adoptions/appA').update({ fitAtDecision: { decision: 'approved' } }));
   });
 
@@ -734,6 +994,13 @@ describe('transporter applications', () => {
     await assertFails(as('staffA').doc('users/rider2').update({ isVerified: true, transporterVerificationStatus: 'approved' }));
     await seedApp('stranger');
     await assertFails(as('staffA').doc('users/stranger').update({ isVerified: true, transporterVerificationStatus: 'approved' }));
+  });
+
+  test('an applicant who is no longer a transporter can still be rejected (application only)', async () => {
+    await seedApp('stranger');
+    // TransporterApplicationRepository.review writes only the application then.
+    await assertSucceeds(as('staffA').doc('transporterApplications/stranger')
+      .update({ status: 'rejected', reviewedBy: 'staffA' }));
   });
 
   test('carers, draft-org staff and transporters cannot verify', async () => {
@@ -1116,5 +1383,99 @@ describe('dashboard and analytics gaps: care rounds, alert claims, summaries, il
     const review = { euthanasiaReview: { reviewerUid: 'ownerA', alternativesConsidered: 'Referral', agrees: true } };
     await assertSucceeds(as('ownerA').doc('animals/animalA').update(review));
     await assertFails(as('staffB').doc('animals/animalA').update(review));
+  });
+});
+
+// Collar tags and their scan chats: a tag opens for anyone with its id, but
+// only its owner lists or edits it; staff approve QR codes. Each finder of
+// a lost pet gets a private chat with the owner.
+describe('collar tags and scan chats', () => {
+  beforeEach(async () => {
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      const db = ctx.firestore();
+      await db.doc('collarTags/tag1').set({ ownerId: 'reporter', name: 'Bantay', ownerMobile: '0917', status: 'lost', qrEnabled: true });
+      await db.doc('collarTags/tag2').set({ ownerId: 'stranger', name: 'Mingming', status: 'active' });
+      await db.doc('rescueSessions/s1').set({ tagId: 'tag1', ownerId: 'reporter', finderId: 'adopter', status: 'active', chatEnabledByOwner: true });
+      await db.doc('rescueSessions/s2').set({ tagId: 'tag1', ownerId: 'reporter', finderId: 'adopter', status: 'active', chatEnabledByOwner: false });
+      await db.doc('rescueSessions/legacy').set({ tagId: 'tag1', status: 'active', chatEnabledByOwner: true });
+    });
+  });
+
+  test('anyone signed in opens a tag by its id, but only owners list theirs', async () => {
+    await assertSucceeds(as('adopter').doc('collarTags/tag1').get());
+    await assertSucceeds(as('reporter').collection('collarTags').where('ownerId', '==', 'reporter').get());
+    await assertFails(as('adopter').collection('collarTags').where('ownerId', '==', 'reporter').get());
+    await assertFails(as('adopter').collection('collarTags').get());
+    await assertSucceeds(as('admin').collection('collarTags').get());
+  });
+
+  test("nobody edits or deletes someone else's tag", async () => {
+    await assertFails(as('adopter').doc('collarTags/tag1').update({ ownerMobile: '000' }));
+    await assertFails(as('adopter').doc('collarTags/tag1').update({ ownerId: 'adopter' }));
+    await assertFails(as('adopter').doc('collarTags/tag1').delete());
+  });
+
+  test('owners edit and mark their own tag lost or found, but not approve its QR', async () => {
+    await assertSucceeds(as('reporter').doc('collarTags/tag1').update({ status: 'active', linkedAlertId: FieldValue.delete() }));
+    await assertFails(as('reporter').doc('collarTags/tag1').update({ qrEnabled: false }));
+    await assertFails(as('reporter').doc('collarTags/tag1').update({ ownerId: 'adopter' }));
+    await assertSucceeds(as('reporter').doc('collarTags/tag1').delete());
+  });
+
+  test("an animal's collar tag is written by that animal's staff only", async () => {
+    const tag = { animalId: 'animalA', source: 'animal_record', name: 'Brownie', qrEnabled: true, status: 'active' };
+    await assertSucceeds(as('staffA').doc('collarTags/animal-animalA').set(tag));
+    await assertSucceeds(as('staffA').doc('collarTags/animal-animalA').set({ ...tag, name: 'Brownie Jr' }, { merge: true }));
+    await assertFails(as('staffB').doc('collarTags/animal-animalA').set({ ...tag, name: 'x' }, { merge: true }));
+    await assertFails(as('adopter').doc('collarTags/animal-animalA').set({ ...tag, name: 'x' }, { merge: true }));
+    // The id must match the animal, and an owner can't be slipped in.
+    await assertFails(as('staffA').doc('collarTags/animal-other').set(tag));
+    await assertFails(as('staffA').doc('collarTags/animal-animalA').set({ ...tag, ownerId: 'staffA' }));
+    await assertSucceeds(as('adopter').doc('collarTags/animal-animalA').get());
+  });
+
+  test('a new tag is created by its owner, without staff fields', async () => {
+    await assertSucceeds(as('adopter').doc('collarTags/new1').set({ ownerId: 'adopter', name: 'Brownie' }));
+    await assertFails(as('adopter').doc('collarTags/new2').set({ ownerId: 'reporter', name: 'Brownie' }));
+    await assertFails(as('adopter').doc('collarTags/new3').set({ ownerId: 'adopter', qrEnabled: true }));
+  });
+
+  test('staff approve QR codes and nothing else', async () => {
+    await assertSucceeds(as('admin').doc('collarTags/tag2').update({ qrEnabled: true }));
+    await assertFails(as('admin').doc('collarTags/tag2').update({ ownerMobile: '000' }));
+  });
+
+  test("only the chat's owner and finder read it", async () => {
+    await assertSucceeds(as('reporter').doc('rescueSessions/s1').get());
+    await assertSucceeds(as('adopter').doc('rescueSessions/s1').get());
+    await assertFails(as('stranger').doc('rescueSessions/s1').get());
+    await assertSucceeds(as('adopter').collection('rescueSessions/s1/messages').get());
+    await assertFails(as('stranger').collection('rescueSessions/s1/messages').get());
+    await assertSucceeds(as('reporter').collection('rescueSessions').where('tagId', '==', 'tag1').where('ownerId', '==', 'reporter').get());
+    await assertFails(as('stranger').collection('rescueSessions').where('tagId', '==', 'tag1').get());
+  });
+
+  test('the owner enables or closes the chat; the finder cannot', async () => {
+    await assertSucceeds(as('reporter').doc('rescueSessions/s2').update({ chatEnabledByOwner: true }));
+    await assertFails(as('adopter').doc('rescueSessions/s2').update({ chatEnabledByOwner: true }));
+    await assertFails(as('adopter').doc('rescueSessions/s1').update({ status: 'resolved' }));
+    await assertSucceeds(as('reporter').doc('rescueSessions/s1').update({ status: 'resolved' }));
+  });
+
+  test('each side posts as itself, only once the owner enabled the chat', async () => {
+    const msg = (uid, sender, over = {}) => ({ sender, senderId: uid, text: 'Hi', sentAt: new Date(), ...over });
+    await assertSucceeds(as('adopter').collection('rescueSessions/s1/messages').add(msg('adopter', 'finder')));
+    await assertSucceeds(as('reporter').collection('rescueSessions/s1/messages').add(msg('reporter', 'owner')));
+    await assertFails(as('adopter').collection('rescueSessions/s1/messages').add(msg('adopter', 'owner')));
+    await assertFails(as('stranger').collection('rescueSessions/s1/messages').add(msg('stranger', 'finder')));
+    await assertFails(as('adopter').collection('rescueSessions/s1/messages').add(msg('reporter', 'finder')));
+    await assertFails(as('adopter').collection('rescueSessions/s2/messages').add(msg('adopter', 'finder')));
+  });
+
+  test('chats from before they were per finder keep working', async () => {
+    await assertSucceeds(as('stranger').doc('rescueSessions/legacy').get());
+    await assertSucceeds(as('stranger').collection('rescueSessions/legacy/messages').add({ sender: 'finder', text: 'Found him', sentAt: new Date() }));
+    await assertSucceeds(as('reporter').doc('rescueSessions/legacy').update({ status: 'resolved' }));
+    await assertFails(as('stranger').doc('rescueSessions/legacy').update({ status: 'resolved' }));
   });
 });

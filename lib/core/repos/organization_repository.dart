@@ -4,6 +4,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
 import 'package:geocoding/geocoding.dart';
 
+import 'package:respawnd1/core/models/organization/org_permission.dart';
 import 'package:respawnd1/core/repos/org_membership_service.dart';
 import 'package:respawnd1/core/models/rescue/org_role.dart';
 
@@ -125,33 +126,33 @@ const double kDefaultServiceAreaRadiusKm = 10;
 /// service area that doesn't have one yet, by geocoding "`<city>, <region>`,
 /// Philippines". functions/index.js tags each new rescue case with the
 /// organizations whose geofence contains it. Areas that can't be geocoded
-/// are saved unchanged.
-Future<List<ServiceArea>> withCoverageGeofences(List<ServiceArea> areas) async {
-  final result = <ServiceArea>[];
-  for (final area in areas) {
-    if (area.hasGeofence) {
-      result.add(area);
-      continue;
-    }
+/// are saved unchanged. New areas are geocoded at the same time, in order.
+Future<List<ServiceArea>> withCoverageGeofences(List<ServiceArea> areas) {
+  Future<ServiceArea> withGeofence(ServiceArea area) async {
+    if (area.hasGeofence) return area;
     try {
       final region = area.administrativeArea;
       final query = [area.name, if (region != null && region.isNotEmpty) region, 'Philippines'].join(', ');
       final hits = await locationFromAddress(query).timeout(const Duration(seconds: 8));
       if (hits.isNotEmpty) {
-        result.add(area.withGeofence(
+        return area.withGeofence(
           lat: hits.first.latitude,
           lng: hits.first.longitude,
           radiusKm: kDefaultServiceAreaRadiusKm,
-        ));
-        continue;
+        );
       }
     } catch (_) {
       // fall through: keep the area without a geofence
     }
-    result.add(area);
+    return area;
   }
-  return result;
+
+  return Future.wait(areas.map(withGeofence));
 }
+
+/// Rounds a coordinate to 2 decimals (about 1 km), for an independent
+/// rescuer's public coverage centre.
+double roundForCoverage(double v) => (v * 100).roundToDouble() / 100;
 
 /// One organization in platform staff's verification review queue.
 class OrganizationReviewItem {
@@ -167,9 +168,13 @@ class OrganizationReviewItem {
     this.reviewedByName,
     this.note,
     this.documents = const [],
+    this.kind = OrgKind.shelter,
   });
 
   final String id;
+
+  /// A shelter, or an independent rescuer (different documents).
+  final OrgKind kind;
   final String name;
   final OrgVerificationStatus status;
   final String phone;
@@ -189,6 +194,10 @@ class OrganizationReviewItem {
     'registration': 'Registration',
     'permits': 'Permit',
     'shelterPhotos': 'Shelter photo',
+    'validId': 'Valid ID',
+    'proofOfAddress': 'Proof of address',
+    'rescueHistory': 'Rescue history',
+    'barangayClearance': 'Barangay clearance',
   };
 
   factory OrganizationReviewItem.fromFirestore(DocumentSnapshot<Map<String, dynamic>> doc) {
@@ -220,6 +229,7 @@ class OrganizationReviewItem {
       reviewedByName: reviewer.isEmpty ? null : reviewer,
       note: note.isEmpty ? null : note,
       documents: docs,
+      kind: OrgKind.fromName(d['kind'] as String?),
     );
   }
 }
@@ -259,6 +269,8 @@ class OrganizationRepository {
     required String name,
     required String address,
     required String contactNumber,
+    // The caller's own draft, so resuming a signup never matches itself.
+    String? excludeOrganizationId,
   }) async {
     final normName = normalizeForMatch(name);
     final normAddress = normalizeForMatch(address);
@@ -270,7 +282,11 @@ class OrganizationRepository {
     final snap = await _organizations.limit(300).get();
     final matches = <OrgDuplicateMatch>[];
     for (final doc in snap.docs) {
+      if (doc.id == excludeOrganizationId) continue;
       final data = doc.data();
+      // A draft was never submitted (abandoned or failed signups): it isn't
+      // a registered organization and must not block the name.
+      if (data['verificationStatus'] == OrgVerificationStatus.draft.name) continue;
       final docName = normalizeForMatch(data['name'] as String? ?? '');
       final docAddress = normalizeForMatch((data['location'] as String?) ?? (data['shelterAddress'] as String?) ?? '');
       final docPhone = normalizePhoneForMatch(data['phone'] as String? ?? data['contactNumber'] as String? ?? '');
@@ -297,6 +313,18 @@ class OrganizationRepository {
     required String name,
     required String contactNumber,
     required String address,
+    // Map pin chosen on About Your Organization; saved as the shelter
+    // location (same fields ShelterLocationPickerPage writes).
+    String? pinName,
+    String? pinPlaceId,
+    double? pinLat,
+    double? pinLng,
+    // An independent rescuer: [address] is a general area (barangay, city)
+    // shown on the profile, and the pin is their home or foster location,
+    // kept in settings/home (members only) instead of the public
+    // organization doc. Their coverage circle is centred on the pin rounded
+    // to about a kilometre, so the circle doesn't give the home away.
+    OrgKind kind = OrgKind.shelter,
   }) async {
     final normalizedName = normalizeForMatch(name);
     final normalizedAddress = normalizeForMatch(address);
@@ -304,7 +332,36 @@ class OrganizationRepository {
 
     final existing = await currentOrganizationFor(uid);
     final orgRef = existing?.reference ?? _organizations.doc();
+    final independent = existing == null
+        ? kind == OrgKind.independent
+        : OrgKind.fromName(existing.data()?['kind'] as String?) == OrgKind.independent;
 
+    if (independent) {
+      await orgRef.set({
+        'name': name,
+        'normalizedName': normalizedName,
+        'contactNumber': contactNumber,
+        'phone': contactNumber,
+        'location': address,
+        'normalizedAddress': normalizedAddress,
+        'normalizedPhone': normalizedPhone,
+        'ownerId': uid,
+        if (pinLat != null && pinLng != null)
+          'serviceAreas': [
+            ServiceArea(
+              name: address,
+              normalizedName: normalizedAddress,
+              lat: roundForCoverage(pinLat),
+              lng: roundForCoverage(pinLng),
+              radiusKm: IndependentRescuer.defaultRadiusKm,
+            ).toMap(),
+          ],
+        if (existing == null) 'kind': OrgKind.independent.name,
+        if (existing == null) 'verificationStatus': OrgVerificationStatus.draft.name,
+        if (existing == null) 'createdAt': FieldValue.serverTimestamp(),
+        'updatedAt': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
+    } else {
     await orgRef.set({
       'name': name,
       'normalizedName': normalizedName,
@@ -314,13 +371,31 @@ class OrganizationRepository {
       'normalizedAddress': normalizedAddress,
       'normalizedPhone': normalizedPhone,
       'ownerId': uid,
+      if (pinLat != null && pinLng != null) ...{
+        'shelterName': (pinName == null || pinName.isEmpty) ? name : pinName,
+        'shelterAddress': address,
+        'shelterPlaceId': (pinPlaceId == null || pinPlaceId.isEmpty) ? null : pinPlaceId,
+        'shelterLat': pinLat,
+        'shelterLng': pinLng,
+        'shelterUpdatedAt': FieldValue.serverTimestamp(),
+      },
       if (existing == null) 'verificationStatus': OrgVerificationStatus.draft.name,
       if (existing == null) 'createdAt': FieldValue.serverTimestamp(),
       'updatedAt': FieldValue.serverTimestamp(),
     }, SetOptions(merge: true));
+    }
 
     await _users.doc(uid).set({'role': 'organization'}, SetOptions(merge: true));
     await OrgMembershipService(firestore: _db).setMember(organizationId: orgRef.id, uid: uid, role: OrgRole.admin);
+    if (independent && pinLat != null && pinLng != null) {
+      await saveHomeLocation(
+        organizationId: orgRef.id,
+        name: (pinName == null || pinName.isEmpty) ? name : pinName,
+        placeId: pinPlaceId,
+        lat: pinLat,
+        lng: pinLng,
+      );
+    }
     // setMember only writes {role, updatedAt} — the owner's email is added
     // here (display purposes on the Staff Members list) rather than
     // widening that shared method's signature for every other caller.
@@ -333,6 +408,71 @@ class OrganizationRepository {
     }
 
     return orgRef.id;
+  }
+
+  /// An independent rescuer's home or foster location
+  /// (organizations/{id}/settings/home): read by its own members only, never
+  /// on the public organization doc.
+  Future<void> saveHomeLocation({
+    required String organizationId,
+    required String name,
+    String? placeId,
+    required double lat,
+    required double lng,
+  }) {
+    return _organizations.doc(organizationId).collection('settings').doc('home').set({
+      'name': name,
+      'placeId': (placeId == null || placeId.isEmpty) ? null : placeId,
+      'lat': lat,
+      'lng': lng,
+      'updatedAt': FieldValue.serverTimestamp(),
+    }, SetOptions(merge: true));
+  }
+
+  Future<({String name, double lat, double lng})?> homeLocation(String organizationId) async {
+    final d = (await _organizations.doc(organizationId).collection('settings').doc('home').get()).data();
+    final lat = (d?['lat'] as num?)?.toDouble();
+    final lng = (d?['lng'] as num?)?.toDouble();
+    if (lat == null || lng == null) return null;
+    return (name: d?['name'] as String? ?? 'Home', lat: lat, lng: lng);
+  }
+
+  /// Sets an independent rescuer's coverage radius (kept between
+  /// [IndependentRescuer.minRadiusKm] and [IndependentRescuer.maxRadiusKm]).
+  /// Org Admin; assignCaseToServiceAreas clamps it again server-side.
+  Future<void> setIndependentRadius({required String organizationId, required double radiusKm}) async {
+    final ref = _organizations.doc(organizationId);
+    final areas = ((await ref.get()).data()?['serviceAreas'] as List? ?? const [])
+        .whereType<Map>()
+        .map((m) => ServiceArea.fromMap(Map<String, dynamic>.from(m)))
+        .toList();
+    if (areas.isEmpty || !areas.first.hasGeofence) {
+      throw StateError('Set your home location first.');
+    }
+    final r = radiusKm.clamp(IndependentRescuer.minRadiusKm, IndependentRescuer.maxRadiusKm).toDouble();
+    areas[0] = areas.first.withGeofence(lat: areas.first.lat!, lng: areas.first.lng!, radiusKm: r);
+    await ref.update({
+      'serviceAreas': areas.map((a) => a.toMap()).toList(),
+      'updatedAt': FieldValue.serverTimestamp(),
+    });
+  }
+
+  /// A system admin turns an independent rescuer's modules on or off and
+  /// changes its caps (setIndependentLimits, functions/independent_rescuers.js).
+  Future<void> setIndependentLimits({
+    required String organizationId,
+    Set<OrgPermission>? enabledPermissions,
+    int? memberCap,
+    int? maxActiveCases,
+    int? maxAnimalsInCare,
+  }) async {
+    await FirebaseFunctions.instance.httpsCallable('setIndependentLimits').call(<String, dynamic>{
+      'organizationId': organizationId,
+      if (enabledPermissions != null) 'enabledPermissions': permissionKeys(enabledPermissions),
+      'memberCap': ?memberCap,
+      'maxActiveCases': ?maxActiveCases,
+      'maxAnimalsInCare': ?maxAnimalsInCare,
+    });
   }
 
   /// Appends newly-uploaded URLs onto whichever verification document group
@@ -365,9 +505,15 @@ class OrganizationRepository {
 
   /// Organizations in one verification state, oldest submission first so
   /// the longest-waiting is reviewed first. Platform staff's review queue.
-  Stream<List<OrganizationReviewItem>> streamForReview(OrgVerificationStatus status) {
+  /// Sign-ups with [status], oldest first. [kind] keeps only shelters or only
+  /// rescue volunteers (kind 'independent'); filtered here, since shelters
+  /// usually have no `kind` field.
+  Stream<List<OrganizationReviewItem>> streamForReview(OrgVerificationStatus status, {OrgKind? kind}) {
     return _organizations.where('verificationStatus', isEqualTo: status.name).snapshots().map((snap) {
-      final items = snap.docs.map(OrganizationReviewItem.fromFirestore).toList();
+      final items = snap.docs
+          .map(OrganizationReviewItem.fromFirestore)
+          .where((o) => kind == null || o.kind == kind)
+          .toList();
       final far = DateTime.fromMillisecondsSinceEpoch(0);
       items.sort((a, b) => (a.submittedAt ?? far).compareTo(b.submittedAt ?? far));
       return items;
@@ -555,6 +701,17 @@ class OrganizationRepository {
   /// Changing legal-identity fields (name/location) that should require
   /// re-verification is a reported policy limitation, not enforced here —
   /// see this session's final report.
+  /// Pauses or resumes new rescue reports for an organization (org admin).
+  /// While paused, assignCaseToServiceAreas (functions/index.js) routes no
+  /// new reports to it; cases it already has are unaffected.
+  Future<void> setAcceptingCases({required String organizationId, required bool accepting}) {
+    return _db.collection('organizations').doc(organizationId).update({
+      'acceptingCases': accepting,
+      'acceptingCasesChangedAt': FieldValue.serverTimestamp(),
+      'updatedAt': FieldValue.serverTimestamp(),
+    });
+  }
+
   Future<void> updateProfile({
     required String organizationId,
     String? name,

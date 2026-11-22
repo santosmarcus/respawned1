@@ -1,10 +1,17 @@
 // Extracted from rescue_page.dart (behavior-preserving refactor).
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 import 'package:respawnd1/app_theme.dart';
+import 'package:respawnd1/core/utils/rescue_risk.dart';
+import 'package:respawnd1/features/collartag/collar_id_tag_screen.dart';
+import 'package:respawnd1/features/collartag/collar_tag_data_model.dart';
+import 'package:respawnd1/features/rescue/lost_found_track_case.dart';
 import 'package:respawnd1/features/rescue/rescue_form_controller.dart';
 import 'package:respawnd1/features/rescue/widgets/found_animal_card.dart';
+import 'package:respawnd1/features/rescue/widgets/health_behavior_assessment.dart';
 import 'package:respawnd1/features/rescue/widgets/rescue_form_fields.dart';
 import 'package:respawnd1/core/utils/validators.dart';
 import 'package:respawnd1/features/rescue/widgets/owner_toggle.dart';
@@ -16,9 +23,13 @@ class LostPetFields extends StatelessWidget {
     required this.form,
     required this.pinnedAddress,
     required this.onChanged,
+    required this.onSwitchToRescue,
   });
 
   final RescueFormController form;
+
+  /// Turns this into a rescue report (finder side, animal needs help).
+  final VoidCallback onSwitchToRescue;
 
   /// The map pin's resolved address (shown as last-seen / found location).
   final String pinnedAddress;
@@ -96,7 +107,7 @@ class LostPetFields extends StatelessWidget {
                 Expanded(
                   child: Text(
                     'A registered ID tag was found on scan — the owner will be '
-                    'notified directly instead of a manual match.',
+                        'notified directly instead of a manual match.',
                     style: GoogleFonts.zain(
                       fontSize: 12,
                       color: AppColors.textPrimary,
@@ -119,6 +130,7 @@ class LostPetFields extends StatelessWidget {
             form: form,
             pinnedAddress: pinnedAddress,
             onChanged: onChanged,
+            onSwitchToRescue: onSwitchToRescue,
           ),
       ],
     );
@@ -215,6 +227,10 @@ class OwnerFields extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       mainAxisSize: MainAxisSize.min,
       children: [
+        // The owner's pets with a collar tag: picking one fills the form,
+        // and submitting marks its tag lost (so whoever scans it can
+        // message the owner, in the app or on the web page).
+        _RegisteredPetsPicker(form: form, onChanged: onChanged),
         const SizedBox(height: 20),
         RescueFieldLabel('Pet Name', required: true),
         const SizedBox(height: 6),
@@ -263,6 +279,9 @@ class OwnerFields extends StatelessWidget {
                     key: ValueKey(form.lostSex),
                     initialValue: form.lostSex,
                     isDense: true,
+                    // Fit the column it's in (its widest option otherwise sets its
+                    // width and overflows half-width rows on small phones).
+                    isExpanded: true,
                     decoration: const InputDecoration(
                       isDense: true,
                       border: UnderlineInputBorder(
@@ -337,22 +356,43 @@ class OwnerFields extends StatelessWidget {
           ],
         ),
         const SizedBox(height: 20),
-        RescueFieldLabel('Temperament', required: false),
-        const SizedBox(height: 8),
-        RescueRadioOption(
-          'Friendly, approachable',
-          form.temperament,
-          (val) => _set(() => form.temperament = val),
-        ),
-        RescueRadioOption(
-          'Nervous, may run',
-          form.temperament,
-          (val) => _set(() => form.temperament = val),
-        ),
-        RescueRadioOption(
-          'Can be defensive / bite risk',
-          form.temperament,
-          (val) => _set(() => form.temperament = val),
+        // The pet's health, behavior and bite risk, with the same choices
+        // a finder answers for the animal they found, so the two reports
+        // can be compared. Environment and Safety is left out: it's about
+        // where the animal is now, which the owner doesn't know.
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: const Color(0xFFFAF9F5),
+            border: Border.all(color: kRescueFieldBorder),
+            borderRadius: BorderRadius.circular(14),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              HealthBehaviorAssessment(
+                entry: form.lostAnimal,
+                onChanged: onChanged,
+                showEnvironmentSafety: false,
+                isOwnedPet: true,
+              ),
+              const SizedBox(height: 16),
+              const RescueSubsectionHeader(
+                'Risk assessment',
+                subtitle: 'Helps finders approach your pet safely. Choose '
+                    'Unknown if you are not sure.',
+              ),
+              const SizedBox(height: 8),
+              RiskDropdown(
+                label: 'Might it bite?',
+                hintText: 'Select',
+                value: form.lostAnimal.biteRisk,
+                options: kBiteRiskLevels,
+                onChanged: (v) => _set(() => form.lostAnimal.biteRisk = v),
+              ),
+            ],
+          ),
         ),
         const SizedBox(height: 20),
         Row(
@@ -408,9 +448,11 @@ class FinderFields extends StatelessWidget {
     required this.form,
     required this.pinnedAddress,
     required this.onChanged,
+    required this.onSwitchToRescue,
   });
 
   final RescueFormController form;
+  final VoidCallback onSwitchToRescue;
 
   /// The map pin's resolved address (shown as last-seen / found location).
   final String pinnedAddress;
@@ -441,34 +483,35 @@ class FinderFields extends StatelessWidget {
         const SizedBox(height: 4),
         Text(
           'Found more than one? Add each animal below — they will be tracked '
-          'together as one case.',
+              'together as one case.',
           style: GoogleFonts.zain(fontSize: 11, color: AppColors.textSecondary),
         ),
         const SizedBox(height: 10),
+        // Each animal's condition is described by the Health & Behavior
+        // Assessment in its card — no separate condition box here.
         FoundAnimalList(animals: form.foundAnimals, onChanged: onChanged),
-        const SizedBox(height: 12),
-        RescueFieldLabel('Describe Condition', required: true),
-        const SizedBox(height: 6),
-        RescueTextField(form.conditionController, 'Calm, scared, injured…'),
         const SizedBox(height: 20),
         RescueFieldLabel('Right now, the animal is', required: true),
         const SizedBox(height: 8),
         RescueRadioOption(
           'With me, I can hold it for now',
           form.animalStatus,
-          (val) => _set(() => form.animalStatus = val),
+              (val) => _set(() => form.animalStatus = val),
         ),
         RescueRadioOption(
           "Still roaming, can't approach it",
           form.animalStatus,
-          (val) => _set(() => form.animalStatus = val),
+              (val) => _set(() => form.animalStatus = val),
         ),
         RescueRadioOption(
           'Already brought to a vet/shelter',
           form.animalStatus,
-          (val) => _set(() => form.animalStatus = val),
+              (val) => _set(() => form.animalStatus = val),
         ),
         const SizedBox(height: 16),
+        // Lost Pet reports are community lost-and-found listings: the
+        // organization does not coordinate them. An animal that needs
+        // pickup or medical care is reported as a rescue instead.
         Container(
           width: double.infinity,
           padding: const EdgeInsets.all(12),
@@ -476,45 +519,45 @@ class FinderFields extends StatelessWidget {
             color: AppColors.pinkrspwn.withValues(alpha: 0.4),
             borderRadius: BorderRadius.circular(10),
           ),
-          child: Row(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Expanded(
-                child: Text(
-                  'This animal needs pickup or medical help',
+              Text(
+                'Does this animal need pickup or medical help?',
+                style: GoogleFonts.zain(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                  color: AppColors.textPrimary,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                'Lost pet reports go to the community lost-and-found board and '
+                'are not handled by the organization. If the animal is hurt, '
+                'sick or in danger, file a rescue report instead. The animals '
+                'you entered are kept.',
+                style: GoogleFonts.zain(
+                  fontSize: 12,
+                  color: AppColors.textPrimary,
+                ),
+              ),
+              const SizedBox(height: 6),
+              TextButton.icon(
+                onPressed: onSwitchToRescue,
+                icon: const Icon(Icons.medical_services_outlined, size: 18, color: AppColors.textPrimary),
+                label: Text(
+                  'Switch to a rescue report',
                   style: GoogleFonts.zain(
                     fontSize: 13,
+                    fontWeight: FontWeight.w700,
                     color: AppColors.textPrimary,
                   ),
                 ),
-              ),
-              Switch(
-                value: form.finderNeedsRescue,
-                activeThumbColor: AppColors.textPrimary,
-                onChanged: (v) => _set(() => form.finderNeedsRescue = v),
+                style: TextButton.styleFrom(padding: EdgeInsets.zero),
               ),
             ],
           ),
         ),
-        if (form.finderNeedsRescue) ...[
-          const SizedBox(height: 16),
-          RescueFieldLabel('Select Urgency', required: true),
-          const SizedBox(height: 8),
-          RescueRadioOption(
-            'Low',
-            form.selectedUrgency,
-            (val) => _set(() => form.selectedUrgency = val),
-          ),
-          RescueRadioOption(
-            'Medium',
-            form.selectedUrgency,
-            (val) => _set(() => form.selectedUrgency = val),
-          ),
-          RescueRadioOption(
-            'Critical',
-            form.selectedUrgency,
-            (val) => _set(() => form.selectedUrgency = val),
-          ),
-        ],
         const SizedBox(height: 20),
         RescueFieldLabel('Contact Number', required: true),
         const SizedBox(height: 6),
@@ -530,6 +573,157 @@ class FinderFields extends StatelessWidget {
           style: GoogleFonts.zain(fontSize: 11, color: AppColors.textSecondary),
         ),
       ],
+    );
+  }
+}
+
+/// "Is it one of your registered pets?" — the signed-in owner's collar-tag
+/// pets (users/{uid}/collarTags). Picking one fills the owner's fields
+/// (RescueFormController.applyCollarTag); tapping it again unpicks it. A
+/// pet already reported lost opens its report instead, so it isn't filed
+/// twice. Hidden when the owner has no collar tags.
+class _RegisteredPetsPicker extends StatelessWidget {
+  const _RegisteredPetsPicker({required this.form, required this.onChanged});
+
+  final RescueFormController form;
+  final VoidCallback onChanged;
+
+  void _openExisting(BuildContext context, CollarTagData tag) {
+    final alertId = tag.linkedAlertId;
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => alertId != null && alertId.isNotEmpty
+            ? LostFoundTrackCasePage(alertId: alertId)
+            : CollarIdTagCardScreen(tagData: tag),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    String? uid;
+    try {
+      uid = FirebaseAuth.instance.currentUser?.uid;
+    } catch (_) {
+      // Firebase not set up (widget tests): no registered pets to show.
+    }
+    if (uid == null) return const SizedBox.shrink();
+    return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+      stream: FirebaseFirestore.instance
+          .collection('users')
+          .doc(uid)
+          .collection('collarTags')
+          .snapshots(),
+      builder: (context, snap) {
+        final tags = [
+          for (final d in snap.data?.docs ??
+              const <QueryDocumentSnapshot<Map<String, dynamic>>>[])
+            CollarTagData.fromFirestore(d.data(), d.id),
+        ]..sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
+        if (tags.isEmpty) return const SizedBox.shrink();
+        final picked = form.linkedCollarTag?.tagId;
+
+        return Padding(
+          padding: const EdgeInsets.only(top: 20),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const RescueSubsectionHeader(
+                'Is it one of your registered pets?',
+                subtitle: 'Pick your pet to fill in its details. Its collar tag '
+                    'will be marked lost, so anyone who scans it can message '
+                    'you, even without the app.',
+              ),
+              const SizedBox(height: 10),
+              SizedBox(
+                height: 112,
+                child: ListView.separated(
+                  scrollDirection: Axis.horizontal,
+                  itemCount: tags.length,
+                  separatorBuilder: (_, _) => const SizedBox(width: 10),
+                  itemBuilder: (context, i) {
+                    final tag = tags[i];
+                    final isLost = tag.status == 'lost';
+                    final selected = tag.tagId == picked;
+                    return GestureDetector(
+                      onTap: () {
+                        if (isLost) {
+                          _openExisting(context, tag);
+                          return;
+                        }
+                        if (selected) {
+                          form.linkedCollarTag = null;
+                        } else {
+                          form.applyCollarTag(tag);
+                        }
+                        onChanged();
+                      },
+                      child: Container(
+                        width: 96,
+                        padding: const EdgeInsets.all(8),
+                        decoration: BoxDecoration(
+                          color: selected ? kRescueSelectedFill : Colors.white,
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(
+                            color: selected ? AppColors.textPrimary : kRescueFieldBorder,
+                            width: selected ? 1.5 : 1,
+                          ),
+                        ),
+                        child: Column(
+                          children: [
+                            CircleAvatar(
+                              radius: 22,
+                              backgroundColor: AppColors.tearspwn,
+                              backgroundImage: tag.petImageUrl?.isNotEmpty == true
+                                  ? NetworkImage(tag.petImageUrl!)
+                                  : null,
+                              child: tag.petImageUrl?.isNotEmpty == true
+                                  ? null
+                                  : const Icon(Icons.pets,
+                                  size: 20, color: AppColors.textPrimary),
+                            ),
+                            const SizedBox(height: 6),
+                            Text(
+                              tag.name.isNotEmpty ? tag.name : 'Unnamed',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: GoogleFonts.zain(
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w700,
+                                  color: AppColors.textPrimary),
+                            ),
+                            Text(
+                              isLost
+                                  ? 'Reported lost'
+                                  : (selected ? 'Selected' : 'Tap to pick'),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: GoogleFonts.zain(
+                                  fontSize: 11,
+                                  color: isLost
+                                      ? AppColors.error
+                                      : AppColors.textSecondary),
+                            ),
+                          ],
+                        ),
+                      ),
+                    );
+                  },
+                ),
+              ),
+              if (picked != null && form.hasLinkedTagPhoto && form.filledMediaCount == 0)
+                Padding(
+                  padding: const EdgeInsets.only(top: 6),
+                  child: Text(
+                    'Your pet\'s collar-tag photo will be used if you don\'t add new photos.',
+                    style: GoogleFonts.zain(fontSize: 11, color: AppColors.textSecondary),
+                  ),
+                ),
+            ],
+          ),
+        );
+      },
     );
   }
 }

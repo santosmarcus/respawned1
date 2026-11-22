@@ -1,5 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 
+import 'package:respawnd1/core/utils/transport_suitability.dart';
+
 enum TransporterApplicationStatus {
   pending,
   approved,
@@ -26,6 +28,9 @@ class TransporterApplication {
   final String mobileNumber;
   final String? vehicleType;
   final String? licensePlate;
+
+  /// Declared animal capacity (null on applications made before it was asked).
+  final int? maxAnimals;
   final String? licenseFrontUrl;
   final String? licenseBackUrl;
   final String? portraitUrl;
@@ -42,6 +47,7 @@ class TransporterApplication {
     required this.mobileNumber,
     this.vehicleType,
     this.licensePlate,
+    this.maxAnimals,
     this.licenseFrontUrl,
     this.licenseBackUrl,
     this.portraitUrl,
@@ -66,6 +72,7 @@ class TransporterApplication {
       mobileNumber: str('mobileNumber') ?? '',
       vehicleType: str('vehicleType'),
       licensePlate: str('licensePlate'),
+      maxAnimals: declaredAnimalCapacity(d['maxAnimals']),
       licenseFrontUrl: str('licenseFrontUrl'),
       licenseBackUrl: str('licenseBackUrl'),
       portraitUrl: str('portraitUrl'),

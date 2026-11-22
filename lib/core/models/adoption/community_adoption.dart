@@ -10,13 +10,10 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 /// Animal Records module, and there is no vet intake, application review,
 /// or reservation flow attached to it.
 ///
-/// Unlike an org-run adoption listing, submitting this doc IS the adoption
-/// — see community_adoption_listing.dart's doc comment. There's no separate
-/// "active listing awaiting an adopter" state: the only person who can ever
-/// create one is the specific community member who's physically at the
-/// animal's last known location (gated in community_adoption_track_page.dart
-/// before this screen is even reachable), and doing so immediately
-/// finalizes them as the adopter.
+/// The report's reporter never adopts its animals. They manage the listing
+/// and choose among interested adopters; once both sign the community
+/// adoption agreement, CommunityAdoptionRequestRepository creates this doc
+/// for the chosen adopter (see community_adoption_request.dart).
 class CommunityAdoption {
   final String id;
   final String? sourceCaseId; // the rescue `cases/{id}` this came from
@@ -43,10 +40,15 @@ class CommunityAdoption {
   final String? adopterId;
   final String? adopterName;
   final String? adopterContact;
-  // True once they've checked the post-adoption participation agreement —
-  // required before submission is allowed (see
-  // community_adoption_listing.dart's validation).
+  // True once the community adoption agreement was signed by both sides.
   final bool agreementAccepted;
+
+  // From the reporter-managed listing (community_adoption_request.dart):
+  // the reporter's adoption profile for this animal (community_profile.dart),
+  // the request it came from, and who rehomed it.
+  final Map<String, dynamic> listingDetails;
+  final String? requestId;
+  final String? rehomedById;
 
   final DateTime? createdAt;
   final DateTime? adoptedAt;
@@ -72,12 +74,17 @@ class CommunityAdoption {
     this.adopterName,
     this.adopterContact,
     this.agreementAccepted = false,
+    this.listingDetails = const {},
+    this.requestId,
+    this.rehomedById,
     this.createdAt,
     this.adoptedAt,
     this.status = 'adopted',
   });
 
-  factory CommunityAdoption.fromFirestore(DocumentSnapshot<Map<String, dynamic>> doc) {
+  factory CommunityAdoption.fromFirestore(
+      DocumentSnapshot<Map<String, dynamic>> doc,
+      ) {
     final data = doc.data() ?? <String, dynamic>{};
     final createdTs = data['createdAt'];
     final adoptedTs = data['adoptedAt'];
@@ -100,6 +107,11 @@ class CommunityAdoption {
       adopterName: data['adopterName'] as String?,
       adopterContact: data['adopterContact'] as String?,
       agreementAccepted: data['agreementAccepted'] as bool? ?? false,
+      listingDetails: data['listingDetails'] is Map
+          ? Map<String, dynamic>.from(data['listingDetails'] as Map)
+          : const {},
+      requestId: data['requestId'] as String?,
+      rehomedById: data['rehomedById'] as String?,
       createdAt: createdTs is Timestamp ? createdTs.toDate() : null,
       adoptedAt: adoptedTs is Timestamp ? adoptedTs.toDate() : null,
       status: data['status'] as String? ?? 'adopted',
@@ -124,6 +136,9 @@ class CommunityAdoption {
     'adopterName': adopterName,
     'adopterContact': adopterContact,
     'agreementAccepted': agreementAccepted,
+    if (listingDetails.isNotEmpty) 'listingDetails': listingDetails,
+    if (requestId != null) 'requestId': requestId,
+    if (rehomedById != null) 'rehomedById': rehomedById,
     'status': status,
     'createdAt': FieldValue.serverTimestamp(),
     'adoptedAt': FieldValue.serverTimestamp(),

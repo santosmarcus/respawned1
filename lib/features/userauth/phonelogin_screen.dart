@@ -125,7 +125,8 @@ class _PhoneLoginScreenState extends State<PhoneLoginScreen> {
     } catch (e) {
       if (mounted) {
         setState(() {
-          _errorMessage = 'Invalid code. Please try again.';
+          // e.g. the number is already on another account (PhoneTakenException).
+          _errorMessage = AuthService.phoneErrorMessage(e);
           _isLoading = false;
         });
       }

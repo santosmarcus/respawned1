@@ -7,30 +7,23 @@ import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/core/models/dashboard/dashboard_model.dart';
 import 'package:respawnd1/core/models/rescue/animal_record.dart';
 import 'package:respawnd1/core/models/rescue/medication.dart';
-import 'package:respawnd1/core/repos/auth_service.dart';
 import 'package:respawnd1/features/admin/animals/widgets/medication_section.dart';
-import 'package:respawnd1/features/admin/rescue/state/rescue_reports_providers.dart';
 import 'package:respawnd1/features/admin/animals/widgets/care_updates_section.dart';
 import 'package:respawnd1/features/care/care_rounds_widgets.dart';
+import 'package:respawnd1/features/account/account_page.dart';
 
-/// Home for organization members with the `carer` role. Carers give care and
-/// record doses; they don't get the admin shell (cases, records, adoptions,
-/// finance). firestore.rules enforces the same split.
+/// The care-tasks screen: today's rounds and each animal's doses and care
+/// updates. Carers were merged into Staff, so any member with daily care
+/// opens it from the admin drawer ([fromAdminShell]); it is still the home
+/// screen of Staff whose only permission is daily care.
 class CarerHomeScreen extends ConsumerWidget {
-  const CarerHomeScreen({super.key, required this.organizationId});
+  const CarerHomeScreen({super.key, required this.organizationId, this.fromAdminShell = false});
 
   final String organizationId;
 
-  Future<void> _signOut(BuildContext context, WidgetRef ref) async {
-    final navigator = Navigator.of(context, rootNavigator: true);
-    // AuthWrapper swaps this screen out as soon as auth state changes, which
-    // disposes `ref`; the container outlives it.
-    final container = ProviderScope.containerOf(context, listen: false);
-    await authService.value.signOut();
-    container.invalidate(currentOrgMembershipProvider);
-    container.invalidate(currentOrganizationCapabilitiesProvider);
-    navigator.popUntil((route) => route.isFirst);
-  }
+  /// Opened from the admin drawer: a back button instead of Account and
+  /// Log out, which the drawer already has.
+  final bool fromAdminShell;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -39,13 +32,22 @@ class CarerHomeScreen extends ConsumerWidget {
       appBar: AppBar(
         backgroundColor: AppColors.background,
         elevation: 0,
+        foregroundColor: AppColors.textPrimary,
+        automaticallyImplyLeading: fromAdminShell,
         title: Text('Care tasks', style: GoogleFonts.tiltWarp(fontSize: 20, color: AppColors.textPrimary)),
-        actions: [
+        actions: fromAdminShell ? null : [
           IconButton(
-            tooltip: 'Log out',
-            icon: const Icon(Icons.logout, color: AppColors.textPrimary),
-            onPressed: () => _signOut(context, ref),
+            tooltip: 'Account',
+            icon: const Icon(Icons.account_circle_outlined, color: AppColors.textPrimary),
+            onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const AccountPage())),
           ),
+          TextButton.icon(
+            onPressed: () => signOutToLogin(context),
+            icon: const Icon(Icons.logout, color: AppColors.error, size: 20),
+            label: Text('Log out',
+                style: GoogleFonts.zain(fontSize: 14, color: AppColors.error, fontWeight: FontWeight.w700)),
+          ),
+          const SizedBox(width: 4),
         ],
       ),
       body: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(

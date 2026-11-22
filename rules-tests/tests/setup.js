@@ -15,7 +15,11 @@ export async function createEnv() {
 
 // Personas (uid -> users doc):
 //   admin       platform staff (console-assigned role)
-//   ownerA      owner of approved orgA          staffA  member of orgA
+//   ownerA      owner of approved orgA          staffA  member of orgA (the
+//               default Staff set plus campaigns and View donations ticked)
+//   carerA      orgA Staff with only daily care ticked (the care-tasks home)
+//   legacyStaffA / legacyCarerA  orgA members docs from before permissions:
+//               both get the default Staff set (carers were merged into Staff)
 //   staffB      member of approved orgB         draftOwner  owner of draft orgD
 //   reporter / stranger / adopter  general users
 //   rider / rider2  pet transporters
@@ -30,11 +34,14 @@ export const users = {
   staffA: { role: 'organization_member', organizationId: 'orgA' },
   staffB: { role: 'organization_member', organizationId: 'orgB' },
   carerA: { role: 'organization_member', organizationId: 'orgA' },
+  legacyStaffA: { role: 'organization_member', organizationId: 'orgA' },
+  legacyCarerA: { role: 'organization_member', organizationId: 'orgA' },
   draftOwner: { role: 'organization', organizationId: 'orgD' },
   reporter: { role: 'general' },
   stranger: { role: 'general' },
   adopter: { role: 'general' },
-  rider: { role: 'pet_transporter' },
+  // rider is a verified transporter; rider2 is not (still pending review).
+  rider: { role: 'pet_transporter', isVerified: true, transporterVerificationStatus: 'approved' },
   rider2: { role: 'pet_transporter' },
   // orgA members with explicit permissions (Admin + Staff model).
   adminA: { role: 'organization_member', organizationId: 'orgA' },
@@ -49,8 +56,13 @@ export const users = {
   platformMemberA: { role: 'admin', organizationId: 'orgA' },
 };
 
-// Preset lists, as in functions/org_permissions.json.
+// Preset lists as in functions/org_permissions.json, plus two custom mixes
+// (rescueCoordinator, adoptionsOfficer) used by the fixtures below.
+// Permission sets used by the tests. The app has one default Staff set
+// (defaultStaff, functions/org_permissions.json); the others are sets an
+// Admin builds by ticking boxes.
 export const presets = {
+  defaultStaff: ['rescue', 'animals', 'care', 'adoptions', 'volunteers', 'insights'],
   fullStaff: ['rescue', 'animals', 'care', 'adoptions', 'campaigns', 'financeView', 'volunteers', 'insights'],
   rescueCoordinator: ['rescue', 'animals', 'care', 'insights'],
   animalCare: ['care'],
@@ -68,8 +80,10 @@ export async function seed(env) {
 
     await db.doc('organizations/orgA').set({ ownerId: 'ownerA', name: 'Org A', verificationStatus: 'approved' });
     await db.doc('organizations/orgA/members/ownerA').set({ role: 'admin', status: 'active' });
-    await db.doc('organizations/orgA/members/staffA').set({ role: 'staff', status: 'active' });
-    await db.doc('organizations/orgA/members/carerA').set({ role: 'carer', status: 'active' });
+    await db.doc('organizations/orgA/members/staffA').set({ role: 'staff', status: 'active', permissions: presets.fullStaff });
+    await db.doc('organizations/orgA/members/carerA').set({ role: 'staff', status: 'active', permissions: presets.animalCare });
+    await db.doc('organizations/orgA/members/legacyStaffA').set({ role: 'staff', status: 'active' });
+    await db.doc('organizations/orgA/members/legacyCarerA').set({ role: 'carer', status: 'active' });
     const staff = (preset, permissions) => ({ role: 'staff', status: 'active', preset, permissions });
     await db.doc('organizations/orgA/members/adminA').set({ role: 'admin', status: 'active' });
     await db.doc('organizations/orgA/members/fullA').set(staff('fullStaff', presets.fullStaff));
@@ -81,7 +95,7 @@ export async function seed(env) {
     await db.doc('organizations/orgA/members/inactiveAdminA').set({ role: 'admin', status: 'removed' });
     await db.doc('organizations/orgA/members/platformMemberA').set({ role: 'admin', status: 'active' });
     await db.doc('organizations/orgB').set({ ownerId: 'someoneElse', name: 'Org B', verificationStatus: 'approved' });
-    await db.doc('organizations/orgB/members/staffB').set({ role: 'staff', status: 'active' });
+    await db.doc('organizations/orgB/members/staffB').set({ role: 'staff', status: 'active', permissions: presets.fullStaff });
     await db.doc('organizations/orgD').set({ ownerId: 'draftOwner', name: 'Org D', verificationStatus: 'draft' });
     await db.doc('organizations/orgD/members/draftOwner').set({ role: 'admin', status: 'active' });
 

@@ -27,6 +27,8 @@ const PUBLIC_FIELDS = [
   'vaccinated', 'spayedNeutered', 'dewormed', 'specialNeeds', 'specialNeedsTypes',
   'adoptionStatus', 'status', 'currentStatus', 'organizationId', 'qrTagId',
   'createdAt', 'updatedAt',
+  // Open / fully funded, kept current by sponsorship_funding.js.
+  'sponsorshipFunding',
 ];
 
 // Legacy photo field names AnimalRecord falls back to; only download URLs
@@ -62,15 +64,34 @@ function publicAnimalOf(data) {
     if (data[key] !== undefined) out[key] = data[key];
   }
   out.photoUrls = photosOf(data);
+  // A description per photo ({url, caption}), for the public photos only.
+  const captions = Array.isArray(data.photoCaptions) ? data.photoCaptions : [];
+  out.photoCaptions = captions.filter((c) =>
+    c && out.photoUrls.includes(c.url) && typeof c.caption === 'string' && c.caption.trim(),
+  ).map((c) => ({url: c.url, caption: c.caption.trim()}));
   return out;
 }
 
 exports.publicAnimalOf = publicAnimalOf;
+exports.photosOf = photosOf;
 
 exports.syncPublicAnimal = onDocumentWritten('animals/{animalId}', async (event) => {
   const after = event.data && event.data.after.exists ? event.data.after.data() : null;
   const ref = admin.firestore().collection('publicAnimals').doc(event.params.animalId);
   const copy = publicAnimalOf(after);
+  // Animals cared for by an independent rescuer say so on their public
+  // page ("Independent rescuer · name"); shelters' animals carry nothing.
+  if (copy && typeof copy.organizationId === 'string' && copy.organizationId) {
+    try {
+      const org = await admin.firestore().collection('organizations').doc(copy.organizationId).get();
+      if (org.exists && org.get('kind') === 'independent') {
+        copy.ownerKind = 'independent';
+        copy.ownerName = org.get('name') || null;
+      }
+    } catch (e) {
+      console.warn('[syncPublicAnimal] organization lookup failed', e.message);
+    }
+  }
   if (copy) {
     await ref.set(copy);
   } else {

@@ -1,6 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/core/repos/auth_service.dart';
@@ -9,8 +10,11 @@ import 'package:respawnd1/features/pettransporter/transit_progress_page.dart';
 import 'package:respawnd1/features/pettransporter/transporter_notif.dart';
 import 'package:respawnd1/core/utils/case_id.dart';
 import 'package:respawnd1/core/utils/transporter_trip_stats.dart';
+import 'package:respawnd1/core/utils/transport_suitability.dart';
 import 'package:respawnd1/features/pettransporter/transporter_verification_screen.dart';
 import 'package:respawnd1/core/widgets/app_dialogs.dart';
+import 'package:respawnd1/core/widgets/delete_account.dart';
+import 'package:respawnd1/features/account/account_page.dart';
 
 class TransporterProfile extends StatelessWidget {
   const TransporterProfile({super.key});
@@ -108,6 +112,7 @@ class TransporterProfile extends StatelessWidget {
             final portraitUrl = verification['portraitUrl'] as String?;
             final vehicleType = verification['vehicleType'] as String?;
             final licensePlate = verification['licensePlate'] as String?;
+            final maxAnimals = declaredAnimalCapacity(verification['maxAnimals']);
 
             final fullName = ('$firstName $lastName').trim();
 
@@ -184,6 +189,31 @@ class TransporterProfile extends StatelessWidget {
                             ? licensePlate
                             : '—',
                       ),
+                      const Divider(height: 20),
+                      _InfoRow(
+                        icon: Icons.pets_outlined,
+                        label: 'Animals Carried Safely',
+                        value: maxAnimals?.toString() ?? 'Not declared',
+                      ),
+                      // Accounts registered before capacity was asked
+                      // declare it once here; changing it later goes
+                      // through a new verification (firestore.rules).
+                      if (maxAnimals == null && (vehicleType ?? '').isNotEmpty) ...[
+                        const SizedBox(height: 6),
+                        Text(
+                          'Until you declare it, you are only matched to single-animal trips.',
+                          style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary),
+                        ),
+                        Align(
+                          alignment: Alignment.centerLeft,
+                          child: TextButton(
+                            onPressed: () => _declareCapacity(context, uid),
+                            child: Text('Declare Capacity',
+                                style: GoogleFonts.zain(
+                                    fontSize: 13, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
+                          ),
+                        ),
+                      ],
                     ],
                   ),
 
@@ -220,6 +250,18 @@ class TransporterProfile extends StatelessWidget {
                   const SizedBox(height: 10),
                   _InfoCard(
                     children: [
+                      _MenuRow(
+                        icon: Icons.account_circle_outlined,
+                        label: 'Account and switch account',
+                        onTap: () {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                                builder: (_) => const AccountPage(returnToDashboard: false)),
+                          );
+                        },
+                      ),
+                      const Divider(height: 20),
                       _MenuRow(
                         icon: Icons.notifications_outlined,
                         label: 'Notifications',
@@ -278,6 +320,15 @@ class TransporterProfile extends StatelessWidget {
                           style: GoogleFonts.tiltWarp(
                               fontSize: 14, color: AppColors.error)),
                       style: AppButtons.dangerOutline,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Center(
+                    child: TextButton(
+                      onPressed: () => showDeleteAccountFlow(context),
+                      child: Text('Delete account',
+                          style: GoogleFonts.zain(fontSize: 14, color: AppColors.textSecondary,
+                              decoration: TextDecoration.underline)),
                     ),
                   ),
                 ],
@@ -511,6 +562,53 @@ class _InfoCard extends StatelessWidget {
       ),
       child: Column(children: children),
     );
+  }
+}
+
+/// One-time capacity declaration for a transporter registered before the
+/// question was part of verification.
+Future<void> _declareCapacity(BuildContext context, String uid) async {
+  final ctrl = TextEditingController();
+  String? error;
+  final value = await showDialog<int>(
+    context: context,
+    builder: (context) => StatefulBuilder(
+      builder: (context, setState) => AlertDialog(
+        title: const Text('How many animals can your vehicle carry safely?'),
+        content: TextField(
+          controller: ctrl,
+          autofocus: true,
+          keyboardType: TextInputType.number,
+          inputFormatters: [FilteringTextInputFormatter.digitsOnly, LengthLimitingTextInputFormatter(2)],
+          decoration: InputDecoration(hintText: 'e.g. 2', errorText: error),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+          ElevatedButton(
+            onPressed: () {
+              final n = declaredAnimalCapacity(ctrl.text.trim());
+              if (n == null) {
+                setState(() => error = 'Enter a number from 1 to $kMaxDeclaredAnimals.');
+                return;
+              }
+              Navigator.pop(context, n);
+            },
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    ),
+  );
+  ctrl.dispose();
+  if (value == null) return;
+  try {
+    await FirebaseFirestore.instance.collection('users').doc(uid).set({
+      'transporterVerification': {'maxAnimals': value},
+    }, SetOptions(merge: true));
+  } catch (e) {
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Could not save: $e')));
+    }
   }
 }
 

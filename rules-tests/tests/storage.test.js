@@ -34,6 +34,17 @@ describe('storage', () => {
     await assertSucceeds(upload('stranger', 'cases/ownedA/communityReports/r1.jpg'));
   });
 
+  test("lost/found pet alert media: only the alert's reporter uploads", async () => {
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await ctx.firestore().doc('petAlerts/alert1').set({ type: 'lost', reporterId: 'reporter' });
+    });
+    await assertSucceeds(upload('reporter', 'petAlerts/alert1/media_0.jpg'));
+    await assertFails(upload('stranger', 'petAlerts/alert1/media_0.jpg'));
+    await assertFails(upload('reporter', 'petAlerts/missing/media_0.jpg'));
+    // The old path never matched a case, so it stays refused.
+    await assertFails(upload('reporter', 'cases/lostpet_alert1/media_0.jpg'));
+  });
+
   test('profile photos are the owner\'s', async () => {
     await assertSucceeds(upload('reporter', 'users/reporter/profile.jpg'));
     await assertFails(upload('stranger', 'users/reporter/profile.jpg'));
@@ -44,6 +55,16 @@ describe('storage', () => {
     await assertSucceeds(upload('adopter', 'adoptions/appA/checkins/f1/img_0.jpg'));
     await assertSucceeds(upload('staffA', 'adoptions/appA/returnRequest/img_0.jpg'));
     await assertFails(upload('stranger', 'adoptions/appA/government_id.jpg'));
+  });
+
+  test('transporter documents: the transporter uploads; verifiers and system admins read', async () => {
+    const path = 'transporter_verifications/rider/license.jpg';
+    await assertSucceeds(upload('rider', path));
+    const meta = (uid) => env.authenticatedContext(uid).storage().ref(path).getMetadata();
+    await assertSucceeds(meta('sysadmin'));
+    await assertSucceeds(meta('staffA'));
+    await assertFails(meta('stranger'));
+    await assertFails(upload('sysadmin', path));
   });
 
   test('organization verification papers: system admins read them, never upload', async () => {
@@ -76,11 +97,27 @@ describe('storage', () => {
     await assertFails(upload('staffB', 'events/orgA/cover_1.jpg'));
     await assertFails(upload('carerA', 'events/orgA/cover_1.jpg'));
     await assertFails(upload('stranger', 'events/orgA/cover_1.jpg'));
-    await assertFails(upload('draftOwner', 'events/orgD/cover_1.jpg'));
+    // An unapproved organization's cover uploads, but firestore.rules
+    // refuses the event itself (Storage can't also read the org doc).
+    await assertSucceeds(upload('draftOwner', 'events/orgD/cover_1.jpg'));
+    await assertFails(upload('draftOwner', 'events/orgA/cover_1.jpg'));
   });
 
-  test('staff of an unapproved organization get no staff access', async () => {
-    await assertFails(upload('draftOwner', 'receipts/1.jpg'));
+  // Storage rules can read only two Firestore documents, so they don't read
+  // organizations/{orgId}: an unapproved organization's approval is
+  // enforced by firestore.rules on the records, not on the files.
+
+  test('organization profile picture: its Admins and platform staff', async () => {
+    const path = 'organizations/orgA/profile/avatar.jpg';
+    await assertSucceeds(upload('ownerA', path));
+    await assertSucceeds(upload('adminA', path));
+    await assertSucceeds(upload('platformMemberA', path));
+    await assertSucceeds(upload('admin', path));
+    await assertFails(upload('staffA', path));
+    await assertFails(upload('fullA', path));
+    await assertFails(upload('inactiveAdminA', path));
+    await assertFails(upload('staffB', path));
+    await assertFails(upload('stranger', path));
   });
 
   test('removed members lose staff access', async () => {

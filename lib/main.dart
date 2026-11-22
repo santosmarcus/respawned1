@@ -3,16 +3,21 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
-//import 'package:flutter_facebook_auth/flutter_facebook_auth.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:flutter_facebook_auth/flutter_facebook_auth.dart';
+import 'package:respawnd1/core/constants/facebook_config.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:respawnd1/core/repos/org_membership_service.dart';
 import 'package:respawnd1/core/models/organization/organization_capabilities.dart';
 import 'package:respawnd1/core/repos/auth_service.dart';
+import 'package:respawnd1/core/services/known_accounts.dart';
+import 'package:respawnd1/core/widgets/app_messages.dart';
+import 'package:respawnd1/features/organization/organization_member_pending_page.dart';
 import 'package:respawnd1/core/repos/organization_repository.dart';
 import 'package:respawnd1/features/organization/signup/organization_about_screen.dart';
 import 'package:respawnd1/features/organization/signup/organization_verification_pending_page.dart';
-import 'package:respawnd1/features/organization/signup/organization_verification_screen.dart';
 import 'package:respawnd1/features/pettransporter/service_screen.dart';
+import 'package:respawnd1/features/adoption/animal_link_page.dart';
 import 'package:respawnd1/features/pettransporter/transporter_verification_screen.dart';
 import 'package:respawnd1/firebase_options.dart';
 import 'package:respawnd1/app_theme.dart';
@@ -40,20 +45,39 @@ void main() async {
   // Foreground push display + notification tap routing (geofence alerts).
   await NotificationService.init(appNavigatorKey);
 
-  /*if (kIsWeb) {
+  // Facebook Page connect (Organization Profile). Android and iOS read the
+  // App ID from strings.xml / Info.plist; the web SDK needs it here.
+  if (kIsWeb) {
     await FacebookAuth.instance.webAndDesktopInitialize(
-      appId: "YOUR_FACEBOOK_APP_ID",
+      appId: FacebookConfig.appId,
       cookie: true,
       xfbml: true,
-      version: "v19.0",
+      version: FacebookConfig.webSdkVersion,
     );
-  }*/
+  }
 
 
-  runApp(const ProviderScope(child: ResPAWndApp()));
+  runApp(const ProviderScope(retry: appProviderRetry, child: ResPAWndApp()));
+}
+
+/// Riverpod retries a failed provider (up to 10 times, backing off to 6.4s)
+/// and reports it as loading meanwhile. A query the rules refuse fails the
+/// same way every time, so retrying it only kept screens (the dashboard for
+/// Staff without some permission) spinning: settle it as an error at once.
+/// Other errors (offline, timeouts) retry 3 times.
+Duration? appProviderRetry(int retryCount, Object error) {
+  if (error is FirebaseException && error.code == 'permission-denied') return null;
+  if (retryCount >= 3) return null;
+  return ProviderContainer.defaultRetry(retryCount, error);
 }
 
 final GlobalKey<NavigatorState> appNavigatorKey = GlobalKey<NavigatorState>();
+
+/// The account Firebase restored from disk when the app launched, until it
+/// signs out. A restored session that never finished onboarding is signed
+/// out so the app opens on the login screen instead of "Your Details"; an
+/// account that signs in during this run continues onboarding as usual.
+String? _restoredUnfinishedUid = FirebaseAuth.instance.currentUser?.uid;
 
 class ResPAWndApp extends StatefulWidget {
   const ResPAWndApp({super.key});
@@ -100,6 +124,10 @@ class _ResPAWndAppState extends State<ResPAWndApp> {
       theme: AppTheme.lightTheme,
       navigatorKey: appNavigatorKey,
       home: const AuthWrapper(), // use this instead of LoginScreen directly
+      // Links into the app (respawnd://open/animal/ID from an animal's public
+      // web page). A cold start opens it over the home screen.
+      onGenerateRoute: animalLinkRoute,
+      onUnknownRoute: unknownLinkRoute,
     );
   }
 }
@@ -127,6 +155,7 @@ class _AuthWrapperState extends State<AuthWrapper> {
 
         // Not logged in
         if (!snapshot.hasData) {
+          _restoredUnfinishedUid = null;
           return const LoginScreen();
         }
 
@@ -174,15 +203,34 @@ class _UserDocRouterState extends State<_UserDocRouter> with WidgetsBindingObser
   /// device's push token (users/{uid}.fcmToken — every Cloud Function
   /// notification depends on it), starts geofencing, and lets a tapped
   /// notification open its screen.
-  void _startSignedInServices() {
+  void _startSignedInServices(Map<String, dynamic>? profile) {
     if (_signedInServicesStarted) return;
     _signedInServicesStarted = true;
+    // Account > Switch account lists the accounts used on this device.
+    final user = FirebaseAuth.instance.currentUser;
+    if (user != null) KnownAccounts.remember(user, profile);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       PushTokenService.register();
       GeofenceService.start(widget.uid);
       NotificationService.markRouterReady();
     });
   }
+  /// Organization at the last profile update (null before the first).
+  String? _lastOrgId;
+
+  /// When this account leaves an organization while signed in (an Admin
+  /// removed them), screens pushed over the root belong to the old access:
+  /// close them so the root re-routes. Joining one (sign-up wizard, accepting
+  /// an invitation) is left alone; those flows navigate themselves.
+  void _popToRootIfAccountMoved(String role, String organizationId) {
+    final previous = _lastOrgId;
+    _lastOrgId = organizationId;
+    if (previous == null || previous.isEmpty || previous == organizationId) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      appNavigatorKey.currentState?.popUntil((route) => route.isFirst);
+    });
+  }
+
   Stream<DocumentSnapshot<Map<String, dynamic>>> _subscribe() =>
       FirebaseFirestore.instance.collection('users').doc(widget.uid).snapshots(includeMetadataChanges: true);
 
@@ -233,6 +281,7 @@ class _UserDocRouterState extends State<_UserDocRouter> with WidgetsBindingObser
 
         final data = doc.data();
         final role = data?['role'] as String? ?? '';
+        _popToRootIfAccountMoved(role, data?['organizationId'] as String? ?? '');
 
         // Onboarding not finished yet (new user, or social sign-in with
         // no role) — only these users see the onboarding questions.
@@ -242,10 +291,28 @@ class _UserDocRouterState extends State<_UserDocRouter> with WidgetsBindingObser
                 body: Center(child: CircularProgressIndicator()),
             );
           }
+          // Reopening the app with a half-finished signup: start from the
+          // login screen; signing in again resumes onboarding here.
+          if (_restoredUnfinishedUid == widget.uid) {
+            _restoredUnfinishedUid = null;
+            WidgetsBinding.instance.addPostFrameCallback((_) => AuthService().signOut());
+            return const Scaffold(
+              body: Center(child: CircularProgressIndicator()),
+            );
+          }
           return const EnterDetailsScreen();
         }
 
-        _startSignedInServices();
+        _restoredUnfinishedUid = null;
+
+        // Disabled by a system admin: sign-in is already blocked, and this
+        // closes an app that was open at the time (its old token can still
+        // read for up to an hour otherwise).
+        if (data?['disabled'] == true) {
+          return const _DisabledAccountScreen();
+        }
+
+        _startSignedInServices(data);
 
         // Existing user with role — route based on role
         switch (role) {
@@ -256,7 +323,10 @@ class _UserDocRouterState extends State<_UserDocRouter> with WidgetsBindingObser
           case 'ngo_staff':
           case 'admin':
             return const AdminHomeScreen();
+          // Rescue volunteers carry rescues like transporters and send the
+          // same documents (their old application form is gone).
           case 'pet_transporter':
+          case 'rescue_volunteer':
             final verificationStatus =
                 data?['transporterVerificationStatus'] as String? ?? '';
             if (verificationStatus.isEmpty) {
@@ -266,8 +336,6 @@ class _UserDocRouterState extends State<_UserDocRouter> with WidgetsBindingObser
                 phone: data?['phone'] as String? ?? '',
               );
             }
-            return const ServiceScreen();
-          case 'rescue_volunteer':
             return const ServiceScreen();
           case 'organization':
             final organizationId = data?['organizationId'] as String?;
@@ -279,6 +347,16 @@ class _UserDocRouterState extends State<_UserDocRouter> with WidgetsBindingObser
               return const OrganizationAboutScreen();
             }
             return OrganizationRoleRouter(organizationId: organizationId);
+          // Joined by invitation: once linked to an organization they get the
+          // same org shell as any org account; until then, their invitations.
+          // (Without this case a member fell through to the general Home on
+          // every restart, with no way back to the organization.)
+          case 'organization_member':
+            final memberOrgId = data?['organizationId'] as String?;
+            if (memberOrgId == null || memberOrgId.isEmpty) {
+              return const OrganizationMemberPendingPage();
+            }
+            return OrganizationRoleRouter(organizationId: memberOrgId);
           case 'general':
           default:
             return const HomeScreen();
@@ -297,19 +375,49 @@ class OrganizationRoleRouter extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return FutureBuilder<DocumentSnapshot>(
-      future: FirebaseFirestore.instance.collection('organizations').doc(organizationId).get(),
+    // Live, so a status change (submitted, approved) re-routes without a
+    // restart. A failed read must not be mistaken for "draft" (that used to
+    // strand the user on the verification screen with no way back).
+    return StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+      stream: FirebaseFirestore.instance.collection('organizations').doc(organizationId).snapshots(),
       builder: (context, snapshot) {
-        if (snapshot.connectionState == ConnectionState.waiting) {
+        if (snapshot.hasError) {
+          return Scaffold(
+            body: Center(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Text('Could not load your organization.'),
+                  const SizedBox(height: 12),
+                  TextButton(
+                    onPressed: () => appNavigatorKey.currentState?.pushAndRemoveUntil(
+                      MaterialPageRoute(builder: (_) => const AuthWrapper()),
+                      (route) => false,
+                    ),
+                    child: const Text('Retry'),
+                  ),
+                  TextButton(
+                    onPressed: () => AuthService().signOut(),
+                    child: const Text('Log out'),
+                  ),
+                ],
+              ),
+            ),
+          );
+        }
+        final doc = snapshot.data;
+        if (doc == null) {
           return const Scaffold(body: Center(child: CircularProgressIndicator()));
         }
-        final data = snapshot.data?.data() as Map<String, dynamic>?;
+        final data = doc.data();
         final status = OrgVerificationStatus.fromName(data?['verificationStatus'] as String?);
         switch (status) {
           case OrgVerificationStatus.approved:
             return _ApprovedOrgHome(organizationId: organizationId);
           case OrgVerificationStatus.draft:
-            return OrganizationVerificationScreen(organizationId: organizationId);
+            // Never submitted: back to the details (prefilled from the
+            // draft), which leads on to the documents. Has Log out.
+            return const OrganizationAboutScreen();
           case OrgVerificationStatus.pending:
           case OrgVerificationStatus.rejected:
           case OrgVerificationStatus.requiresChanges:
@@ -324,27 +432,102 @@ class OrganizationRoleRouter extends StatelessWidget {
 /// carers) get the care-tasks screen, Staff with no permissions a short
 /// "ask an Admin" page, everyone else the admin shell. Live, so a change an
 /// Admin makes applies without signing out.
-class _ApprovedOrgHome extends StatelessWidget {
+class _ApprovedOrgHome extends StatefulWidget {
   final String organizationId;
   const _ApprovedOrgHome({required this.organizationId});
 
   @override
+  State<_ApprovedOrgHome> createState() => _ApprovedOrgHomeState();
+}
+
+class _ApprovedOrgHomeState extends State<_ApprovedOrgHome> {
+  // Created once (a stream made in build() re-subscribed on every rebuild).
+  late final Stream<OrganizationCapabilities>? _caps = FirebaseAuth.instance.currentUser == null
+      ? null
+      : OrgMembershipService().streamCapabilities(FirebaseAuth.instance.currentUser!.uid);
+
+  /// What this member could do at the last update; null before the first.
+  String? _lastAccess;
+
+  static String _accessKey(OrganizationCapabilities c) {
+    final perms = c.permissions.map((p) => p.name).toList()..sort();
+    return '${c.isActive}|${c.role?.name}|${c.isAdmin}|${perms.join(',')}';
+  }
+
+  /// An Admin changed this member's access while the app was open: close
+  /// any module screens opened on top (they may no longer be allowed) and
+  /// say why, instead of leaving stale screens that now fail to load.
+  void _onAccessChanged(OrganizationCapabilities caps) {
+    final key = _accessKey(caps);
+    final previous = _lastAccess;
+    _lastAccess = key;
+    if (previous == null || previous == key) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final nav = appNavigatorKey.currentState;
+      if (nav == null) return;
+      nav.popUntil((route) => route.isFirst);
+      final ctx = appNavigatorKey.currentContext;
+      if (ctx != null) {
+        ScaffoldMessenger.maybeOf(ctx)?.showSnackBar(
+          appSnackBar('Your access in this organization was changed by an Admin.'),
+        );
+      }
+    });
+  }
+
+  @override
   Widget build(BuildContext context) {
-    final uid = FirebaseAuth.instance.currentUser?.uid;
-    if (uid == null) return const AdminHomeScreen();
+    final stream = _caps;
+    if (stream == null) return const AdminHomeScreen();
     return StreamBuilder<OrganizationCapabilities>(
-      stream: OrgMembershipService().streamCapabilities(uid),
+      stream: stream,
       builder: (context, snapshot) {
         final caps = snapshot.data;
         if (caps == null) {
           return const Scaffold(body: Center(child: CircularProgressIndicator()));
         }
+        _onAccessChanged(caps);
         return switch (orgHomeFor(caps)) {
-          OrgHome.care => CarerHomeScreen(organizationId: organizationId),
+          OrgHome.care => CarerHomeScreen(organizationId: widget.organizationId),
           OrgHome.noAccess => const _NoOrgAccessScreen(),
           OrgHome.admin => const AdminHomeScreen(),
         };
       },
+    );
+  }
+}
+
+class _DisabledAccountScreen extends StatelessWidget {
+  const _DisabledAccountScreen();
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: SafeArea(
+        child: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(Icons.block, size: 48),
+                const SizedBox(height: 12),
+                const Text('Account disabled', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700)),
+                const SizedBox(height: 8),
+                const Text(
+                  'This account has been disabled by a ResPAWnd administrator. Contact support if you think this is a mistake.',
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 16),
+                ElevatedButton(
+                  onPressed: () => AuthService().signOut(),
+                  child: const Text('Log out'),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
     );
   }
 }

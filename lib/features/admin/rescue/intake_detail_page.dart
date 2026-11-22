@@ -1,5 +1,6 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:respawnd1/core/widgets/progress_timeline.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:respawnd1/app_theme.dart';
@@ -12,6 +13,8 @@ import 'package:respawnd1/features/admin/animals/animal_records_flow_page.dart';
 import 'package:respawnd1/features/admin/rescue/admin_track_case_page.dart';
 import 'package:respawnd1/features/admin/rescue/assign_rider_page.dart';
 import 'package:respawnd1/features/admin/rescue/state/rescue_reports_providers.dart';
+import 'package:respawnd1/features/admin/rescue/widgets/case_page_kit.dart';
+import 'package:respawnd1/features/admin/rescue/expenses/case_costs_card.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/close_case_flow.dart';
 import 'package:respawnd1/core/widgets/app_dialogs.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/transporter_details_card.dart';
@@ -64,6 +67,10 @@ class _IntakeDetailPageState extends ConsumerState<IntakeDetailPage> {
 
   ShelterDestination? _resolvedDestination;
   String? _currentOrganizationId;
+  bool _resolvingDestination = true;
+  // Post-frame intake completion runs once per distinct state, not on every
+  // rebuild (each rebuild used to schedule another uncaught transaction).
+  String? _lastIntakeCompletionKey;
 
   @override
   void initState() {
@@ -87,19 +94,25 @@ class _IntakeDetailPageState extends ConsumerState<IntakeDetailPage> {
     final uid = FirebaseAuth.instance.currentUser?.uid;
     ShelterDestination? resolved;
     String? orgId;
-    if (uid != null) {
-      final membership = await OrgMembershipService().getMembership(uid);
-      orgId = membership?.organizationId;
-      final repo = ref.read(organizationDirectoryRepositoryProvider);
-      resolved = await repo.resolveShelterLocation(orgId);
-      // TODO: Remove the user-scoped shelter fallback once organization
-      // membership is required for every admin/NGO account.
-      resolved ??= await repo.resolveUserShelterLocation(uid);
+    if (mounted) setState(() => _resolvingDestination = true);
+    try {
+      if (uid != null) {
+        final membership = await OrgMembershipService().getMembership(uid);
+        orgId = membership?.organizationId;
+        final repo = ref.read(organizationDirectoryRepositoryProvider);
+        resolved = await repo.resolveShelterLocation(orgId);
+        // TODO: Remove the user-scoped shelter fallback once organization
+        // membership is required for every admin/NGO account.
+        resolved ??= await repo.resolveUserShelterLocation(uid);
+      }
+    } catch (_) {
+      // Shown as "no shelter location" with a way to set one.
     }
     if (mounted) {
       setState(() {
         _resolvedDestination = resolved;
         _currentOrganizationId = orgId;
+        _resolvingDestination = false;
       });
     }
   }
@@ -113,6 +126,19 @@ class _IntakeDetailPageState extends ConsumerState<IntakeDetailPage> {
       );
       return;
     }
+    // Open on whatever is already saved where this will write
+    // (organizations/{orgId}.shelter*, or the account's own temporary
+    // shelter), not a blank search. A legacy name-only location has no pin
+    // to show, so it opens blank.
+    final repo = ref.read(organizationDirectoryRepositoryProvider);
+    ShelterDestination? current;
+    try {
+      current = orgId != null ? await repo.resolveShelterLocation(orgId) : await repo.resolveUserShelterLocation(uid);
+    } catch (_) {
+      current = null;
+    }
+    if (current != null && (current.lat == null || current.lng == null)) current = null;
+    if (!mounted) return;
     // No organization linked -> save onto this account's own temporary
     // shelter fields instead, so Intake can still be exercised end-to-end.
     final saved = await Navigator.push<bool>(
@@ -121,6 +147,11 @@ class _IntakeDetailPageState extends ConsumerState<IntakeDetailPage> {
         builder: (_) => ShelterLocationPickerPage(
           organizationId: orgId,
           userId: orgId == null ? uid : null,
+          initialName: current?.name,
+          initialAddress: current?.address,
+          initialPlaceId: current?.placeId,
+          initialLat: current?.lat,
+          initialLng: current?.lng,
         ),
       ),
     );
@@ -178,27 +209,8 @@ class _IntakeDetailPageState extends ConsumerState<IntakeDetailPage> {
     }
     if (transporterUid == null) return;
 
-    final confirmed = await showConfirmActionDialog(context, title: 'Confirm Intake', content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            _ConfirmRow('Intake Destination', destination.name),
-            _ConfirmRow('Transporter', '$transporterName ($transporterType)'),
-            _ConfirmRow(
-              'Clinic Pickup Location',
-              c.vetClinicName ?? 'Not on file',
-            ),
-            _ConfirmRow('Case ID', '#${c.shortCaseId}'),
-            _ConfirmRow('Species Summary', c.speciesSummary),
-            _ConfirmRow(
-              'Discharge Date',
-              c.dischargedAt != null
-                  ? formatDate(c.dischargedAt!)
-                  : 'Not on file',
-            ),
-          ],
-        ), confirmLabel: 'Confirm');
-    if (confirmed != true || !mounted) return;
+    // No second "Confirm Intake" popup: this page already lists the
+    // destination, transporter and case, so the button is the confirmation.
 
     setState(() => _isConfirmingIntake = true);
     try {
@@ -347,6 +359,59 @@ class _IntakeDetailPageState extends ConsumerState<IntakeDetailPage> {
     }
   }
 
+  void _reassignTransporter(RescueCase c) => Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => AssignRiderPage(
+            caseId: widget.caseId,
+            data: c.raw,
+            postAcceptTrackingMode: TrackingMode.intakeTransfer,
+          ),
+        ),
+      );
+
+  /// Before intake is confirmed: Confirm Intake (or Set Shelter Location
+  /// when none is usable yet) and Reassign, in the same sticky bar every
+  /// other case page uses.
+  Widget _confirmBar(
+    RescueCase c, {
+    required String? defaultUid,
+    required String defaultName,
+    required String defaultType,
+    required bool defaultIsDemo,
+  }) {
+    final d = _resolvedDestination;
+    final hasDestination = d != null && d.lat != null && d.lng != null;
+    final CaseAction primary;
+    if (_resolvingDestination) {
+      primary = const CaseAction('Confirm Intake', null);
+    } else if (!hasDestination) {
+      primary = CaseAction('Set Shelter Location', _openShelterPicker);
+    } else {
+      primary = CaseAction(
+        'Confirm Intake',
+        defaultUid == null
+            ? null
+            : () => _confirmIntake(
+                  c: c,
+                  transporterUid: defaultUid,
+                  transporterName: defaultName,
+                  transporterType: defaultType,
+                  transporterIsDemo: defaultIsDemo,
+                ),
+      );
+    }
+    // Reassign lives on the transporter card's menu; Assign shows here only
+    // while there is no transporter yet.
+    return CaseActionBar(
+      primary: primary,
+      secondary: defaultUid == null
+          ? CaseAction('Assign Transporter', () => _reassignTransporter(c), icon: Icons.swap_horiz)
+          : null,
+      busy: _isConfirmingIntake,
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final liveCase = ref.watch(caseDetailProvider(widget.caseId)).asData?.value;
@@ -411,26 +476,31 @@ class _IntakeDetailPageState extends ConsumerState<IntakeDetailPage> {
         intakeAnimalIndexes.isNotEmpty &&
         intakeAnimalIndexes.every((i) => animalIsReceived(c, i));
 
-    if (widget.animalIndexes != null) {
+    final completionKey =
+        '${completedIndexes.length}/$totalAnimals/$selectedAnimalsReceived/${c.intakeReceivedAt != null}';
+    if (completionKey != _lastIntakeCompletionKey) {
+      _lastIntakeCompletionKey = completionKey;
       WidgetsBinding.instance.addPostFrameCallback((_) async {
-        if (completedIndexes.length >= totalAnimals &&
-            selectedAnimalsReceived) {
-          await ref
-              .read(rescueCaseRepositoryProvider)
-              .completeIntakeForAnimals(
-                caseId: widget.caseId,
-                animalIndexes: widget.animalIndexes!,
-              );
+        try {
+          if (widget.animalIndexes != null) {
+            if (completedIndexes.length >= totalAnimals && selectedAnimalsReceived) {
+              await ref.read(rescueCaseRepositoryProvider).completeIntakeForAnimals(
+                    caseId: widget.caseId,
+                    animalIndexes: widget.animalIndexes!,
+                  );
+            }
+          } else {
+            await _checkIntakeAutoComplete(
+              c,
+              completedCount: completedIndexes.length,
+              totalAnimals: totalAnimals,
+            );
+          }
+        } catch (e) {
+          debugPrint('Intake auto-complete skipped: $e');
+          _lastIntakeCompletionKey = null; // retry on the next change
         }
       });
-    } else {
-      WidgetsBinding.instance.addPostFrameCallback(
-        (_) => _checkIntakeAutoComplete(
-          c,
-          completedCount: completedIndexes.length,
-          totalAnimals: totalAnimals,
-        ),
-      );
     }
 
     final dischargeDateStr = c.dischargedAt != null
@@ -452,157 +522,129 @@ class _IntakeDetailPageState extends ConsumerState<IntakeDetailPage> {
             color: AppColors.background,
           ),
         ),
-        // Reassign Transporter / Change Intake Destination live here instead
-        // of as standalone buttons in the body — Reassign is only offered
-        // while there's still something to reassign (before the animal is
-        // marked received); Change Destination stays available throughout.
+        // Nothing left to change once the animal is at the shelter.
         actions: [
-          if (c.intakeConfirmedAt != null)
-            PopupMenuButton<String>(
-              icon: const Icon(Icons.more_vert, color: AppColors.background),
-              onSelected: (value) {
-                switch (value) {
-                  case 'reassign':
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) => AssignRiderPage(
-                          caseId: widget.caseId,
-                          data: c.raw,
-                          postAcceptTrackingMode: TrackingMode.intakeTransfer,
-                        ),
-                      ),
-                    );
-                    break;
-                  case 'change_destination':
-                    _openShelterPicker();
-                    break;
-                }
-              },
-              itemBuilder: (context) => [
-                if (c.intakeReceivedAt == null)
-                  const PopupMenuItem(
-                    value: 'reassign',
-                    child: Text('Reassign Transporter'),
-                  ),
-                const PopupMenuItem(
-                  value: 'change_destination',
-                  child: Text('Change Intake Destination'),
-                ),
-              ],
-            ),
+          if (!selectedAnimalsReceived)
+          CaseOverflowMenu(
+            busy: _isConfirmingReceived || _isClosingCase,
+            actions: [
+              CaseAction('Change Intake Destination', _openShelterPicker, icon: Icons.home_work_outlined),
+              CaseAction('Close Case', _isClosingCase ? null : () => _closeCase(c), icon: Icons.block, destructive: true),
+            ],
+          ),
         ],
       ),
+      // Once intake is confirmed, the bar has only Confirm Animal Received
+      // (until it is). Transport Tracking and Reassign Transporter are on the
+      // transporter card; Change Intake Destination and Close Case are in
+      // the app bar's menu.
+      bottomNavigationBar: c.intakeConfirmedAt == null
+          ? _confirmBar(c,
+              defaultUid: defaultUid,
+              defaultName: defaultName,
+              defaultType: defaultType,
+              defaultIsDemo: defaultIsDemo)
+          : CaseActionBar.maybe(
+              primary: selectedAnimalsReceived
+                  ? null
+                  : CaseAction('Confirm Animal Received', _isConfirmingReceived ? null : () => _confirmAnimalReceived(c)),
+              busy: _isConfirmingReceived || _isClosingCase,
+            ),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(16),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             // Header — same hierarchy as Treatment Details / Rescue Reports.
-            Text(
-              '#${c.shortCaseId}',
-              style: GoogleFonts.tiltWarp(
-                fontSize: 22,
-                color: AppColors.textPrimary,
+            CaseHeaderCard(
+              title: c.speciesSummary,
+              caseId: c.shortCaseId,
+              reporterName: c.reporterName,
+              photoUrls: c.photoUrls,
+              badges: [
+                if ((c.vetClinicName ?? '').isNotEmpty)
+                  CaseBadge(label: c.vetClinicName!, icon: Icons.local_hospital_outlined),
+                CaseBadge(label: 'Discharged $dischargeDateStr', icon: Icons.event_outlined, color: AppColors.tearspwn),
+                if (c.raw['sourceType'] == 'adoptionReturn')
+                  const CaseBadge(
+                      label: 'Intake source: adoption return',
+                      icon: Icons.assignment_return_outlined,
+                      color: AppColors.pinkrspwn),
+              ],
+            ),
+            const SizedBox(height: kCaseGap),
+            // The intake sequence, so the next step is obvious.
+            ProgressTimeline(
+              title: 'Animal intake',
+              statusLabel: completedIndexes.length >= totalAnimals && selectedAnimalsReceived ? 'Done' : 'In progress',
+              steps: ProgressTimeline.sequence(
+                [
+                  ('Confirm intake', 'Check the shelter destination and transporter, then start the trip.'),
+                  ('Confirm animal received', 'Confirm the animal physically arrived at the shelter.'),
+                  ('Quarantine / isolation (required)', 'Start it, then let it run or end it.'),
+                  ('Create animal records', '$totalAnimals ${totalAnimals == 1 ? 'animal' : 'animals'} · ${completedIndexes.length} done'),
+                ],
+                c.intakeConfirmedAt == null
+                    ? 0
+                    : !selectedAnimalsReceived
+                        ? 1
+                        : !c.hasQuarantineDecision
+                            ? 2
+                            : completedIndexes.length < totalAnimals
+                                ? 3
+                                : 4,
               ),
             ),
-            const SizedBox(height: 2),
-            Text(
-              c.speciesSummary,
-              style: GoogleFonts.zain(
-                fontSize: 14,
-                fontWeight: FontWeight.w600,
-                color: AppColors.textPrimary,
+            const SizedBox(height: kCaseGap),
+            if (c.intakeConfirmedAt == null)
+              const CaseOutcomeBanner(
+                tone: CaseBannerTone.info,
+                icon: Icons.arrow_forward,
+                title: 'Next: confirm intake',
+                message: 'Check the shelter destination and the transporter, then confirm to start the trip.',
+              )
+            else if (selectedAnimalsReceived)
+              CaseOutcomeBanner(
+                tone: CaseBannerTone.success,
+                icon: Icons.check_circle_outline,
+                title: 'Animal received',
+                message: c.intakeReceivedAt == null
+                    ? 'Receipt confirmed. Finish quarantine and the animal records below.'
+                    : 'Received ${formatDate(c.intakeReceivedAt!)}. Finish quarantine and the animal records below.',
+              )
+            else
+              const CaseOutcomeBanner(
+                tone: CaseBannerTone.info,
+                icon: Icons.local_shipping_outlined,
+                title: 'Transport in progress',
+                message: 'Confirm the animal was received when it arrives at the shelter.',
               ),
-            ),
-            if ((c.vetClinicName ?? '').isNotEmpty) ...[
-              const SizedBox(height: 2),
-              Text(
-                c.vetClinicName!,
-                style: GoogleFonts.zain(
-                  fontSize: 13,
-                  color: AppColors.textSecondary,
-                ),
-              ),
-            ],
-            const SizedBox(height: 2),
-            Text(
-              'Discharged $dischargeDateStr',
-              style: GoogleFonts.zain(
-                fontSize: 12,
-                color: AppColors.textSecondary,
-              ),
-            ),
-
-            if (c.raw['sourceType'] == 'adoptionReturn') ...[
-              const SizedBox(height: 10),
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 8,
-                ),
-                decoration: BoxDecoration(
-                  color: AppColors.pinkrspwn.withValues(alpha: 0.4),
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                child: Row(
-                  children: [
-                    const Icon(
-                      Icons.assignment_return_outlined,
-                      size: 16,
-                      color: AppColors.textPrimary,
-                    ),
-                    const SizedBox(width: 8),
-                    Text(
-                      'Intake Source: Adoption Return',
-                      style: GoogleFonts.zain(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w700,
-                        color: AppColors.textPrimary,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-
-            const SizedBox(height: 20),
+            const SizedBox(height: kCaseGap),
 
             if (c.intakeConfirmedAt == null)
               _ConfirmIntakeSection(
-                rescueCase: c,
                 destination: _resolvedDestination,
+                resolvingDestination: _resolvingDestination,
+                assignment: (latestAssignment != null &&
+                        (latestAssignment.status == TransportAssignmentStatus.accepted ||
+                            latestAssignment.status == TransportAssignmentStatus.completed))
+                    ? latestAssignment
+                    : null,
                 defaultUid: defaultUid,
                 defaultName: defaultName,
                 defaultType: defaultType,
-                defaultIsDemo: defaultIsDemo,
-                isConfirming: _isConfirmingIntake,
                 onChangeShelter: _openShelterPicker,
-                onReassign: () => Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) => AssignRiderPage(
-                      caseId: widget.caseId,
-                      data: c.raw,
-                      postAcceptTrackingMode: TrackingMode.intakeTransfer,
-                    ),
-                  ),
-                ),
-                onConfirm: () => _confirmIntake(
-                  c: c,
-                  transporterUid: defaultUid,
-                  transporterName: defaultName,
-                  transporterType: defaultType,
-                  transporterIsDemo: defaultIsDemo,
-                ),
+                onReassign: () => _reassignTransporter(c),
               )
             else ...[
-              _SectionHeader('Intake Destination'),
-              _InfoItem('Destination', c.intakeDestinationName ?? '-'),
-              if ((c.intakeDestinationAddress ?? '').isNotEmpty)
-                _InfoItem('Address', c.intakeDestinationAddress!),
-              const SizedBox(height: 16),
+              CaseInfoGrid(
+                title: 'Intake destination',
+                items: [
+                  CaseInfoItem('Destination', c.intakeDestinationName ?? '-'),
+                  CaseInfoItem('Address', c.intakeDestinationAddress, wide: true),
+                ],
+              ),
+              const SizedBox(height: kCaseGap),
 
               // Transporter Card Regression spec §4 — restores the shared
               // transporter card here too (it previously showed only a
@@ -616,93 +658,43 @@ class _IntakeDetailPageState extends ConsumerState<IntakeDetailPage> {
               // delivery for historical context; Reassign Transporter
               // stays in the overflow menu (see AppBar actions above) —
               // not re-added to the card itself.
-              _SectionHeader('Clinic-to-Shelter Transport'),
               if (latestAssignment != null &&
                   (latestAssignment.status == TransportAssignmentStatus.accepted ||
                       latestAssignment.status == TransportAssignmentStatus.completed)) ...[
-                TransporterDetailsCard(assignment: latestAssignment),
-                const SizedBox(height: 8),
-              ],
-              if (selectedAnimalsReceived)
-                Container(
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: AppColors.greenrspwn.withValues(alpha: 0.15),
-                    borderRadius: BorderRadius.circular(14),
-                  ),
-                  child: Row(
-                    children: [
-                      const Icon(
-                        Icons.check_circle,
-                        color: AppColors.greenrspwn,
-                        size: 20,
+                _SectionHeader('Clinic-to-Shelter Transport'),
+                TransporterDetailsCard(
+                  assignment: latestAssignment,
+                  onTrack: () => Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => AdminTrackCasePage(
+                        caseId: widget.caseId,
+                        data: c.raw,
+                        mode: TrackingMode.intakeTransfer,
                       ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              'Animal received',
-                              style: GoogleFonts.zain(
-                                fontSize: 13,
-                                fontWeight: FontWeight.w600,
-                                color: AppColors.textPrimary,
-                              ),
-                            ),
-                            Text(
-                              c.intakeReceivedAt == null
-                                  ? 'Receipt confirmed'
-                                  : 'Received ${formatDate(c.intakeReceivedAt!)}',
-                              style: GoogleFonts.zain(
-                                fontSize: 12,
-                                color: AppColors.textSecondary,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
-                )
-              else
-                Text(
-                  'Transport in progress.',
-                  style: GoogleFonts.zain(
-                    fontSize: 13,
-                    color: AppColors.textSecondary,
-                  ),
-                ),
-              const SizedBox(height: 8),
-              OutlinedButton.icon(
-                onPressed: () => Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) => AdminTrackCasePage(
-                      caseId: widget.caseId,
-                      data: c.raw,
-                      mode: TrackingMode.intakeTransfer,
                     ),
                   ),
+                  menuActions: [
+                    if (c.intakeReceivedAt == null)
+                      CaseAction(
+                        'Reassign Transporter',
+                        () => Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => AssignRiderPage(
+                              caseId: widget.caseId,
+                              data: c.raw,
+                              postAcceptTrackingMode: TrackingMode.intakeTransfer,
+                            ),
+                          ),
+                        ),
+                        icon: Icons.swap_horiz,
+                      ),
+                  ],
                 ),
-                icon: const Icon(Icons.map_outlined, size: 18),
-                label: Text(
-                  'View Transport Tracking',
-                  style: GoogleFonts.zain(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: AppColors.textPrimary,
-                  side: const BorderSide(color: AppColors.textPrimary),
-                  minimumSize: const Size(double.infinity, 44),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(30),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 20),
+                const SizedBox(height: 8),
+              ],
+              const SizedBox(height: 12),
               _QuarantineSection(
                 rescueCase: c,
                 daysController: _quarantineDaysController,
@@ -717,34 +709,6 @@ class _IntakeDetailPageState extends ConsumerState<IntakeDetailPage> {
               ),
 
               const SizedBox(height: 20),
-              if (!selectedAnimalsReceived) ...[
-                SizedBox(
-                  width: double.infinity,
-                  child: ElevatedButton(
-                    onPressed: _isConfirmingReceived
-                        ? null
-                        : () => _confirmAnimalReceived(c),
-                    style: AppButtons.primary,
-                    child: _isConfirmingReceived
-                        ? const SizedBox(
-                            height: 20,
-                            width: 20,
-                            child: CircularProgressIndicator(
-                              strokeWidth: 2,
-                              color: AppColors.textPrimary,
-                            ),
-                          )
-                        : Text(
-                            'Confirm Animal Received',
-                            style: GoogleFonts.tiltWarp(
-                              fontSize: 15,
-                              color: AppColors.textPrimary,
-                            ),
-                          ),
-                  ),
-                ),
-                const SizedBox(height: 20),
-              ],
               _AnimalRecordsSection(
                 caseId: widget.caseId,
                 data: c.raw,
@@ -755,25 +719,10 @@ class _IntakeDetailPageState extends ConsumerState<IntakeDetailPage> {
                 sourceAnimalRecordId: sourceAnimalRecordId,
                 animalIndexes: widget.animalIndexes,
               ),
-              const SizedBox(height: 20),
-              SizedBox(
-                width: double.infinity,
-                child: OutlinedButton(
-                  onPressed: _isClosingCase ? null : () => _closeCase(c),
-                  style: AppButtons.dangerOutline,
-                  child: _isClosingCase
-                      ? const SizedBox(
-                          height: 20,
-                          width: 20,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      : Text(
-                          'Close Case',
-                          style: GoogleFonts.tiltWarp(fontSize: 15),
-                        ),
-                ),
-              ),
             ],
+
+            // Treatment costs stay viewable after the Treatment page.
+            CaseCostsCard(rescueCase: c, topGap: 20),
 
             const SizedBox(height: 32),
           ],
@@ -784,108 +733,95 @@ class _IntakeDetailPageState extends ConsumerState<IntakeDetailPage> {
 }
 
 class _ConfirmIntakeSection extends StatelessWidget {
-  final RescueCase rescueCase;
   final ShelterDestination? destination;
+  final bool resolvingDestination;
+  final TransportAssignment? assignment;
   final String? defaultUid;
   final String defaultName;
   final String defaultType;
-  final bool defaultIsDemo;
-  final bool isConfirming;
   final VoidCallback onChangeShelter;
   final VoidCallback onReassign;
-  final VoidCallback onConfirm;
 
   const _ConfirmIntakeSection({
-    required this.rescueCase,
     required this.destination,
+    required this.resolvingDestination,
+    required this.assignment,
     required this.defaultUid,
     required this.defaultName,
     required this.defaultType,
-    required this.defaultIsDemo,
-    required this.isConfirming,
     required this.onChangeShelter,
     required this.onReassign,
-    required this.onConfirm,
   });
-
-  bool get _hasUsableDestination =>
-      destination != null &&
-      destination!.lat != null &&
-      destination!.lng != null;
 
   @override
   Widget build(BuildContext context) {
-    final canConfirm = _hasUsableDestination && defaultUid != null;
-
+    final hasUsableDestination =
+        destination != null && destination!.lat != null && destination!.lng != null;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        _SectionHeader('Confirm Intake'),
-        _DestinationCard(
-          destination: destination,
-          onChangeShelter: onChangeShelter,
-        ),
+        _SectionHeader('Shelter destination'),
+        if (resolvingDestination)
+          const _DestinationLoadingCard()
+        else
+          _DestinationCard(destination: destination, onChangeShelter: onChangeShelter),
         const SizedBox(height: 16),
-        _InfoItem(
-          'Selected Transporter',
-          defaultUid != null ? '$defaultName ($defaultType)' : 'None selected',
-        ),
-        _InfoItem(
-          'Clinic Pickup Location',
-          rescueCase.vetClinicName ?? 'Not on file',
-        ),
-        const SizedBox(height: 8),
-        OutlinedButton(
-          onPressed: onReassign,
-          style: AppButtons.outline,
-          child: Text(
-            'Reassign Transporter',
-            style: GoogleFonts.zain(fontSize: 12, fontWeight: FontWeight.w600),
-          ),
-        ),
-        const SizedBox(height: 20),
-        if (!canConfirm) ...[
-          Text(
-            !_hasUsableDestination
-                ? 'Set a shelter location before confirming intake.'
-                : 'Select a transporter before confirming intake.',
-            style: GoogleFonts.zain(
-              fontSize: 12,
-              color: AppColors.textSecondary,
+        _SectionHeader('Clinic-to-shelter transporter'),
+        if (assignment != null)
+          TransporterDetailsCard(
+            assignment: assignment!,
+            menuActions: [CaseAction('Reassign Transporter', onReassign, icon: Icons.swap_horiz)],
+          )
+        else if (defaultUid != null) ...[
+          _InfoItem('Transporter', '$defaultName ($defaultType)'),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: TextButton.icon(
+              onPressed: onReassign,
+              icon: const Icon(Icons.swap_horiz, size: 18),
+              label: const Text('Reassign Transporter'),
             ),
           ),
-          const SizedBox(height: 8),
-        ],
-        SizedBox(
-          width: double.infinity,
-          child: ElevatedButton(
-            onPressed: isConfirming
-                ? null
-                : (!_hasUsableDestination
-                      ? onChangeShelter
-                      : (canConfirm ? onConfirm : null)),
-            style: AppButtons.primary,
-            child: isConfirming
-                ? const SizedBox(
-                    height: 20,
-                    width: 20,
-                    child: CircularProgressIndicator(
-                      strokeWidth: 2,
-                      color: AppColors.textPrimary,
-                    ),
-                  )
-                : Text(
-                    !_hasUsableDestination
-                        ? 'Set Shelter Location'
-                        : 'Confirm Intake',
-                    style: GoogleFonts.tiltWarp(
-                      fontSize: 15,
-                      color: AppColors.textPrimary,
-                    ),
-                  ),
+        ]
+        else
+          Text(
+            'No transporter yet. Use Assign Transporter below.',
+            style: GoogleFonts.zain(fontSize: 13, color: AppColors.textSecondary),
           ),
-        ),
+        if (!resolvingDestination && (!hasUsableDestination || defaultUid == null)) ...[
+          const SizedBox(height: 12),
+          Text(
+            !hasUsableDestination
+                ? 'Set a shelter location before confirming intake.'
+                : 'Assign a transporter before confirming intake.',
+            style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary),
+          ),
+        ],
       ],
+    );
+  }
+}
+
+class _DestinationLoadingCard extends StatelessWidget {
+  const _DestinationLoadingCard();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: AppColors.slaterspwn),
+      ),
+      child: Row(
+        children: [
+          const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2)),
+          const SizedBox(width: 12),
+          Text('Loading shelter location…',
+              style: GoogleFonts.zain(fontSize: 13, color: AppColors.textSecondary)),
+        ],
+      ),
     );
   }
 }
@@ -1013,7 +949,7 @@ class _QuarantineSection extends StatelessWidget {
     if (c.quarantineStatus == 'active' && c.isQuarantineActive) {
       final end = c.quarantineScheduledEndAt;
       return (
-        title: 'Quarantine / Isolation',
+        title: 'Quarantine',
         subtitle: end != null ? 'Active · Ends ${_fmtDate(end)}' : 'Active',
       );
     }
@@ -1024,7 +960,7 @@ class _QuarantineSection extends StatelessWidget {
       }
       final end = c.quarantineEndedAt;
       return (
-        title: 'Quarantine / Isolation',
+        title: 'Quarantine',
         subtitle: end != null ? 'Completed ${_fmtDate(end)}' : 'Completed',
       );
     }
@@ -1161,8 +1097,7 @@ class _QuarantineSection extends StatelessWidget {
       );
     }
 
-    // Not started yet — required, so the only action is Start.
-    // (Quarantine/isolation can no longer be skipped.)
+    // Not started yet — required, so the only action is Start (no Skip).
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -1335,9 +1270,10 @@ class _AnimalRecordsSection extends StatelessWidget {
       children: [
         Text(
           !received
-              ? 'Confirm that the animal has been received before creating its record.'
+              ? 'Locked until step 2 is done: confirm the animal was received '
+                  '(the Confirm Animal Received button at the bottom).'
               : !quarantineStarted
-                  ? 'Start quarantine/isolation above before creating the animal record.'
+                  ? 'Locked until step 3 is done: start quarantine/isolation above.'
                   : '$completedCount of $totalAnimals records created',
           style: GoogleFonts.zain(fontSize: 13, color: AppColors.textSecondary),
         ),
@@ -1411,36 +1347,6 @@ class _InfoItem extends StatelessWidget {
               fontWeight: FontWeight.w600,
               color: AppColors.textPrimary,
             ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _ConfirmRow extends StatelessWidget {
-  final String label;
-  final String value;
-  const _ConfirmRow(this.label, this.value);
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            label,
-            style: GoogleFonts.zain(
-              fontSize: 11,
-              fontWeight: FontWeight.w700,
-              color: AppColors.textSecondary,
-            ),
-          ),
-          Text(
-            value,
-            style: GoogleFonts.zain(fontSize: 14, color: AppColors.textPrimary),
           ),
         ],
       ),

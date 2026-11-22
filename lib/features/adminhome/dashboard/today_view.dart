@@ -7,7 +7,6 @@ import 'package:respawnd1/core/models/adoption/adoption_application.dart';
 import 'package:respawnd1/core/models/rescue/animal_record.dart';
 import 'package:respawnd1/core/models/rescue/expense.dart';
 import 'package:respawnd1/core/models/rescue/rescue_case.dart';
-import 'package:respawnd1/core/models/rescue/vaccination_record.dart';
 import 'package:respawnd1/core/utils/currency.dart';
 import 'package:respawnd1/features/admin/adoption/state/adoption_providers.dart';
 import 'package:respawnd1/features/admin/animals/state/animal_records_providers.dart';
@@ -15,20 +14,27 @@ import 'package:respawnd1/features/admin/donation/donation_admin_providers.dart'
 import 'package:respawnd1/features/admin/rescue/state/rescue_reports_providers.dart';
 import 'package:respawnd1/features/adminhome/dashboard/alert_claims.dart';
 import 'package:respawnd1/features/adminhome/dashboard/dashboard_alerts.dart';
+import 'package:respawnd1/features/adminhome/dashboard/dashboard_cache.dart';
 import 'package:respawnd1/features/adminhome/dashboard/dashboard_data.dart';
 import 'package:respawnd1/core/models/dashboard/dashboard_model.dart';
 import 'package:respawnd1/features/adminhome/dashboard/dashboard_nav.dart';
 import 'package:respawnd1/features/adminhome/dashboard/dashboard_ui.dart';
 import 'package:respawnd1/features/adminhome/dashboard/events_card.dart';
+import 'package:respawnd1/features/adminhome/dashboard/care_need_row.dart';
 import 'package:respawnd1/features/adminhome/dashboard/rescue_readiness.dart';
-import 'package:respawnd1/features/adminhome/dashboard/week_schedule.dart';
 import 'package:respawnd1/features/adminhome/dashboard/shelter_settings.dart';
-import 'package:respawnd1/features/admin/donation/expense_oversight_page.dart';
 import 'package:respawnd1/features/care/care_rounds_widgets.dart';
 import 'package:respawnd1/features/donation/models.dart';
+import 'package:respawnd1/core/models/donation/donation_model.dart';
+import 'package:respawnd1/core/models/rescue/rescue_status.dart';
+import 'package:respawnd1/core/utils/app_date_format.dart';
+import 'package:respawnd1/features/admin/animals/widgets/medication_section.dart';
+import 'package:respawnd1/features/admin/donation/donation_admin_home.dart';
 
-/// The "Today" tab: what needs action now, whether the shelter can take
-/// another rescue, and the state of care, adoption and funds.
+/// The "Today" tab, top to bottom: Priority actions, Rescue readiness for
+/// today, Rescue, Shelter care, Adoption, Donations & funds and Volunteer
+/// events. Recent activity is on the bell's Notifications page
+/// (admin_notifications.dart).
 class TodayView extends StatelessWidget {
   final GlobalKey? priorityKey;
   const TodayView({super.key, this.priorityKey});
@@ -38,321 +44,29 @@ class TodayView extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        const GlanceCard(),
+        // Each card keeps its last height while its data loads (DashCardSlot).
+        KeyedSubtree(key: priorityKey, child: const DashCardSlot(id: 'priority', child: PriorityActionsCard())),
         const SizedBox(height: 14),
-        KeyedSubtree(key: priorityKey, child: const PriorityActionsCard()),
+        const DashCardSlot(id: 'readiness', child: RescueReadinessCard()),
         const SizedBox(height: 14),
-        const WeekScheduleCard(),
+        const DashCardSlot(id: 'rescue', child: RescueSummaryCard()),
         const SizedBox(height: 14),
-        const RescueReadinessCard(),
+        const DashCardSlot(id: 'shelterCare', child: ShelterCareCard()),
         const SizedBox(height: 14),
-        const RescueSummaryCard(),
+        const DashCardSlot(id: 'adoption', child: AdoptionSummaryCard()),
         const SizedBox(height: 14),
-        const ShelterCareCard(),
+        const DashCardSlot(id: 'funds', child: DonationsFundsCard()),
         const SizedBox(height: 14),
-        const AdoptionSummaryCard(),
-        const SizedBox(height: 14),
-        const EventsCard(),
-        const SizedBox(height: 14),
-        const DonationsFundsCard(),
-        const SizedBox(height: 14),
-        const RecentActivityCard(),
+        const DashCardSlot(id: 'events', child: EventsCard()),
       ],
-    );
-  }
-}
-
-// ─── Today at a glance ───────────────────────────────────────────────────
-
-class _Tile {
-  final IconData icon;
-  final String value;
-  final String label;
-  final ChipTone? tone;
-  final VoidCallback? onTap;
-  const _Tile(this.icon, this.value, this.label, {this.tone, this.onTap});
-}
-
-class GlanceCard extends ConsumerWidget {
-  const GlanceCard({super.key});
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final occ = ref.watch(shelterOccupancyProvider).asData?.value;
-    final snap = ref.watch(dashboardRescueSnapshotProvider).asData?.value;
-    final pending = ref.watch(adoptionsByStatusesProvider(statusFilter(AdoptionStatus.pending))).asData?.value;
-    final approved = ref.watch(adoptionsByStatusesProvider(statusFilter(AdoptionStatus.approved))).asData?.value;
-    final adopted = ref.watch(adoptionsByStatusesProvider(statusFilter(AdoptionStatus.adopted))).asData?.value;
-    final canManage = ref.watch(canManageFinancesProvider).asData?.value ?? false;
-    final payments = canManage ? ref.watch(paymentAttemptsProvider).asData?.value : null;
-    final campaigns = ref.watch(adminCampaignsProvider).asData?.value;
-    final volunteerApps = ref.watch(pendingVolunteerApplicationsProvider).asData?.value;
-    final transporterApps = ref.watch(pendingTransporterApplicationsProvider).asData?.value;
-    final events = ref.watch(upcomingEventsProvider).asData?.value;
-
-    String n(int? v) => v == null ? '—' : '$v';
-    ChipTone? warnIf(int? v) => (v ?? 0) > 0 ? ChipTone.amber : null;
-
-    final urgentCases = snap?.urgentWaiting;
-    final urgent = urgentCases?.length;
-    final weekEnd = DateTime.now().add(const Duration(days: 7));
-    final eventsThisWeek = events?.where((e) => e.startAt.isBefore(weekEnd)).length;
-    final returns = adopted == null ? null : activeReturnsIn(adopted).length;
-    final toVerify = payments?.where((p) => p.status == 'needs_review').length;
-    final active = campaigns?.where((c) => !c.isDraft && !c.isArchived && !c.isEnded && c.status == 'active').toList();
-    final gap = active?.fold<double>(0, (s, c) => s + (c.target > c.collected ? c.target - c.collected : 0));
-    final supplies = campaigns == null
-        ? null
-        : [
-      for (final c in campaigns.where((c) => !c.isDraft && !c.isArchived && !c.isEnded))
-        for (final i in c.inKindItems)
-          if ((i.quantityRemaining ?? 0) > 0) i,
-    ].length;
-    final free = occ?.free;
-
-    return OutlinedCard(
-      title: 'Today at a glance',
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          _GlanceGroup(
-            icon: Icons.sos,
-            name: 'Rescue',
-            onOpen: () => openRescueTab(context, ref, RescuePipelineTab.review),
-            tiles: [
-              // Capacity first, then urgent rescues, then the rest.
-              _Tile(
-                Icons.house,
-                occ == null ? '—' : (free == null ? 'Set' : '${free < 0 ? 0 : free}'),
-                free == null ? 'Capacity not set' : 'Spaces free',
-                tone: free != null && free <= 0 ? ChipTone.red : null,
-                onTap: free == null ? () => showShelterSetupSheet(context) : null,
-              ),
-              _Tile(
-                Icons.sos,
-                n(urgent),
-                'Urgent, not moving',
-                tone: (urgent ?? 0) > 0 ? ChipTone.red : null,
-                onTap: () => openRescueTab(context, ref, urgentTabFor(urgentCases ?? const [])),
-              ),
-              _Tile(
-                Icons.fact_check,
-                n(snap?.count(RescueStage.review)),
-                'Unverified reports',
-                tone: warnIf(snap?.count(RescueStage.review)),
-                onTap: () => openRescueTab(context, ref, RescuePipelineTab.review),
-              ),
-              _Tile(
-                Icons.medication,
-                n(occ?.atVet),
-                'At the vet',
-                tone: warnIf(occ?.atVet),
-                onTap: () => openRescueTab(context, ref, RescuePipelineTab.treatment),
-              ),
-            ],
-          ),
-          _GlanceGroup(
-            icon: Icons.favorite,
-            name: 'Adoption',
-            onOpen: () => openAdoptionQueue(context, AdoptionStatus.pending),
-            tiles: [
-              _Tile(
-                Icons.assignment_ind,
-                n(pending?.length),
-                'Applications to review',
-                onTap: () => openAdoptionQueue(context, AdoptionStatus.pending),
-              ),
-              _Tile(
-                Icons.home,
-                n(approved?.length),
-                'Awaiting handover',
-                onTap: () => openAdoptionQueue(context, AdoptionStatus.approved),
-              ),
-              _Tile(
-                Icons.assignment_return,
-                n(returns),
-                'Return requests',
-                tone: warnIf(returns),
-                onTap: () => openAdoptionQueue(context, AdoptionStatus.adopted),
-              ),
-            ],
-          ),
-          _GlanceGroup(
-            icon: Icons.groups,
-            name: 'People',
-            onOpen: () => openVolunteers(context),
-            tiles: [
-              _Tile(
-                Icons.two_wheeler,
-                n(transporterApps?.length),
-                'Transporters to verify',
-                tone: warnIf(transporterApps?.length),
-                onTap: () => openTransporterApplications(context),
-              ),
-              _Tile(
-                Icons.person_add_alt,
-                n(volunteerApps?.length),
-                'Volunteer applications',
-                onTap: () => openVolunteerApplications(context),
-              ),
-              _Tile(
-                Icons.event,
-                n(eventsThisWeek),
-                'Events in 7 days',
-                onTap: () => openEvents(context),
-              ),
-            ],
-          ),
-          _GlanceGroup(
-            icon: Icons.volunteer_activism,
-            name: 'Donation',
-            onOpen: () => openDonationsAdmin(context),
-            last: true,
-            tiles: [
-              canManage
-                  ? _Tile(
-                Icons.payments,
-                n(toVerify),
-                'Donations to verify',
-                tone: warnIf(toVerify),
-                onTap: () => openFlaggedPayments(context),
-              )
-                  : const _Tile(Icons.lock, '—', 'Donations to verify (admins)'),
-              _Tile(
-                Icons.campaign,
-                gap == null ? '—' : _shortPeso(gap),
-                'Campaign gap',
-                onTap: () => openDonationsAdmin(context),
-              ),
-              _Tile(
-                Icons.inventory_2,
-                n(supplies),
-                'Supplies needed',
-                tone: warnIf(supplies),
-                onTap: () => openDonationsAdmin(context),
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-String _shortPeso(double v) {
-  if (v >= 1000) {
-    final k = v / 1000;
-    return '₱${k >= 100 ? k.round() : k.toStringAsFixed(1)}k';
-  }
-  return formatPeso(v);
-}
-
-class _GlanceGroup extends StatelessWidget {
-  final IconData icon;
-  final String name;
-  final List<_Tile> tiles;
-  final VoidCallback onOpen;
-  final bool last;
-  const _GlanceGroup({
-    required this.icon,
-    required this.name,
-    required this.tiles,
-    required this.onOpen,
-    this.last = false,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final line = AppColors.textPrimary.withValues(alpha: 0.14);
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        InkWell(
-          onTap: onOpen,
-          child: Container(
-            constraints: const BoxConstraints(minHeight: 36),
-            padding: const EdgeInsets.fromLTRB(12, 7, 8, 6),
-            decoration: BoxDecoration(
-              color: const Color(0xFFF3F0E4),
-              border: Border(bottom: BorderSide(color: line)),
-            ),
-            child: Row(
-              children: [
-                Icon(icon, size: 16, color: AppColors.textPrimary),
-                const SizedBox(width: 7),
-                Expanded(child: Text(name, style: dashTitle(13.5))),
-                const Icon(Icons.chevron_right, size: 18, color: AppColors.textSecondary),
-              ],
-            ),
-          ),
-        ),
-        Container(
-          decoration: BoxDecoration(
-            border: last ? null : const Border(bottom: BorderSide(color: AppColors.textPrimary, width: 1.3)),
-          ),
-          child: IntrinsicHeight(
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                for (int i = 0; i < tiles.length; i++)
-                  Expanded(
-                    child: Container(
-                      decoration: BoxDecoration(
-                        border: i == tiles.length - 1 ? null : Border(right: BorderSide(color: line)),
-                      ),
-                      child: _GlanceTile(tile: tiles[i]),
-                    ),
-                  ),
-              ],
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-class _GlanceTile extends StatelessWidget {
-  final _Tile tile;
-  const _GlanceTile({required this.tile});
-
-  @override
-  Widget build(BuildContext context) {
-    final color = switch (tile.tone) {
-      ChipTone.red => DashSeverity.critical.color,
-      ChipTone.amber => DashSeverity.warning.color,
-      _ => AppColors.textPrimary,
-    };
-    return Semantics(
-      button: tile.onTap != null,
-      label: '${tile.label}: ${tile.value}',
-      child: InkWell(
-        onTap: tile.onTap,
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(6, 10, 6, 9),
-          child: Column(
-            children: [
-              Icon(tile.icon, size: 19, color: AppColors.textSecondary),
-              const SizedBox(height: 4),
-              FittedBox(
-                fit: BoxFit.scaleDown,
-                child: Text(tile.value, style: GoogleFonts.tiltWarp(fontSize: 21, color: color, height: 1)),
-              ),
-              const SizedBox(height: 3),
-              Text(
-                tile.label,
-                textAlign: TextAlign.center,
-                style: dashBody(size: 12, weight: FontWeight.w700),
-              ),
-            ],
-          ),
-        ),
-      ),
     );
   }
 }
 
 // ─── Priority actions ────────────────────────────────────────────────────
+
+/// Priority actions show at most this many items; the rest are under View all.
+const int kPriorityActionsShown = 5;
 
 class PriorityActionsCard extends ConsumerStatefulWidget {
   const PriorityActionsCard({super.key});
@@ -369,7 +83,7 @@ class _PriorityActionsCardState extends ConsumerState<PriorityActionsCard> {
   Widget build(BuildContext context) {
     final state = ref.watch(dashboardAlertsProvider);
     final filtered = state.alerts.where((a) => _area == null || a.area == _area).toList();
-    final shown = _all ? filtered : filtered.take(6).toList();
+    final shown = _all ? filtered : filtered.take(kPriorityActionsShown).toList();
 
     Widget tab(String label, AlertArea? area) {
       final on = _area == area;
@@ -436,7 +150,7 @@ class _PriorityActionsCardState extends ConsumerState<PriorityActionsCard> {
             )
           else
             for (int i = 0; i < shown.length; i++) _ActionRow(alert: shown[i], first: i == 0),
-          if (filtered.length > 6)
+          if (filtered.length > kPriorityActionsShown)
             InkWell(
               onTap: () => setState(() => _all = !_all),
               child: Container(
@@ -545,7 +259,7 @@ class _ActionRow extends ConsumerWidget {
                             if (claim != null)
                               StatusChip(
                                 '${claim.isMine ? 'You’re' : '${claim.byName} is'} on it'
-                                '${claim.at == null ? '' : ' · ${elapsedSince(claim.at)}'}',
+                                    '${claim.at == null ? '' : ' · ${elapsedSince(claim.at)}'}',
                                 tone: ChipTone.green,
                                 icon: Icons.pan_tool_outlined,
                               ),
@@ -565,9 +279,9 @@ class _ActionRow extends ConsumerWidget {
                   else if (claim.isMine)
                     const PopupMenuItem(value: 'release', child: Text('Release'))
                   else ...[
-                    PopupMenuItem(value: 'claim', child: Text('Take over from ${claim.byName}')),
-                    const PopupMenuItem(value: 'release', child: Text('Release (admins)')),
-                  ],
+                      PopupMenuItem(value: 'claim', child: Text('Take over from ${claim.byName}')),
+                      const PopupMenuItem(value: 'release', child: Text('Release (admins)')),
+                    ],
                 ],
               ),
               Center(
@@ -592,79 +306,129 @@ class _ActionRow extends ConsumerWidget {
   }
 }
 
-// ─── Rescue (reference card) ─────────────────────────────────────────────
+// ─── Rescue ──────────────────────────────────────────────────────────────
 
+/// Urgent cases, reports awaiting verification and the active cases by
+/// stage.
 class RescueSummaryCard extends ConsumerWidget {
   const RescueSummaryCard({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final snapAsync = ref.watch(dashboardRescueSnapshotProvider);
-    final supply = ref.watch(transportSupplyProvider).asData?.value;
+    // Review tab = pending review, verifying and accepted-without-clinic.
+    final reviewTab = ref.watch(casesForTabProvider(RescuePipelineTab.review)).asData?.value;
 
     return SectionCard(
       icon: Icons.sos,
       title: 'Rescue',
       onOpen: () => openRescueTab(context, ref, RescuePipelineTab.review),
-      padding: EdgeInsets.zero,
       child: DashAsync<RescueSnapshot>(
         value: snapAsync,
         what: 'rescue cases',
         builder: (snap) {
-          final urgentCases = snap.urgentWaiting;
-          final urgent = urgentCases.length;
-          // Current wait = time since the clinic was chosen for cases still
-          // waiting for a rider. Uses recorded timestamps only.
-          final waits = snap
-              .of(RescueStage.transporter)
-              .map((c) => c.vetClinicSelectedAt ?? c.createdAt)
-              .whereType<DateTime>()
-              .map((t) => DateTime.now().difference(t).inMinutes / 60)
-              .toList();
-          final avgWait = waits.isEmpty ? null : waits.reduce((a, b) => a + b) / waits.length;
-          final line = AppColors.textPrimary.withValues(alpha: 0.14);
+          final epoch = DateTime.fromMillisecondsSinceEpoch(0);
+          int oldestFirst(RescueCase a, RescueCase b) => (a.createdAt ?? epoch).compareTo(b.createdAt ?? epoch);
+          final urgent = [...snap.urgentWaiting]..sort(oldestFirst);
+          final verifying = [
+            for (final c in reviewTab ?? snap.of(RescueStage.review))
+              if (c.status == RescueStatus.pendingReview || c.status == RescueStatus.verifying) c,
+          ]..sort(oldestFirst);
+          final active = snap.all;
+          const stages = [
+            (RescueStage.clinic, RescuePipelineTab.review),
+            (RescueStage.transporter, RescuePipelineTab.assign),
+            (RescueStage.transit, RescuePipelineTab.ongoing),
+            (RescueStage.treatment, RescuePipelineTab.treatment),
+            (RescueStage.intake, RescuePipelineTab.intake),
+            (RescueStage.fieldIssue, RescuePipelineTab.ongoing),
+          ];
+
           return Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              Padding(
-                padding: const EdgeInsets.fromLTRB(4, 12, 4, 6),
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Expanded(
-                      child: BigStat(
-                        value: '$urgent',
-                        label: 'Urgent, not moving',
-                        color: urgent > 0 ? DashSeverity.critical.color : null,
-                        onTap: () => openRescueTab(context, ref, urgentTabFor(urgentCases)),
-                      ),
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(
+                    child: BigStat(
+                      value: '${urgent.length}',
+                      label: 'Urgent cases',
+                      color: urgent.isNotEmpty ? DashSeverity.critical.color : null,
+                      onTap: () => openRescueTab(context, ref, urgentTabFor(urgent)),
                     ),
-                    Expanded(
-                      child: BigStat(value: '${snap.all.length}', label: 'Active cases'),
+                  ),
+                  Expanded(
+                    child: BigStat(
+                      value: '${verifying.length}',
+                      label: 'Awaiting verification',
+                      color: verifying.isNotEmpty ? DashSeverity.warning.color : null,
+                      onTap: () => openRescueTab(context, ref, RescuePipelineTab.review),
                     ),
-                    Expanded(
-                      child: BigStat(
-                        value: '${snap.count(RescueStage.review)}',
-                        label: 'Awaiting verification',
-                        color: snap.count(RescueStage.review) > 0 ? DashSeverity.warning.color : null,
-                        onTap: () => openRescueTab(context, ref, RescuePipelineTab.review),
-                      ),
+                  ),
+                  Expanded(
+                    child: BigStat(
+                      value: '${active.length}',
+                      label: 'Active cases',
+                      onTap: () => openRescueTab(context, ref, RescuePipelineTab.ongoing),
                     ),
-                  ],
-                ),
+                  ),
+                ],
               ),
-              Container(
-                padding: const EdgeInsets.fromLTRB(8, 9, 8, 10),
-                decoration: BoxDecoration(
-                  border: Border(top: BorderSide(color: line)),
-                ),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceAround,
+              const CardLabel('Urgent cases'),
+              if (urgent.isEmpty)
+                const DashEmpty('No critical case is waiting on staff.')
+              else
+                ExpandableList(
+                  initialCount: 3,
+                  moreLabel: 'All urgent cases',
                   children: [
-                    _SubStat(supply == null ? '—' : '${supply.onAssignment}', 'on a ride'),
-                    _SubStat(supply == null ? '—' : '${supply.free}', 'riders free'),
-                    _SubStat(avgWait == null ? '0' : '${avgWait.round()}h', 'avg wait now'),
+                    for (final c in urgent)
+                      _CaseRow(
+                        c: c,
+                        sub: '${c.status.label} · waiting ${elapsedSince(c.createdAt).replaceAll(' ago', '')}',
+                        chip: const StatusChip('Critical', tone: ChipTone.red, icon: Icons.priority_high),
+                      ),
                   ],
                 ),
+              const CardLabel('Awaiting verification'),
+              if (verifying.isEmpty)
+                const DashEmpty('Every report has been assessed.')
+              else
+                ExpandableList(
+                  initialCount: 3,
+                  moreLabel: 'All reports to verify',
+                  children: [
+                    for (final c in verifying)
+                      _CaseRow(
+                        c: c,
+                        sub: c.status == RescueStatus.verifying
+                            ? 'Rider sent to verify · reported ${elapsedSince(c.createdAt)}'
+                            : 'Not yet assessed · reported ${elapsedSince(c.createdAt)}',
+                        chip: _urgencyChip(c),
+                      ),
+                  ],
+                ),
+              const CardLabel('Active cases by stage'),
+              Wrap(
+                spacing: 6,
+                runSpacing: 6,
+                children: [
+                  for (final (stage, tab) in stages)
+                    ActionChip(
+                      avatar: Icon(stage.icon, size: 16, color: AppColors.textPrimary),
+                      label: Text('${stage.label} ${snap.count(stage)}'),
+                      labelStyle: dashBody(size: 12.5, weight: FontWeight.w700),
+                      backgroundColor: const Color(0xFFFFFDF8),
+                      side: BorderSide(
+                        color: stage == RescueStage.fieldIssue && snap.count(stage) > 0
+                            ? DashSeverity.critical.color
+                            : AppColors.textPrimary.withValues(alpha: 0.14),
+                      ),
+                      visualDensity: VisualDensity.compact,
+                      onPressed: () => openRescueTab(context, ref, tab),
+                    ),
+                ],
               ),
             ],
           );
@@ -672,24 +436,47 @@ class RescueSummaryCard extends ConsumerWidget {
       ),
     );
   }
+
+  static StatusChip _urgencyChip(RescueCase c) => switch (UrgencyLevel.fromFirestoreValue(c.urgency)) {
+    UrgencyLevel.critical => const StatusChip('Critical', tone: ChipTone.red),
+    UrgencyLevel.medium => const StatusChip('Medium', tone: ChipTone.amber),
+    _ => const StatusChip('Low', tone: ChipTone.info),
+  };
 }
 
-class _SubStat extends StatelessWidget {
-  final String value;
-  final String label;
-  const _SubStat(this.value, this.label);
+class _CaseRow extends StatelessWidget {
+  final RescueCase c;
+  final String sub;
+  final Widget chip;
+  const _CaseRow({required this.c, required this.sub, required this.chip});
 
   @override
   Widget build(BuildContext context) {
-    return Text.rich(
-      TextSpan(
-        children: [
-          TextSpan(
-            text: '$value ',
-            style: GoogleFonts.tiltWarp(fontSize: 15, color: AppColors.textPrimary),
-          ),
-          TextSpan(text: label, style: dashMuted(12.5)),
-        ],
+    final where = c.address == null ? '' : ' · ${c.address!.split(',').first}';
+    return InkWell(
+      onTap: () => openRescueCase(context, c),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 8),
+        child: Row(
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    '${c.speciesSummary.isEmpty ? 'Animal' : c.speciesSummary} #${c.shortCaseId}$where',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: dashBody(size: 14.5, weight: FontWeight.w700),
+                  ),
+                  Text(sub, maxLines: 2, overflow: TextOverflow.ellipsis, style: dashMuted(12.5)),
+                ],
+              ),
+            ),
+            const SizedBox(width: 6),
+            chip,
+          ],
+        ),
       ),
     );
   }
@@ -697,182 +484,258 @@ class _SubStat extends StatelessWidget {
 
 // ─── Shelter care ────────────────────────────────────────────────────────
 
+/// The animals' continuing care: who needs medication, isolation,
+/// treatment or other ongoing care, most urgent first.
 class ShelterCareCard extends ConsumerWidget {
   const ShelterCareCard({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final recordsAsync = ref.watch(allAnimalRecordsProvider);
-    final vaxAsync = ref.watch(vaccinationsByAnimalProvider);
-    final vax = vaxAsync.asData?.value;
+    final vax = ref.watch(vaccinationsByAnimalProvider).asData?.value;
+    final plans = ref.watch(activeMedicationPlansByAnimalProvider).asData?.value;
+    final missed = ref.watch(missedDosesByAnimalProvider).asData?.value;
     final orgId = ref.watch(dashboardOrgIdProvider).asData?.value;
-    // Editing the care roster and round tasks is an Admin setting.
     final isAdmin = ref.watch(isOrgAdminProvider).asData?.value ?? false;
-
-    final inCare = (recordsAsync.asData?.value ?? const <AnimalRecord>[]).where(isInCare).toList();
-    final statuses = {for (final a in inCare) a.id: vax == null ? null : healthStatusOf(vax[a.id])};
-    int count(HealthRecordStatus s) => statuses.values.where((v) => v == s).length;
-    final overdue = count(HealthRecordStatus.overdue);
 
     return SectionCard(
       icon: Icons.monitor_heart,
       title: 'Shelter care',
       onOpen: () => openAnimalRecords(context),
-      trailing: overdue > 0
-          ? Padding(
-        padding: const EdgeInsets.only(right: 6),
-        child: StatusChip('$overdue overdue', tone: ChipTone.red, icon: Icons.error_outline),
-      )
-          : null,
       child: DashAsync<List<AnimalRecord>>(
         value: recordsAsync,
         what: 'animal records',
-        builder: (_) {
-          final total = inCare.length;
-          int pct(int n) => total == 0 ? 0 : (n * 1000 / total).round();
-          final attention = [...inCare]
-            ..sort((a, b) => _attentionRank(a, statuses[a.id]).compareTo(_attentionRank(b, statuses[b.id])));
-          final top = attention.where((a) => _attentionRank(a, statuses[a.id]) < 4).take(3).toList();
+        builder: (records) {
+          final inCare = records.where(isInCare).toList();
+          final needing = animalsNeedingCare(inCare, plans: plans, missedDoses: missed, vaccinations: vax);
+
+          int count(bool Function(CareNeed) test) => needing.where((e) => e.$2.any(test)).length;
+          final tally = [
+            (Icons.medication, 'Medication', count((n) => n.label.startsWith('Medication')), ChipTone.amber),
+            (Icons.do_not_touch, 'Isolation', count((n) => n.label == 'Isolation'), ChipTone.amber),
+            (Icons.local_hospital, 'In treatment', count((n) => n.label == 'In treatment'), ChipTone.red),
+            (Icons.error_outline, 'Missed doses', count((n) => n.label.contains('missed dose')), ChipTone.red),
+            (Icons.vaccines, 'Vaccine overdue', count((n) => n.label == 'Vaccine overdue'), ChipTone.red),
+            (Icons.healing, 'Recovering', count((n) => n.label == 'Recovering'), ChipTone.info),
+            (Icons.accessible, 'Special needs', count((n) => n.label.startsWith('Special needs')), ChipTone.info),
+          ];
 
           return Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              const CardLabel('Today’s care'),
-              // Dashboard gaps 2 and 3: the rounds carers tick off, and who
-              // is on shift today.
-              if (orgId != null)
-                CareRoundsChecklist(organizationId: orgId, compact: true, canEditSetup: isAdmin)
-              else
-                const _NotTrackedRow(
-                  icon: Icons.restaurant,
-                  text: 'Care rounds are kept per organization. This account isn’t linked to one.',
+              Text(
+                needing.isEmpty
+                    ? '${plural(inCare.length, 'animal')} in care. None needs continuing care.'
+                    : '${plural(needing.length, 'animal')} of ${inCare.length} in care need continuing care.',
+                style: dashBody(size: 14, weight: FontWeight.w700),
+              ),
+              const SizedBox(height: 8),
+              Wrap(
+                spacing: 5,
+                runSpacing: 5,
+                children: [
+                  for (final (icon, label, n, tone) in tally)
+                    if (n > 0) StatusChip('$label $n', tone: tone, icon: icon),
+                ],
+              ),
+              if (needing.isNotEmpty) ...[
+                const CardLabel('Continuing care'),
+                ExpandableList(
+                  initialCount: 5,
+                  moreLabel: 'All animals needing care',
+                  children: [for (final (a, needs) in needing) CareNeedRow(animal: a, needs: needs)],
                 ),
-              const SizedBox(height: 6),
+              ],
+              const SizedBox(height: 4),
               const DetailLine(
                 Icons.medication,
-                'Carers log medication doses, with optional photos, on each animal’s Medical tab. Missed doses show there.',
+                'Carers log each dose, with optional photos, on the animal’s Medical tab. Missed doses show here.',
                 maxLines: null,
               ),
-              CardLabel('Health records · ${plural(total, 'animal')} in care'),
-              if (vax == null && vaxAsync.isLoading)
-                const DashLoading(label: 'Loading vaccinations…')
-              else if (vaxAsync.hasError)
-                DashError(what: 'vaccination records', error: vaxAsync.error!)
-              else if (total == 0)
-                  const DashEmpty('No animals in care.', severity: DashSeverity.info)
-                else ...[
-                    ClipRRect(
-                      borderRadius: BorderRadius.circular(6),
-                      child: SizedBox(
-                        height: 12,
-                        child: Row(
-                          children: [
-                            for (final (s, color) in [
-                              (HealthRecordStatus.completed, DashSeverity.ok.color),
-                              (HealthRecordStatus.dueSoon, DashSeverity.warning.color),
-                              (HealthRecordStatus.overdue, DashSeverity.critical.color),
-                              (HealthRecordStatus.notRecorded, const Color(0xFFD7D4CB)),
-                            ])
-                              if (count(s) > 0)
-                                Expanded(
-                                  flex: pct(count(s)),
-                                  child: Container(color: color, margin: const EdgeInsets.only(right: 2)),
-                                ),
-                          ],
+              if (orgId != null)
+                Padding(
+                  padding: const EdgeInsets.only(top: 6),
+                  child: Align(
+                    alignment: Alignment.centerLeft,
+                    child: DashLinkButton(
+                      label: 'Today’s care rounds',
+                      icon: Icons.checklist,
+                      onPressed: () => Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => CareRoundsPage(organizationId: orgId, canEditSetup: isAdmin),
                         ),
                       ),
                     ),
-                    const SizedBox(height: 7),
-                    Wrap(
-                      spacing: 5,
-                      runSpacing: 5,
-                      children: [
-                        StatusChip(
-                          'Up to date ${count(HealthRecordStatus.completed)}',
-                          tone: ChipTone.green,
-                          icon: Icons.check,
-                        ),
-                        StatusChip(
-                          'Due ≤$kDueSoonDays d ${count(HealthRecordStatus.dueSoon)}',
-                          tone: ChipTone.amber,
-                          icon: Icons.schedule,
-                        ),
-                        StatusChip('Overdue $overdue', tone: ChipTone.red, icon: Icons.error_outline),
-                        StatusChip('Not recorded ${count(HealthRecordStatus.notRecorded)}', tone: ChipTone.notRecorded),
-                      ],
-                    ),
-                    Padding(
-                      padding: const EdgeInsets.only(top: 6),
-                      child: Text(
-                        'Based on vaccination records. “Not recorded” never means “not given”.',
-                        style: dashMuted(),
-                      ),
-                    ),
-                    for (final a in top) _AnimalAttentionRow(animal: a, status: statuses[a.id], vax: vax?[a.id]),
-                  ],
+                  ),
+                ),
             ],
           );
         },
       ),
     );
   }
-
-  static int _attentionRank(AnimalRecord a, HealthRecordStatus? s) {
-    if (s == HealthRecordStatus.overdue) return 0;
-    if (hasOpenMedicalCase(a)) return 1;
-    if ((a.health.currentMedications ?? '').trim().isNotEmpty || s == HealthRecordStatus.dueSoon) return 2;
-    if (s == HealthRecordStatus.notRecorded) return 3;
-    return 9;
-  }
 }
 
-class _NotTrackedRow extends StatelessWidget {
-  final IconData icon;
-  final String text;
-  const _NotTrackedRow({required this.icon, required this.text});
+// ─── Adoption ────────────────────────────────────────────────────────────
+
+/// Animals ready to be turned over for adoption (vaccinations,
+/// spay/neuter, medication course and behavior all done), then the
+/// applications awaiting review and the upcoming interviews.
+class AdoptionSummaryCard extends ConsumerWidget {
+  const AdoptionSummaryCard({super.key});
 
   @override
-  Widget build(BuildContext context) {
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Icon(icon, size: 18, color: AppColors.textSecondary),
-        const SizedBox(width: 8),
-        Expanded(child: Text(text, style: dashMuted(12.5))),
-        const SizedBox(width: 6),
-        const StatusChip('Not tracked yet', tone: ChipTone.notRecorded),
-      ],
+  Widget build(BuildContext context, WidgetRef ref) {
+    final recordsAsync = ref.watch(allAnimalRecordsProvider);
+    final vax = ref.watch(vaccinationsByAnimalProvider).asData?.value;
+    final plans = ref.watch(activeMedicationPlansByAnimalProvider).asData?.value;
+    final pending = ref.watch(adoptionsByStatusesProvider(statusFilter(AdoptionStatus.pending))).asData?.value;
+    final interview = ref.watch(adoptionsByStatusesProvider(statusFilter(AdoptionStatus.interview))).asData?.value;
+
+    return SectionCard(
+      icon: Icons.favorite,
+      title: 'Adoption',
+      onOpen: () => openAdoptionQueue(context, AdoptionStatus.pending),
+      child: DashAsync<List<AnimalRecord>>(
+        value: recordsAsync,
+        what: 'animal records',
+        builder: (records) {
+          // Candidates: in care, not in treatment, not already reserved or
+          // placed, not being transferred out.
+          final candidates = records
+              .where((a) => isInCare(a) && !hasOpenMedicalCase(a) && !a.isReserved && !a.isTransferredOut)
+              .map((a) => (a, turnoverChecksFor(a, vaccines: vax == null ? null : healthStatusOf(vax[a.id]), plans: plans?[a.id])))
+              .toList();
+          int gaps(List<TurnoverCheck> c) => c.where((x) => x.done != true).length;
+          final ready = candidates.where((e) => gaps(e.$2) == 0).toList()
+            ..sort((x, y) => (x.$1.isAdoptable ? 1 : 0).compareTo(y.$1.isAdoptable ? 1 : 0));
+          final almost = candidates.where((e) => gaps(e.$2) > 0 && gaps(e.$2) <= 2).toList()
+            ..sort((x, y) => gaps(x.$2).compareTo(gaps(y.$2)));
+
+          final epoch = DateTime.fromMillisecondsSinceEpoch(0);
+          final toReview = [...?pending]..sort((a, b) => (a.createdAt ?? epoch).compareTo(b.createdAt ?? epoch));
+          final today = DateTime.now();
+          final startOfToday = DateTime(today.year, today.month, today.day);
+          final upcoming = [
+            for (final a in interview ?? const <AdoptionApplication>[])
+              if (a.appointmentDate != null && !a.appointmentDate!.isBefore(startOfToday)) a,
+          ]..sort((a, b) => a.appointmentDate!.compareTo(b.appointmentDate!));
+          final unscheduled = (interview ?? const <AdoptionApplication>[]).where((a) => a.appointmentDate == null).length;
+
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(
+                    child: BigStat(
+                      value: '${ready.length}',
+                      label: 'Ready for adoption',
+                      color: ready.isNotEmpty ? DashSeverity.ok.color : null,
+                      onTap: () => openAnimalRecords(context),
+                    ),
+                  ),
+                  Expanded(
+                    child: BigStat(
+                      value: pending == null ? '—' : '${toReview.length}',
+                      label: 'Applications to review',
+                      color: toReview.isNotEmpty ? DashSeverity.warning.color : null,
+                      onTap: () => openAdoptionQueue(context, AdoptionStatus.pending),
+                    ),
+                  ),
+                  Expanded(
+                    child: BigStat(
+                      value: interview == null ? '—' : '${upcoming.length}',
+                      label: 'Upcoming interviews',
+                      onTap: () => openAdoptionQueue(context, AdoptionStatus.interview),
+                    ),
+                  ),
+                ],
+              ),
+              const CardLabel('Ready to turn over for adoption'),
+              if (ready.isEmpty)
+                const DashEmpty(
+                  'No animal has vaccinations, spay/neuter, medication and behavior all done yet.',
+                  severity: DashSeverity.info,
+                )
+              else
+                ExpandableList(
+                  initialCount: 5,
+                  moreLabel: 'All ready animals',
+                  children: [
+                    for (final (a, checks) in ready)
+                      _TurnoverRow(
+                        animal: a,
+                        checks: checks,
+                        trailing: a.isAdoptable
+                            ? const StatusChip('Listed', tone: ChipTone.green, icon: Icons.check)
+                            : const StatusChip('Not listed yet', tone: ChipTone.amber, icon: Icons.campaign),
+                      ),
+                  ],
+                ),
+              if (almost.isNotEmpty) ...[
+                const CardLabel('Almost ready'),
+                ExpandableList(
+                  initialCount: 3,
+                  moreLabel: 'All almost-ready animals',
+                  children: [
+                    for (final (a, checks) in almost)
+                      _TurnoverRow(animal: a, checks: checks, showOnlyGaps: true),
+                  ],
+                ),
+              ],
+              const CardLabel('Awaiting application review'),
+              if (pending == null)
+                const DashLoading(label: 'Loading applications…')
+              else if (toReview.isEmpty)
+                const DashEmpty('No applications waiting for review.')
+              else
+                ExpandableList(
+                  initialCount: 3,
+                  moreLabel: 'All applications to review',
+                  children: [for (final app in toReview) _ApplicationRow(app: app)],
+                ),
+              const CardLabel('Upcoming interviews'),
+              if (interview == null)
+                const DashLoading(label: 'Loading interviews…')
+              else if (upcoming.isEmpty)
+                const DashEmpty('No interviews scheduled from today on.', severity: DashSeverity.info)
+              else
+                ExpandableList(
+                  initialCount: 3,
+                  moreLabel: 'All upcoming interviews',
+                  children: [for (final app in upcoming) _ApplicationRow(app: app)],
+                ),
+              if (unscheduled > 0)
+                DetailLine(
+                  Icons.event_busy,
+                  '${plural(unscheduled, 'application')} in Interview without a date yet.',
+                  color: DashSeverity.warning.color,
+                ),
+            ],
+          );
+        },
+      ),
     );
   }
 }
 
-class _AnimalAttentionRow extends StatelessWidget {
+class _TurnoverRow extends StatelessWidget {
   final AnimalRecord animal;
-  final HealthRecordStatus? status;
-  final List<VaccinationRecord>? vax;
-  const _AnimalAttentionRow({required this.animal, required this.status, required this.vax});
+  final List<TurnoverCheck> checks;
+  final Widget? trailing;
+  final bool showOnlyGaps;
+  const _TurnoverRow({required this.animal, required this.checks, this.trailing, this.showOnlyGaps = false});
 
   @override
   Widget build(BuildContext context) {
-    final due = nextVaccineDue(vax);
-    final chips = <Widget>[
-      if (status == HealthRecordStatus.overdue)
-        StatusChip('Vaccine overdue${due == null ? '' : ' · ${shortDate(due)}'}', tone: ChipTone.red),
-      if (status == HealthRecordStatus.dueSoon && due != null)
-        StatusChip('Vaccine due ${shortDate(due)}', tone: ChipTone.amber),
-      if (hasOpenMedicalCase(animal)) const StatusChip('In treatment', tone: ChipTone.amber),
-      if ((animal.health.currentMedications ?? '').trim().isNotEmpty)
-        const StatusChip('On medication', tone: ChipTone.amber),
-      if (status == HealthRecordStatus.notRecorded)
-        const StatusChip('Vaccines not recorded', tone: ChipTone.notRecorded),
-    ];
+    final shown = showOnlyGaps ? checks.where((c) => c.done != true) : checks;
     return InkWell(
       onTap: () => openAnimalRecord(context, animal),
-      child: Container(
+      child: Padding(
         padding: const EdgeInsets.symmetric(vertical: 9),
-        decoration: BoxDecoration(
-          border: Border(top: BorderSide(color: AppColors.textPrimary.withValues(alpha: 0.14))),
-        ),
         child: Row(
           children: [
             DashThumb(url: animal.photoUrls.isNotEmpty ? animal.photoUrls.first : null, size: 40),
@@ -886,117 +749,26 @@ class _AnimalAttentionRow extends StatelessWidget {
                     style: dashBody(size: 14.5, weight: FontWeight.w700),
                   ),
                   const SizedBox(height: 3),
-                  Wrap(spacing: 4, runSpacing: 4, children: chips),
+                  Wrap(
+                    spacing: 4,
+                    runSpacing: 4,
+                    children: [
+                      for (final c in shown)
+                        StatusChip(
+                          showOnlyGaps ? '${c.label}: ${c.detail}' : c.label,
+                          tone: c.done == true
+                              ? ChipTone.green
+                              : (c.done == false ? ChipTone.amber : ChipTone.notRecorded),
+                          icon: c.done == true ? Icons.check : (c.done == false ? Icons.close : Icons.question_mark),
+                        ),
+                    ],
+                  ),
                 ],
               ),
             ),
-            const Icon(Icons.chevron_right, color: AppColors.textSecondary),
+            if (trailing != null) ...[const SizedBox(width: 6), trailing!],
           ],
         ),
-      ),
-    );
-  }
-}
-
-// ─── Adoption ────────────────────────────────────────────────────────────
-
-class AdoptionSummaryCard extends ConsumerWidget {
-  const AdoptionSummaryCard({super.key});
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final records = ref.watch(allAnimalRecordsProvider).asData?.value;
-    final pending = ref.watch(adoptionsByStatusesProvider(statusFilter(AdoptionStatus.pending)));
-    final interview =
-        ref.watch(adoptionsByStatusesProvider(statusFilter(AdoptionStatus.interview))).asData?.value ?? const [];
-    final approved =
-        ref.watch(adoptionsByStatusesProvider(statusFilter(AdoptionStatus.approved))).asData?.value ?? const [];
-
-    final inCare = (records ?? const <AnimalRecord>[]).where(isInCare).toList();
-    final available = records == null ? null : inCare.where((a) => a.isAdoptable).length;
-    final awaiting = records == null
-        ? null
-        : inCare.where((a) => a.adoptionStatus == 'not_ready' && !hasOpenMedicalCase(a)).length;
-    final listedWithGaps = inCare.where((a) => a.isAdoptable && readinessGaps(a) > 0).toList()
-      ..sort((a, b) => readinessGaps(b).compareTo(readinessGaps(a)));
-
-    return SectionCard(
-      icon: Icons.favorite,
-      title: 'Adoption',
-      onOpen: () => openAdoptionQueue(context, AdoptionStatus.pending),
-      child: DashAsync<List<AdoptionApplication>>(
-        value: pending,
-        what: 'applications',
-        builder: (pendingApps) {
-          final epoch = DateTime.fromMillisecondsSinceEpoch(0);
-          final queue = [
-            ...([...pendingApps]..sort((a, b) => (a.createdAt ?? epoch).compareTo(b.createdAt ?? epoch))),
-            ...interview,
-            ...approved,
-          ].take(4).toList();
-          return Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Expanded(
-                    child: BigStat(
-                      value: available == null ? '—' : '$available',
-                      label: 'Available',
-                      onTap: () => openAnimalRecords(context),
-                    ),
-                  ),
-                  Expanded(
-                    child: BigStat(
-                      value: awaiting == null ? '—' : '$awaiting',
-                      label: 'Awaiting assessment',
-                      color: (awaiting ?? 0) > 0 ? DashSeverity.warning.color : null,
-                      onTap: () => openAnimalRecords(context),
-                    ),
-                  ),
-                  Expanded(
-                    child: BigStat(
-                      value: '${pendingApps.length}',
-                      label: 'Applications to review',
-                      onTap: () => openAdoptionQueue(context, AdoptionStatus.pending),
-                    ),
-                  ),
-                ],
-              ),
-              if (queue.isEmpty)
-                const DashEmpty('No applications waiting.')
-              else
-                for (final app in queue) _ApplicationRow(app: app),
-              if (listedWithGaps.isNotEmpty) ...[
-                CardLabel(
-                  'Readiness · ${listedWithGaps.first.name.isEmpty ? listedWithGaps.first.species : listedWithGaps.first.name}',
-                ),
-                InkWell(
-                  onTap: () => openAnimalRecord(context, listedWithGaps.first),
-                  child: Wrap(
-                    spacing: 5,
-                    runSpacing: 5,
-                    children: [
-                      for (final item in readinessItemsFor(listedWithGaps.first))
-                        StatusChip(
-                          item.label,
-                          tone: item.done == true
-                              ? ChipTone.green
-                              : (item.done == false ? ChipTone.amber : ChipTone.notRecorded),
-                          icon: item.done == true
-                              ? Icons.check
-                              : (item.done == false ? Icons.close : Icons.question_mark),
-                        ),
-                      if ((listedWithGaps.first.health.currentMedications ?? '').trim().isNotEmpty)
-                        const StatusChip('On meds · disclose', tone: ChipTone.amber, icon: Icons.medication),
-                    ],
-                  ),
-                ),
-              ],
-            ],
-          );
-        },
       ),
     );
   }
@@ -1028,11 +800,9 @@ class _ApplicationRow extends StatelessWidget {
     };
     return InkWell(
       onTap: () => openApplication(context, app),
-      child: Container(
+      // Rows sit in an ExpandableList, which draws the dividers.
+      child: Padding(
         padding: const EdgeInsets.symmetric(vertical: 9),
-        decoration: BoxDecoration(
-          border: Border(top: BorderSide(color: AppColors.textPrimary.withValues(alpha: 0.14))),
-        ),
         child: Row(
           children: [
             Expanded(
@@ -1080,7 +850,7 @@ class DonationsFundsCard extends ConsumerWidget {
         child: StatusChip('Money managers', tone: ChipTone.ink, icon: Icons.lock),
       )
           : null,
-      child: canManageAsync.isLoading
+      child: !canManageAsync.hasValue && !canManageAsync.hasError
           ? const DashLoading()
           : (!canManage
           ? const RestrictedNotice(
@@ -1091,173 +861,356 @@ class DonationsFundsCard extends ConsumerWidget {
   }
 }
 
+/// How well a fund category is covered.
+enum FundLevel {
+  sufficient('Sufficient', ChipTone.green, Icons.check),
+  low('Low', ChipTone.amber, Icons.trending_down),
+  critical('Critical', ChipTone.red, Icons.error_outline);
+
+  const FundLevel(this.label, this.tone, this.icon);
+  final String label;
+  final ChipTone tone;
+  final IconData icon;
+
+  /// Sufficient: the money set aside covers the need. Low: at least half.
+  /// Critical: less than half. Nothing needed counts as sufficient.
+  static FundLevel of(double setAside, double need) {
+    if (need <= 0) return FundLevel.sufficient;
+    final r = setAside / need;
+    if (r >= 1) return FundLevel.sufficient;
+    if (r >= 0.5) return FundLevel.low;
+    return FundLevel.critical;
+  }
+}
+
+/// The allocation category ('Food', 'Medicine and Treatment', ... as in
+/// kAllocationCategories) a bill counts against.
+String fundCategoryOfExpense(ExpenseCategory c) => switch (c) {
+  ExpenseCategory.consultation ||
+  ExpenseCategory.medication ||
+  ExpenseCategory.procedure ||
+  ExpenseCategory.laboratory ||
+  ExpenseCategory.vaccination ||
+  ExpenseCategory.confinement => 'Medicine and Treatment',
+  ExpenseCategory.transport => 'Transport',
+  ExpenseCategory.foodAndSupplies => 'Food',
+  ExpenseCategory.utilities => 'Bills and Utilities',
+  ExpenseCategory.rent => 'Shelter',
+  ExpenseCategory.staffCompensation || ExpenseCategory.administrative => 'Administrative',
+  ExpenseCategory.other => 'Other',
+};
+
+/// The allocation categories a campaign's money is set aside for, from its
+/// purpose tags (or, untagged, its fund kind). Empty = general money that
+/// can go anywhere ('General Operations' or no purpose).
+List<String> fundCategoriesOfCampaign(DonationListing c) {
+  const byTag = {
+    'Medicine & Treatment': 'Medicine and Treatment',
+    'Food and Supplies': 'Food',
+    'Shelter': 'Shelter',
+    'Rescue': 'Transport',
+  };
+  final fromTags = {for (final t in c.purposeTags) ?byTag[t]}.toList();
+  if (fromTags.isNotEmpty) return fromTags;
+  return switch (c.fundKind) {
+  'medical' => const ['Medicine and Treatment'],
+  'shelter_resource' => const ['Shelter'],
+  _ => const [],
+  };
+}
+
+class _FundCategory {
+  final String name;
+  double setAside = 0;
+  double unpaid = 0;
+  double spent30 = 0;
+  double allocatedTotal = 0;
+  _FundCategory(this.name);
+
+  double get need => unpaid + spent30;
+  FundLevel get level => FundLevel.of(setAside, need);
+}
+
 class _FundsBody extends ConsumerWidget {
   const _FundsBody();
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final payments = ref.watch(paymentAttemptsProvider).asData?.value;
-    final donations = ref.watch(allDonationsProvider).asData?.value;
     final campaignsAsync = ref.watch(adminCampaignsProvider);
+    final allocations = ref.watch(orgAllocationsProvider);
     final expenses = ref.watch(allCaseExpensesProvider);
-    final general = ref.watch(myGeneralExpensesProvider).asData?.value;
-    final settings = ref.watch(shelterSettingsProvider).asData?.value ?? ShelterSettings.empty;
-
-    final since = DateTime.now().subtract(const Duration(days: 30));
-    final pendingList = payments?.where((p) => p.status == 'needs_review' || p.status == 'pending').toList();
-    final pendingSum = pendingList?.fold<double>(0, (s, p) => s + p.amount);
-    final verified = donations
-        ?.where((d) => !d.isInKind && d.when != null && d.when!.isAfter(since))
-        .fold<double>(0, (s, d) => s + d.amountValue);
+    final general = ref.watch(myGeneralExpensesProvider);
+    final donations = ref.watch(allDonationsProvider);
+    final asOf = DateTime.now();
 
     return DashAsync<List<DonationListing>>(
       value: campaignsAsync,
       what: 'campaigns',
       builder: (all) {
         final live = all.where((c) => !c.isDraft && !c.isArchived && c.status != 'closed').toList();
-        double bal(Iterable<DonationListing> l) =>
-            l.fold(0, (s, c) => s + (c.availableBalance > 0 ? c.availableBalance : 0));
-        final unrestricted = bal(live.where((c) => !c.restricted));
-        final restricted = bal(live.where((c) => c.restricted));
-        final campaigns = live.where((c) => c.target > 0).toList()
-          ..sort((a, b) => (b.collected / b.target).compareTo(a.collected / a.target));
+
+        // ── Funds by category ──
+        final cats = {for (final n in kAllocationCategories) n: _FundCategory(n)};
+        _FundCategory cat(String name) => cats[name] ?? cats['Other']!;
+        var generalPool = 0.0;
+        var restrictedElsewhere = 0.0;
+        for (final c in live) {
+          final balance = c.availableBalance > 0 ? c.availableBalance : 0.0;
+          if (balance == 0) continue;
+          final targets = fundCategoriesOfCampaign(c);
+          if (targets.isNotEmpty) {
+            for (final t in targets) {
+              cat(t).setAside += balance / targets.length;
+            }
+          } else if (c.restricted) {
+            restrictedElsewhere += balance;
+          } else {
+            generalPool += balance;
+          }
+        }
+        final since = asOf.subtract(const Duration(days: 30));
+        for (final a in allocations.asData?.value ?? const <({String campaignId, AllocationEntry entry})>[]) {
+          if (a.entry.isTransfer) continue;
+          final c = cat(a.entry.category);
+          c.allocatedTotal += a.entry.amount;
+          if (a.entry.createdAt != null && a.entry.createdAt!.isAfter(since)) c.spent30 += a.entry.amount;
+        }
+        for (final e in [...?expenses.asData?.value, ...?general.asData?.value]) {
+          if (e.outstandingAmount > 0) cat(fundCategoryOfExpense(e.category)).unpaid += e.outstandingAmount;
+        }
+        final shown = cats.values.where((c) => c.setAside > 0 || c.need > 0 || c.allocatedTotal > 0).toList()
+          ..sort((a, b) => b.level.index.compareTo(a.level.index));
+        final loadingParts = [allocations, expenses, general].any((v) => !v.hasValue && !v.hasError);
+        final failedParts = [
+          if (allocations.hasError) 'allocations',
+          if (expenses.hasError) 'case bills',
+          if (general.hasError) 'general expenses',
+        ];
+
+        // ── Donations ──
+        double pct(DonationListing c) => c.target > 0 ? c.collected / c.target : 0;
+        final running = live.where((c) => c.target > 0 && !c.isEnded && !c.isGoalMet).toList();
+        final almost = running.where((c) => pct(c) >= 0.75 && pct(c) < 1).toList()
+          ..sort((a, b) => pct(b).compareTo(pct(a)));
+        String? attentionReason(DonationListing c) {
+          if (c.needsExtensionDecision) return 'Ended short of its goal: extend or close it';
+          if (c.status == 'paused') return 'Paused';
+          if (c.status == 'goal_not_met') return 'Ended short of its goal';
+          if (c.target > 0 && c.endDate != null && !c.isEnded && c.daysRemaining <= 14 && pct(c) < 0.75) {
+            return '${plural(c.daysRemaining, 'day')} left at ${(pct(c) * 100).round()}%';
+          }
+          return null;
+        }
+
+        final attention = [
+          for (final c in live)
+            if (attentionReason(c) case final reason?) (c, reason),
+        ]..sort((a, b) => a.$1.daysRemaining.compareTo(b.$1.daysRemaining));
+        final refunds = [
+          for (final d in donations.asData?.value ?? const <DonationHistoryRecord>[])
+            if (d.refundRequest?.isOpen ?? false) d,
+        ]..sort((a, b) => (a.refundRequest!.requestedAt ?? asOf).compareTo(b.refundRequest!.requestedAt ?? asOf));
 
         return Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            const CardLabel('Donations · last 30 days'),
             Row(
               children: [
-                Expanded(
-                  child: BigStat(
-                    value: pendingSum == null ? '—' : _shortPeso(pendingSum),
-                    label: 'Pending (${pendingList?.length ?? '—'})',
-                    color: (pendingSum ?? 0) > 0 ? DashSeverity.warning.color : null,
-                  ),
-                ),
-                Expanded(
-                  child: BigStat(value: verified == null ? '—' : _shortPeso(verified), label: 'Recorded'),
-                ),
+                const Icon(Icons.schedule, size: 15, color: AppColors.textSecondary),
+                const SizedBox(width: 5),
+                Expanded(child: Text('As of ${formatDateTime(asOf)}', style: dashMuted(12.5))),
               ],
             ),
-            const CardLabel('Available funds · verified only'),
-            if (unrestricted + restricted > 0)
-              ClipRRect(
-                borderRadius: BorderRadius.circular(7),
-                child: SizedBox(
-                  height: 14,
-                  child: Row(
-                    children: [
-                      if (unrestricted > 0)
-                        Expanded(
-                          flex: unrestricted.round(),
-                          child: Container(color: AppColors.textPrimary),
-                        ),
-                      if (restricted > 0) ...[
-                        const SizedBox(width: 2),
-                        Expanded(
-                          flex: restricted.round(),
-                          child: Container(color: AppColors.lavenderrspwn),
-                        ),
-                      ],
-                    ],
-                  ),
-                ),
+            const CardLabel('Funds by category'),
+            if (loadingParts && shown.isEmpty)
+              const DashLoading(label: 'Loading allocations and bills…')
+            else if (shown.isEmpty)
+              const DashEmpty('No funds allocated or bills recorded yet.', severity: DashSeverity.info)
+            else
+              for (int i = 0; i < shown.length; i++) _FundCategoryRow(c: shown[i], first: i == 0),
+            if (failedParts.isNotEmpty)
+              DetailLine(
+                Icons.cloud_off_outlined,
+                'Couldn’t load ${failedParts.join(', ')}; levels may be off.',
+                color: DashSeverity.critical.color,
+                maxLines: null,
               ),
-            const SizedBox(height: 6),
+            const SizedBox(height: 4),
             Wrap(
               spacing: 12,
               runSpacing: 4,
               children: [
-                LegendText(AppColors.textPrimary, 'General ${formatPeso(unrestricted)}'),
-                LegendText(
-                  AppColors.lavenderrspwn,
-                  'Restricted ${formatPeso(restricted)}',
-                  style: dashBody(size: 12.5, weight: FontWeight.w700, color: const Color(0xFF5D68C9)),
-                ),
-                if ((pendingSum ?? 0) > 0)
-                  Text('Pending ${formatPeso(pendingSum!)} not counted', style: dashMuted(12.5)),
+                LegendText(AppColors.textPrimary, 'General funds, any category ${formatPeso(generalPool)}'),
+                if (restrictedElsewhere > 0)
+                  LegendText(AppColors.lavenderrspwn, 'Restricted to specific animals ${formatPeso(restrictedElsewhere)}'),
               ],
             ),
-            if (campaigns.isNotEmpty) const CardLabel('Campaigns'),
-            for (final c in campaigns.take(2)) _CampaignRow(c: c),
-            const CardLabel('Obligations'),
-            ...expenses.when(
-              data: (list) {
-                const vetCats = {
-                  ExpenseCategory.consultation,
-                  ExpenseCategory.medication,
-                  ExpenseCategory.procedure,
-                  ExpenseCategory.laboratory,
-                  ExpenseCategory.vaccination,
-                  ExpenseCategory.confinement,
-                };
-                // Outstanding balances, so a partly funded bill counts only
-                // for the part nobody has covered yet.
-                final vet = list
-                    .where((e) => vetCats.contains(e.category))
-                    .fold<double>(0, (s, e) => s + e.outstandingAmount);
-                final transport = list
-                    .where((e) => e.category == ExpenseCategory.transport)
-                    .fold<double>(0, (s, e) => s + e.outstandingAmount);
-                // General (non-case) running costs: utilities, rent, supplies, pay.
-                final running = general?.fold<double>(0, (s, e) => s + e.outstandingAmount);
-                final everything = [...list, ...?general];
-                final missing = everything.where((e) => (e.receiptUrl ?? '').isEmpty).length;
-                // Donation gaps 6 and 7.
-                final awaiting = expensesAwaitingApproval(everything);
-                final overdue = expensesWithOverdueReceipts(everything, settings.effectiveReceiptDueDays);
-                return [
-                  _KvRow(
-                    Icons.local_hospital,
-                    'Unfunded vet bills',
-                    Text(formatPeso(vet), style: GoogleFonts.tiltWarp(fontSize: 15)),
-                    first: true,
-                  ),
-                  _KvRow(
-                    Icons.local_shipping,
-                    'Unfunded transport',
-                    Text(formatPeso(transport), style: GoogleFonts.tiltWarp(fontSize: 15)),
-                  ),
-                  _KvRow(
-                    Icons.home_work_outlined,
-                    'Unfunded general expenses',
-                    Text(running == null ? '—' : formatPeso(running), style: GoogleFonts.tiltWarp(fontSize: 15)),
-                  ),
-                  _KvRow(
-                    Icons.receipt_long,
-                    'Missing receipts',
-                    StatusChip('$missing', tone: missing > 0 ? ChipTone.amber : ChipTone.green),
-                  ),
-                  InkWell(
-                    onTap: () => openExpenseOversight(context),
-                    child: _KvRow(
-                      Icons.assignment_late_outlined,
-                      overdue.isEmpty
-                          ? 'Receipts overdue'
-                          : 'Receipts overdue: ${overdue.take(3).map((e) => e.title).join(', ')}'
-                          '${overdue.length > 3 ? ' +${overdue.length - 3} more' : ''}',
-                      StatusChip('${overdue.length}', tone: overdue.isNotEmpty ? ChipTone.red : ChipTone.green),
+            Padding(
+              padding: const EdgeInsets.only(top: 6),
+              child: Text(
+                'Need = unpaid bills + the last 30 days’ spending in that category. Sufficient: money set aside '
+                    'covers the need. Low: covers at least half. Critical: less than half. General funds can cover a gap.',
+                style: dashMuted(),
+              ),
+            ),
+            const CardLabel('Almost complete'),
+            if (almost.isEmpty)
+              const DashEmpty('No campaign is between 75% and its goal.', severity: DashSeverity.info)
+            else
+              for (final c in almost.take(3)) _CampaignRow(c: c),
+            const CardLabel('Needs more attention'),
+            if (attention.isEmpty)
+              const DashEmpty('No campaign is ending short or waiting on a decision.')
+            else
+              ExpandableList(
+                initialCount: 3,
+                moreLabel: 'All campaigns needing attention',
+                children: [
+                  for (final (c, reason) in attention)
+                    InkWell(
+                      onTap: () => openCampaign(context, c.id),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 8),
+                        child: Row(
+                          children: [
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    c.title,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: dashBody(size: 14, weight: FontWeight.w700),
+                                  ),
+                                  Text(
+                                    '$reason · ${formatPeso(c.collected)}'
+                                        '${c.target > 0 ? ' of ${formatPeso(c.target)}' : ''}',
+                                    style: dashMuted(12.5),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            const StatusChip('Attention', tone: ChipTone.amber, icon: Icons.flag_outlined),
+                          ],
+                        ),
+                      ),
                     ),
-                  ),
-                  InkWell(
-                    onTap: () => openExpenseOversight(context),
-                    child: _KvRow(
-                      Icons.pending_actions,
-                      'Payments awaiting approval',
-                      settings.expenseApprovalThreshold == null && awaiting.isEmpty
-                          ? const StatusChip('No approval step set', tone: ChipTone.notRecorded)
-                          : StatusChip('${awaiting.length}', tone: awaiting.isNotEmpty ? ChipTone.amber : ChipTone.green),
-                    ),
-                  ),
-                ];
-              },
-              loading: () => [const DashLoading(label: 'Loading expenses…')],
-              error: (e, _) => [DashError(what: 'expenses', error: e)],
+                ],
+              ),
+            const CardLabel('Needs refund review'),
+            if (!donations.hasValue && !donations.hasError)
+              const DashLoading(label: 'Loading donations…')
+            else if (donations.hasError)
+              DashError(what: 'donations', error: donations.error!)
+            else if (refunds.isEmpty)
+                const DashEmpty('No refund requests waiting.')
+              else
+                ExpandableList(
+                  initialCount: 3,
+                  moreLabel: 'All refund requests',
+                  children: [
+                    for (final d in refunds)
+                      InkWell(
+                        onTap: () => Navigator.push(
+                          context,
+                          MaterialPageRoute(builder: (_) => const DonationAdminHomeScreen(initialTab: DonationAdminTab.refunds)),
+                        ),
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 8),
+                          child: Row(
+                            children: [
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      '${formatPeso(d.amountValue)} · ${d.displayName}',
+                                      style: dashBody(size: 14, weight: FontWeight.w700),
+                                    ),
+                                    Text(
+                                      [
+                                        if (d.campaignName.isNotEmpty) d.campaignName,
+                                        d.refundRequest!.reason?.label ?? 'Refund requested',
+                                        'requested ${elapsedSince(d.refundRequest!.requestedAt)}',
+                                      ].join(' · '),
+                                      maxLines: 2,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: dashMuted(12.5),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              StatusChip(
+                                d.refundRequest!.status == 'failed' ? 'Refund failed' : 'Review',
+                                tone: d.refundRequest!.status == 'failed' ? ChipTone.red : ChipTone.amber,
+                                icon: Icons.undo,
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 6,
+              runSpacing: 6,
+              children: [
+                DashLinkButton(label: 'Donations', icon: Icons.volunteer_activism, onPressed: () => openDonationsAdmin(context)),
+              ],
             ),
           ],
         );
       },
+    );
+  }
+}
+
+class _FundCategoryRow extends StatelessWidget {
+  final _FundCategory c;
+  final bool first;
+  const _FundCategoryRow({required this.c, required this.first});
+
+  @override
+  Widget build(BuildContext context) {
+    final level = c.level;
+    final color = switch (level) {
+      FundLevel.sufficient => DashSeverity.ok.color,
+      FundLevel.low => DashSeverity.warning.color,
+      FundLevel.critical => DashSeverity.critical.color,
+    };
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      decoration: BoxDecoration(
+        border: first ? null : Border(top: BorderSide(color: AppColors.textPrimary.withValues(alpha: 0.14))),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              Expanded(child: Text(c.name, style: dashBody(size: 14.5, weight: FontWeight.w700))),
+              StatusChip(level.label, tone: level.tone, icon: level.icon),
+            ],
+          ),
+          const SizedBox(height: 5),
+          DashProgress(
+            fraction: c.need <= 0 ? 1 : c.setAside / c.need,
+            color: color,
+            semanticsLabel: '${formatPeso(c.setAside)} set aside for ${formatPeso(c.need)} needed',
+          ),
+          const SizedBox(height: 3),
+          Text(
+            c.need <= 0
+                ? '${formatPeso(c.setAside)} set aside · nothing unpaid or spent in 30 days'
+                : '${formatPeso(c.setAside)} set aside · needs ${formatPeso(c.need)} '
+                '(${formatPeso(c.unpaid)} unpaid + ${formatPeso(c.spent30)} spent in 30 days)',
+            style: dashMuted(12.5),
+          ),
+          if (c.allocatedTotal > 0) Text('${formatPeso(c.allocatedTotal)} allocated so far', style: dashMuted(12)),
+        ],
+      ),
     );
   }
 }
@@ -1269,10 +1222,6 @@ class _CampaignRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final pct = (c.collected / c.target * 100).round();
-    final over = c.collected >= c.target;
-    final note = over
-        ? '${formatPeso(c.collected - c.target)} above target · ${c.restricted ? 'stays with its stated purpose' : 'reconcile before reuse'}'
-        : '${formatPeso(c.target - c.collected)} short${c.linkedCaseId != null ? ' · urgent care may proceed from general funds' : ''}';
     return InkWell(
       onTap: () => openCampaign(context, c.id),
       child: Padding(
@@ -1290,180 +1239,20 @@ class _CampaignRow extends StatelessWidget {
                     style: dashBody(size: 14, weight: FontWeight.w700),
                   ),
                 ),
-                Text(
-                  '$pct%',
-                  style: dashBody(
-                    size: 14,
-                    weight: FontWeight.w700,
-                    color: over ? DashSeverity.ok.color : AppColors.textPrimary,
-                  ),
-                ),
+                Text('$pct%', style: dashBody(size: 14, weight: FontWeight.w700, color: DashSeverity.ok.color)),
               ],
             ),
             const SizedBox(height: 5),
             DashProgress(
               fraction: c.collected / c.target,
-              color: over ? DashSeverity.ok.color : AppColors.greenrspwn,
+              color: AppColors.greenrspwn,
               semanticsLabel: '${formatPeso(c.collected)} of ${formatPeso(c.target)}',
             ),
             const SizedBox(height: 3),
-            Text(note, style: dashMuted()),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _KvRow extends StatelessWidget {
-  final IconData icon;
-  final String label;
-  final Widget value;
-  final bool first;
-  const _KvRow(this.icon, this.label, this.value, {this.first = false});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(vertical: 8),
-      decoration: BoxDecoration(
-        border: first ? null : Border(top: BorderSide(color: AppColors.textPrimary.withValues(alpha: 0.14))),
-      ),
-      child: Row(
-        children: [
-          Icon(icon, size: 17, color: AppColors.textPrimary),
-          const SizedBox(width: 6),
-          Expanded(
-            child: Text(label, style: dashBody(size: 14, weight: FontWeight.w700)),
-          ),
-          value,
-        ],
-      ),
-    );
-  }
-}
-
-// ─── Recent activity ─────────────────────────────────────────────────────
-
-class _Event {
-  final IconData icon;
-  final String title;
-  final String subtitle;
-  final DateTime time;
-  final void Function(BuildContext) open;
-  const _Event(this.icon, this.title, this.subtitle, this.time, this.open);
-}
-
-/// Built from timestamps already on loaded records (case reports,
-/// treatment updates, adoption decisions, donations) — no generated
-/// entries and no extra query.
-class RecentActivityCard extends ConsumerWidget {
-  const RecentActivityCard({super.key});
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final snap = ref.watch(dashboardRescueSnapshotProvider).asData?.value;
-    final approved =
-        ref.watch(adoptionsByStatusesProvider(statusFilter(AdoptionStatus.approved))).asData?.value ?? const [];
-    final adopted =
-        ref.watch(adoptionsByStatusesProvider(statusFilter(AdoptionStatus.adopted))).asData?.value ?? const [];
-    final canManage = ref.watch(canViewFinancesProvider).asData?.value ?? false;
-    final donations = canManage ? ref.watch(recentDonationsProvider).asData?.value : null;
-
-    String animalOf(RescueCase c) => c.speciesSummary.isEmpty ? 'Animal' : c.speciesSummary;
-    final events = <_Event>[
-      for (final c in snap?.all ?? const <RescueCase>[])
-        if (c.createdAt != null)
-          _Event(
-            Icons.sos,
-            'New report · ${animalOf(c)}${c.address == null ? '' : ', ${c.address!.split(',').first}'}',
-            c.reporterName ?? 'Community reporter',
-            c.createdAt!,
-                (ctx) => openRescueCase(ctx, c),
-          ),
-      for (final c in snap?.of(RescueStage.treatment) ?? const <RescueCase>[])
-        if (c.treatmentUpdatedAt != null)
-          _Event(
-            Icons.healing,
-            'Treatment update · ${animalOf(c)} #${c.shortCaseId}',
-            [c.latestTreatmentUpdateType, c.vetClinicName].whereType<String>().join(' · '),
-            c.treatmentUpdatedAt!,
-                (ctx) => openTreatment(ctx, c),
-          ),
-      for (final a in approved)
-        if (a.approvedAt != null)
-          _Event(
-            Icons.check,
-            'Application approved · ${a.animalName}',
-            a.adopterName,
-            a.approvedAt!,
-                (ctx) => openApplication(ctx, a),
-          ),
-      for (final a in adopted)
-        if (a.adoptedAt != null)
-          _Event(
-            Icons.home,
-            'Adopted · ${a.animalName}',
-            a.adopterName,
-            a.adoptedAt!,
-                (ctx) => openApplication(ctx, a),
-          ),
-      for (final d in donations ?? const [])
-        if (d.when != null)
-          _Event(
-            Icons.payments,
-            d.isInKind ? 'In-kind donation recorded' : 'Donation ${formatPeso(d.amountValue)} recorded',
-            d.campaignName.isEmpty ? d.displayName : d.campaignName,
-            d.when!,
-                (ctx) => openDonationsAdmin(ctx),
-          ),
-    ]..sort((a, b) => b.time.compareTo(a.time));
-
-    return SectionCard(
-      icon: Icons.history,
-      title: 'Recent activity',
-      child: events.isEmpty
-          ? (snap == null
-          ? const DashLoading()
-          : const DashEmpty('No recent activity recorded.', severity: DashSeverity.info))
-          : Column(children: [for (final e in events.take(5)) _EventRow(e: e)]),
-    );
-  }
-}
-
-class _EventRow extends StatelessWidget {
-  final _Event e;
-  const _EventRow({required this.e});
-
-  @override
-  Widget build(BuildContext context) {
-    return InkWell(
-      onTap: () => e.open(context),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 7),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Container(
-              width: 28,
-              height: 28,
-              decoration: const BoxDecoration(color: AppColors.tearspwn, shape: BoxShape.circle),
-              child: Icon(e.icon, size: 15, color: AppColors.textPrimary),
-            ),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    e.title,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: dashBody(size: 14, weight: FontWeight.w700),
-                  ),
-                  Text('${e.subtitle.isEmpty ? '' : '${e.subtitle} · '}${elapsedSince(e.time)}', style: dashMuted()),
-                ],
-              ),
+            Text(
+              '${formatPeso(c.target - c.collected)} to go'
+                  '${c.endDate == null ? '' : ' · ${plural(c.daysRemaining, 'day')} left'}',
+              style: dashMuted(),
             ),
           ],
         ),

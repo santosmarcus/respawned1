@@ -54,6 +54,8 @@ class TransporterDetailPage extends StatelessWidget {
               _Section(title: 'Vehicle', children: [
                 _row(Icons.local_shipping_outlined, 'Vehicle type', t.vehicleType),
                 _row(Icons.confirmation_number_outlined, 'License plate', t.licensePlate),
+                _row(Icons.pets_outlined, 'Carries safely',
+                    t.maxAnimals == null ? 'Not declared (single-animal trips only)' : '${t.maxAnimals} animal${t.maxAnimals == 1 ? '' : 's'}'),
               ]),
               _Section(title: 'Availability', children: [
                 _row(Icons.circle, 'Status', t.isOnline ? 'Online now' : 'Offline',

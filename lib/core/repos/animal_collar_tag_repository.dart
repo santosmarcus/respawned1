@@ -68,6 +68,9 @@ class AnimalCollarTagRepository {
       'ownerMobile': _str(o['contactNumber']).isNotEmpty ? _str(o['contactNumber']) : _str(o['phone']),
       'ownerEmail': _str(o['email']),
       'ownerFacebookLink': _str(o['facebookUrl']),
+      // The registered codes (animalTags) its QR tag and NFC chip carry.
+      'animalQrCode': _str(data['qrTagId']),
+      'animalNfcCode': _str(data['nfcTagId']),
       'qrEnabled': true,
       'archived': data['archived'] == true || data['status'] == 'deceased',
     };

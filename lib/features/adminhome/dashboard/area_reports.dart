@@ -45,7 +45,7 @@ extension AreaReportX on AreaReport {
     AreaReport.rescue => 'Rescue',
     AreaReport.adoption => 'Adoptions',
     AreaReport.donation => 'Donations',
-    AreaReport.volunteers => 'Volunteers',
+    AreaReport.volunteers => 'Event volunteers',
   };
 }
 

@@ -30,3 +30,41 @@ Stream<List<T>> combineLatest<T>(List<Stream<T>> streams) {
   );
   return controller.stream;
 }
+
+/// For each [source] event, switches to the stream [mapper] returns,
+/// cancelling the previous one (rxdart's switchMap). Unlike `asyncExpand`,
+/// a new source event is never stuck behind an inner stream that doesn't
+/// end (Firestore snapshot streams never do).
+Stream<R> switchMap<T, R>(Stream<T> source, Stream<R> Function(T value) mapper) {
+  late final StreamController<R> controller;
+  StreamSubscription<T>? outer;
+  StreamSubscription<R>? inner;
+  controller = StreamController<R>(
+    onListen: () {
+      outer = source.listen(
+        (v) {
+          inner?.cancel();
+          inner = mapper(v).listen(controller.add, onError: controller.addError);
+        },
+        onError: controller.addError,
+        onDone: () async {
+          await inner?.asFuture<void>().catchError((_) {});
+          await controller.close();
+        },
+      );
+    },
+    onPause: () {
+      outer?.pause();
+      inner?.pause();
+    },
+    onResume: () {
+      outer?.resume();
+      inner?.resume();
+    },
+    onCancel: () async {
+      await inner?.cancel();
+      await outer?.cancel();
+    },
+  );
+  return controller.stream;
+}

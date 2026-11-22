@@ -2,6 +2,7 @@
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 
+import 'package:respawnd1/core/models/rescue/case_claim_rules.dart';
 import 'package:respawnd1/core/models/rescue/referral.dart';
 import 'package:respawnd1/core/models/rescue/referral_type.dart';
 import 'package:respawnd1/core/models/rescue/rescue_status.dart';
@@ -32,6 +33,9 @@ class CaseReferralRepository {
   /// An unowned case is stamped with the referring organization, which gets
   /// it back if the target declines or doesn't answer in time
   /// (functions/index.js followUpCaseReferrals).
+  ///
+  /// [type] rescueVolunteer: the target is an independent rescuer (an
+  /// organization with kind 'independent'); the flow is the same.
   Future<String> referToOrganization({
     required String caseId,
     required String targetOrgId,
@@ -39,6 +43,7 @@ class CaseReferralRepository {
     String? note,
     required String actorUid,
     required String actorName,
+    ReferralType type = ReferralType.anotherOrganization,
   }) async {
     final caseSnap = await _store.caseDoc(caseId).get();
     final caseData = caseSnap.data() ?? const <String, dynamic>{};
@@ -58,7 +63,7 @@ class CaseReferralRepository {
     final referralRef = _store.referralsOf(caseId).doc();
     final batch = _store.db.batch();
     batch.set(referralRef, {
-      'type': ReferralType.anotherOrganization.name,
+      'type': type.name,
       'status': ReferralStatus.referredPending.name,
       'createdAt': FieldValue.serverTimestamp(),
       'createdByUid': actorUid,
@@ -91,7 +96,7 @@ class CaseReferralRepository {
         if (caseOrgId.isEmpty && fromOrgId.isNotEmpty) 'organizationId': fromOrgId,
         'referralOutcome': FieldValue.delete(),
       },
-      action: 'referred_to_organization',
+      action: type == ReferralType.rescueVolunteer ? 'referred_to_volunteer' : 'referred_to_organization',
       actorUid: actorUid,
       actorName: actorName,
       details: {'targetOrgId': targetOrgId, 'targetOrgName': targetOrgName, 'referralId': referralRef.id},
@@ -142,6 +147,14 @@ class CaseReferralRepository {
       if (actorOrgId.isNotEmpty && actorOrgId != targetOrgId) {
         throw StateError('Only ${referral['targetOrgName'] ?? 'the receiving organization'} can answer this referral.');
       }
+      // An independent rescuer accepts only while under capacity.
+      var targetIndependent = false;
+      if (accept) {
+        final target = await tx.get(_store.db.collection('organizations').doc(targetOrgId));
+        final refusal = independentCapacityRefusal(target.data());
+        if (refusal != null) throw refusal;
+        targetIndependent = target.data()?['kind'] == 'independent';
+      }
       final targetOrgName = referral['targetOrgName'] as String? ?? 'The receiving organization';
       final fromOrgName = referral['fromOrgName'] as String? ?? '';
       final referralId = referral['referralId'] as String?;
@@ -165,6 +178,7 @@ class CaseReferralRepository {
           'status': RescueStatus.pendingReview.firestoreValue,
           'referredToOrgId': FieldValue.delete(),
           if (accept) 'organizationId': targetOrgId,
+          if (accept) 'ownerKind': targetIndependent ? 'independent' : FieldValue.delete(),
           'referralOutcome': {
             'status': accept ? 'accepted' : 'declined',
             'referralId': referralId,
@@ -191,20 +205,127 @@ class CaseReferralRepository {
     });
   }
 
-  Future<String> referToLgu({
+  /// The referring organization takes a still-unanswered referral back
+  /// (organization or LGU). The case returns to the status it had before
+  /// the referral (Rescue Review for older referrals that didn't record
+  /// one), the receiving organization loses access to it, and the existing
+  /// refer sheet can send it somewhere else. Organization referrals also
+  /// come back by themselves after 48 hours with no answer
+  /// (functions/index.js followUpCaseReferrals); LGU referrals only come
+  /// back this way.
+  Future<void> withdraw({
     required String caseId,
-    required String barangay,
-    required LguReferralReason reason,
-    required String explanation,
-    bool attachReportMedia = true,
+    required String reason,
+    required String actorUid,
+    required String actorName,
+  }) async {
+    final caseRef = _store.caseDoc(caseId);
+    // LGU referrals don't keep their id on the case; find the open one.
+    final open = await _store
+        .referralsOf(caseId)
+        .orderBy('createdAt', descending: true)
+        .limit(5)
+        .get();
+    await _store.db.runTransaction((tx) async {
+      final snap = await tx.get(caseRef);
+      final c = snap.data() ?? const <String, dynamic>{};
+      if (c['status'] != RescueStatus.referred.firestoreValue) {
+        throw StateError('This case is no longer waiting on a referral.');
+      }
+      final referral = c['referral'] is Map
+          ? Map<String, dynamic>.from(c['referral'] as Map)
+          : const <String, dynamic>{};
+      final targetOrgId = c['referredToOrgId'] as String? ?? '';
+      var referralId = targetOrgId.isNotEmpty ? referral['referralId'] as String? : null;
+      String? barangay;
+      if (referralId == null) {
+        for (final d in open.docs) {
+          final status = d.data()['status'];
+          if (status == ReferralStatus.notified.name || status == ReferralStatus.referredPending.name) {
+            referralId = d.id;
+            barangay = d.data()['barangay'] as String?;
+            break;
+          }
+        }
+      }
+      // A shared-link referral keeps its id and the status it left on the case.
+      final link = c['linkReferral'] is Map ? Map<String, dynamic>.from(c['linkReferral'] as Map) : null;
+      if (link != null && referralId == null) referralId = link['referralId'] as String?;
+      final previous = targetOrgId.isNotEmpty
+          ? referral['previousStatus'] as String?
+          : link?['previousStatus'] as String?;
+      final backTo = (previous == null || previous.isEmpty || previous == RescueStatus.referred.firestoreValue)
+          ? RescueStatus.pendingReview.firestoreValue
+          : previous;
+      final targetName = targetOrgId.isNotEmpty
+          ? (referral['targetOrgName'] as String? ?? 'the receiving organization')
+          : link != null
+              ? 'the shared link'
+              : (barangay == null || barangay.isEmpty ? 'the LGU/barangay' : 'the $barangay LGU/barangay');
+      if (referralId != null) {
+        tx.update(_store.referralsOf(caseId).doc(referralId), {
+          'status': ReferralStatus.withdrawn.name,
+          'respondedAt': FieldValue.serverTimestamp(),
+          'respondedByUid': actorUid,
+          'respondedByName': actorName,
+          'withdrawReason': reason,
+        });
+      }
+      _store.recordActionIn(
+        tx,
+        caseId: caseId,
+        statusLine: 'Referral to $targetName withdrawn. The case is open again.',
+        fields: {
+          'status': backTo,
+          'referredToOrgId': FieldValue.delete(),
+          'linkReferral': FieldValue.delete(),
+          'referralOutcome': {
+            'status': 'withdrawn',
+            'referralId': referralId,
+            'targetOrgId': targetOrgId.isEmpty ? null : targetOrgId,
+            'targetOrgName': targetOrgId.isEmpty ? targetName : referral['targetOrgName'],
+            'fromOrgId': referral['fromOrgId'],
+            'fromOrgName': referral['fromOrgName'],
+            'reason': reason,
+            'byUid': actorUid,
+            'byName': actorName,
+            'at': FieldValue.serverTimestamp(),
+          },
+        },
+        action: 'referral_withdrawn',
+        actorUid: actorUid,
+        actorName: actorName,
+        details: {
+          'referralId': referralId,
+          'targetOrgId': targetOrgId.isEmpty ? null : targetOrgId,
+          'targetName': targetName,
+          'reason': reason,
+          'restoredStatus': backTo,
+        },
+      );
+    });
+  }
+
+  /// Refer → shared link: a referral anyone outside the app can take
+  /// through its web link (functions/referral_shares.js), filling in their
+  /// own name and contact there. The case is Referred but stays pending in
+  /// Review (`linkReferral.state` 'waiting') until someone answers "Will
+  /// handle it" (functions/referral_share_rules.js linkReferralUpdate),
+  /// which moves it to Closed. Stored as the `localGovernmentUnit` type so
+  /// the existing link callables accept it; the report's photos go with it.
+  Future<String> referByLink({
+    required String caseId,
+    String note = '',
     required String actorUid,
     required String actorName,
   }) async {
     final caseSnap = await _store.caseDoc(caseId).get();
-    final mediaUrls = attachReportMedia
-        ? List<String>.from(caseSnap.data()?['photoUrls'] ?? const [])
-        : <String>[];
-
+    final data = caseSnap.data() ?? const <String, dynamic>{};
+    final current = data['status'] as String?;
+    if (current == RescueStatus.referred.firestoreValue) {
+      throw StateError('This case is already referred.');
+    }
+    final trimmed = note.trim();
     final referralRef = _store.referralsOf(caseId).doc();
     await referralRef.set({
       'type': ReferralType.localGovernmentUnit.name,
@@ -212,50 +333,47 @@ class CaseReferralRepository {
       'createdAt': FieldValue.serverTimestamp(),
       'createdByUid': actorUid,
       'createdByName': actorName,
-      'barangay': barangay,
-      'lguReason': reason.name,
-      'lguExplanation': explanation,
-      'attachedMediaUrls': mediaUrls,
+      'byLink': true,
+      if (trimmed.isNotEmpty) 'lguExplanation': trimmed,
+      'attachedMediaUrls': List<String>.from(data['photoUrls'] ?? const []),
     });
     await _store.recordAction(
       caseId: caseId,
-      statusLine: 'Referred to the $barangay LGU/barangay: ${reason.label}.',
-      fields: {'status': RescueStatus.referred.firestoreValue},
-      action: 'referred_to_lgu',
+      statusLine: 'Referred by shared link. Waiting for someone to take it.',
+      fields: {
+        'status': RescueStatus.referred.firestoreValue,
+        'linkReferral': {
+          'referralId': referralRef.id,
+          'state': 'waiting',
+          'at': Timestamp.now(),
+          'previousStatus': current,
+        },
+      },
+      action: 'referred_by_link',
       actorUid: actorUid,
       actorName: actorName,
-      details: {'barangay': barangay, 'reason': reason.name},
+      details: {'referralId': referralRef.id},
     );
     return referralRef.id;
   }
 
-  /// TODO: rescue-volunteer referral has no assignment/matching logic yet.
-  /// This only records the referral so the modal has something to call;
-  /// wire up actual volunteer notification once that flow is designed.
+  /// Refers the case to an independent rescuer (Refer → Rescue Volunteer):
+  /// the same flow as [referToOrganization] — they accept or decline, with
+  /// the 24 h reminder and 48 h return to the referring organization.
   Future<String> referToVolunteer({
     required String caseId,
+    required String targetOrgId,
+    required String targetOrgName,
     String? note,
     required String actorUid,
     required String actorName,
-  }) async {
-    final referralRef = _store.referralsOf(caseId).doc();
-    final batch = _store.db.batch();
-    batch.set(referralRef, {
-      'type': ReferralType.rescueVolunteer.name,
-      'status': ReferralStatus.referredPending.name,
-      'createdAt': FieldValue.serverTimestamp(),
-      'createdByUid': actorUid,
-      'createdByName': actorName,
-      'note': note,
-    });
-    _store.recordActionInBatch(
-      batch,
-      caseId: caseId,
-      action: 'referred_to_volunteer',
-      actorUid: actorUid,
-      actorName: actorName,
-    );
-    await batch.commit();
-    return referralRef.id;
-  }
+  }) => referToOrganization(
+        caseId: caseId,
+        targetOrgId: targetOrgId,
+        targetOrgName: targetOrgName,
+        note: note,
+        actorUid: actorUid,
+        actorName: actorName,
+        type: ReferralType.rescueVolunteer,
+      );
 }

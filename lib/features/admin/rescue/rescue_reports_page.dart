@@ -1,3 +1,5 @@
+import 'package:respawnd1/features/admin/widgets/view_only.dart';
+import 'package:respawnd1/core/models/organization/org_permission.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -17,12 +19,61 @@ import 'package:respawnd1/features/admin/rescue/admin_track_case_page.dart';
 import 'package:respawnd1/features/admin/rescue/treatment_detail_page.dart';
 import 'package:respawnd1/features/admin/rescue/intake_detail_page.dart';
 import 'package:respawnd1/features/admin/rescue/state/rescue_reports_providers.dart';
+import 'package:respawnd1/features/admin/rescue/widgets/case_page_kit.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/rescue_case_card.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/rescue_filter_sheet.dart';
 import 'package:respawnd1/features/admin/widgets/admin_app_bar.dart';
 import 'package:respawnd1/features/admin/widgets/admin_drawer.dart';
 import 'package:respawnd1/features/admin/widgets/admin_search_bar.dart';
 import 'package:respawnd1/features/admin/widgets/admin_tab_bar.dart';
+import 'package:respawnd1/features/admin/widgets/admin_tab_seen.dart';
+
+/// The Closed-tab card's sub-line for a referred or completed case.
+String closedCaseOutcomeNote(RescueCase c, {String? myOrgId, DateTime? now}) {
+  if (c.status == RescueStatus.completed) {
+    if (c.raw['status'] == 'closed') {
+      final reason = c.raw['closureReason'] as String?;
+      if (reason != null) return 'Closed · ${ClosureReason.fromName(reason).label}';
+      final claimed = (c.raw['communityAdoptionIds'] as List?)?.isNotEmpty ?? false;
+      return claimed ? 'Closed · claimed through Community Adoption' : 'Closed · animal deceased';
+    }
+    return 'Intaked';
+  }
+  final referral = c.raw['referral'] is Map ? c.raw['referral'] as Map : const {};
+  final targetOrgId = c.raw['referredToOrgId'] as String? ?? '';
+  final link = c.linkReferral;
+  if (targetOrgId.isEmpty && link != null) {
+    final name = (link['answeredByName'] as String?)?.trim() ?? '';
+    final at = link['at'];
+    final age = at is Timestamp ? caseAgeLabel(at.toDate(), now: now) : null;
+    return switch (link['state']) {
+      'accepted' => 'Referred by link · taken by ${name.isEmpty ? 'the receiver' : name}',
+      'declined' => "Referred by link · ${name.isEmpty ? 'they' : name} can't take it",
+      'needs_info' => 'Referred by link · more information asked',
+      _ => 'Referred by link · ${age == null ? 'waiting' : 'waiting $age'}',
+    };
+  }
+  if (targetOrgId.isEmpty) {
+    // LGU referrals keep nothing on the case but the status line
+    // the old LGU referral form wrote.
+    for (final h in c.statusHistory.reversed) {
+      final m = RegExp(r'^Referred to the (.+) LGU/barangay').firstMatch(h.status);
+      if (m == null) continue;
+      final ts = h.timestamp;
+      return 'Referred to ${m.group(1)} LGU · ${ts == null ? 'waiting' : 'waiting ${caseAgeLabel(ts, now: now)}'}';
+    }
+    return 'Referred to LGU/barangay · waiting';
+  }
+  final at = referral['referredAt'];
+  final age = at is Timestamp ? caseAgeLabel(at.toDate(), now: now) : null;
+  final waiting = age == null ? 'waiting' : 'waiting $age';
+  if (myOrgId != null && myOrgId.isNotEmpty && myOrgId == targetOrgId) {
+    final from = (referral['fromOrgName'] as String?)?.trim() ?? '';
+    return 'Referred to you${from.isEmpty ? '' : ' by $from'} · needs your answer';
+  }
+  final to = (referral['targetOrgName'] as String?)?.trim() ?? '';
+  return 'Referred to ${to.isEmpty ? 'another organization' : to} · $waiting';
+}
 
 String _friendlyCasesError(Object err) {
   if (err is FirebaseException && err.code == 'permission-denied') {
@@ -47,6 +98,8 @@ class RescueReportsPage extends ConsumerStatefulWidget {
 
 class _RescueReportsPageState extends ConsumerState<RescueReportsPage> {
   final _searchController = TextEditingController();
+  // Clears a step's number once it has been opened (admin_tab_seen.dart).
+  final _seenMarker = AdminTabSeenMarker('rescue');
 
   @override
   void dispose() {
@@ -117,6 +170,24 @@ class _RescueReportsPageState extends ConsumerState<RescueReportsPage> {
     final selectedTab = ref.watch(rescuePipelineTabProvider);
     final filters = ref.watch(rescueFilterProvider);
     final casesAsync = ref.watch(filteredCasesProvider);
+    // Closed tab: tells "referred to you" apart from "referred by you".
+    final myOrgId = ref.watch(currentOrganizationIdProvider).asData?.value;
+
+    // The tab the admin is looking at, while it shows its own cases (not a
+    // status picked from the filter sheet). Its number is hidden, and every
+    // case in it is marked seen while this screen is on top, so the number
+    // stays gone until a new case arrives in that step.
+    final seen = ref.watch(adminTabSeenProvider('rescue'));
+    final viewingTab = filters.statusOverride == null ? selectedTab : null;
+    Iterable<String>? idsIn(RescuePipelineTab tab) =>
+        ref.watch(casesForTabProvider(tab)).asData?.value.map((c) => c.id);
+    if (viewingTab != null && (ModalRoute.of(context)?.isCurrent ?? true)) {
+      final ids = idsIn(viewingTab);
+      final seenByTab = seen.asData?.value;
+      if (ids != null && seenByTab != null) {
+        _seenMarker.markSeen(viewingTab.name, ids, seenByTab[viewingTab.name]);
+      }
+    }
 
     // Picking a tab (or re-tapping the current one) also drops a status
     // override set from the filter sheet, so the tab shows its own cases.
@@ -133,7 +204,10 @@ class _RescueReportsPageState extends ConsumerState<RescueReportsPage> {
         bottom: AdminTabBar(
           tabs: [
             for (final tab in RescuePipelineTab.values)
-              AdminTab(tab.label, count: ref.watch(casesForTabProvider(tab)).asData?.value.length ?? 0),
+              AdminTab(
+                tab.label,
+                count: tab == viewingTab ? null : unseenTabCount(seen, tab.name, idsIn(tab)),
+              ),
           ],
           selectedIndex: selectedTab.index,
           onSelected: selectTab,
@@ -141,6 +215,7 @@ class _RescueReportsPageState extends ConsumerState<RescueReportsPage> {
       ),
       body: Column(
         children: [
+          const ViewOnlyBanner(perms: [OrgPermission.rescue]),
           AdminSearchBar(
             controller: _searchController,
             hintText: 'Search species, reporter, case ID…',
@@ -327,11 +402,22 @@ class _RescueReportsPageState extends ConsumerState<RescueReportsPage> {
                       return RescueCaseCard(
                         rescueCase: c,
                         showStatusChip: filters.statusOverride != null,
+                        outcomeNote: 'Cancelled',
                         closureInfo: ClosureCardInfo(
                           reasonLabel: reason.label,
                           closedDate: closedAt,
                           closedBy: c.raw['closedByName'] as String?,
                         ),
+                        onTap: () => _navigateToDetail(context, c),
+                      );
+                    }
+                    if (c.status == RescueStatus.referred || c.status == RescueStatus.completed) {
+                      // Closed tab: referred away (still reopenable) or
+                      // finished. The sub-line says which.
+                      return RescueCaseCard(
+                        rescueCase: c,
+                        showStatusChip: true,
+                        outcomeNote: closedCaseOutcomeNote(c, myOrgId: myOrgId),
                         onTap: () => _navigateToDetail(context, c),
                       );
                     }

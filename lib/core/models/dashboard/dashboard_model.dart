@@ -6,6 +6,7 @@ import 'package:respawnd1/core/models/rescue/animal_record.dart';
 import 'package:respawnd1/core/models/rescue/rescue_case.dart';
 import 'package:respawnd1/core/models/rescue/rescue_status.dart';
 import 'package:respawnd1/core/utils/adoption_lifecycle.dart';
+import 'package:respawnd1/core/utils/adoption_readiness.dart';
 
 /// Pure, UI-free derivations the operational dashboard is built on. Every
 /// function here reads only fields that already exist on the shared
@@ -266,27 +267,14 @@ String nextCareActionFor(AnimalRecord a) {
 
 // ─── Adoption readiness ──────────────────────────────────────────────────
 
-/// One readiness item — `null` means "not recorded", which is shown as a
-/// gap, never as a pass or a fail.
-class ReadinessItem {
-  final String label;
-  final bool? done;
-  const ReadinessItem(this.label, this.done);
-}
-
 /// Readiness information the admin needs to review — deliberately NOT a
-/// verdict. Vaccination is one item among several, never decisive alone.
-List<ReadinessItem> readinessItemsFor(AnimalRecord a) => [
-  ReadinessItem('Vaccinated', a.raw.containsKey('vaccinated') ? a.vaccinated : null),
-  ReadinessItem('Dewormed', a.health.dewormed),
-  ReadinessItem('Spay/neuter', a.health.sterilized),
-  ReadinessItem('Vet checkup on file', a.health.lastVetCheckup != null),
-  ReadinessItem('Temperament noted', a.keyCharacteristics.isNotEmpty ? true : null),
-  ReadinessItem('Photo', a.photoUrls.isNotEmpty),
-];
+/// verdict. Delegates to the single checklist in adoption_readiness.dart
+/// (the same one the Adoptable toggle uses). `done` is null for items the
+/// record has no value for.
+List<ReadinessCheck> readinessItemsFor(AnimalRecord a) => readinessForRecord(a);
 
 /// Gaps = items that are missing/unrecorded or not yet done.
-int readinessGaps(AnimalRecord a) => readinessItemsFor(a).where((i) => i.done != true).length;
+int readinessGaps(AnimalRecord a) => unmetReadiness(readinessItemsFor(a)).length;
 
 // ─── Adoption returns ────────────────────────────────────────────────────
 

@@ -49,6 +49,17 @@ bool isTransporterStillOnline({
       now.difference(lastSeenAt) <= kTransporterPresenceThreshold;
 }
 
+/// A real transporter also needs a phone number (staff call them about the
+/// pickup) and a shared location (distance and the search radius) to be
+/// offered a case.
+bool isTransporterReachable({
+  required Object? phone,
+  required Object? lastLat,
+  required Object? lastLng,
+}) {
+  return phone is String && phone.trim().isNotEmpty && lastLat is num && lastLng is num;
+}
+
 /// True when [expiresAt] is a Timestamp that [now] is past. A missing or
 /// malformed `expiresAt` never expires.
 bool isOfferExpired(Object? expiresAt, Timestamp now) {

@@ -1,22 +1,27 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:cloud_functions/cloud_functions.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 
+import 'package:respawnd1/core/models/organization/org_permission.dart';
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/core/repos/organization_repository.dart';
 import 'package:respawnd1/core/utils/app_date_format.dart';
+import 'package:respawnd1/core/widgets/app_dialogs.dart';
 import 'package:respawnd1/core/widgets/app_messages.dart';
 import 'package:respawnd1/features/admin/widgets/admin_app_bar.dart';
 import 'package:respawnd1/features/admin/widgets/admin_search_bar.dart';
 import 'package:respawnd1/features/admin/widgets/admin_tab_bar.dart';
 import 'package:respawnd1/features/systemadmin/user_directory.dart';
 
-/// The system admin's read-only directory of every account: each
-/// organization's people with their role there, and the other account types
-/// (transporters, volunteers, general users, admins). Nothing here changes an
-/// account; organization admins manage their own members, and organization
-/// staff verify transporters.
+/// The system admin's directory of every account: each organization's people
+/// with their role there (shelters under Organization, rescue volunteers'
+/// teams under Rescue volunteers), and the other account types
+/// (transporters, general users, admins). From an account's details the system
+/// admin can disable (suspend sign-in) or remove it (deleteMyAccount's
+/// cleanup, server-side). Organization admins still manage their own members'
+/// access, and organization staff verify transporters.
 class SystemUsersPage extends StatefulWidget {
   const SystemUsersPage({super.key, this.menuActions = const [], this.firestore});
 
@@ -50,50 +55,79 @@ class _SystemUsersPageState extends State<SystemUsersPage> {
   Widget build(BuildContext context) {
     return StreamBuilder<List<DirectoryUser>>(
       stream: _users,
-      builder: (context, snap) {
-        final users = snap.data ?? const <DirectoryUser>[];
-        int count(AccountGroup g) => users.where((u) => groupOf(u) == g).length;
-        final group = AccountGroup.values[_tab];
-        return Scaffold(
-          backgroundColor: AppColors.background,
-          appBar: AdminAppBar(
-            title: 'Users',
-            showLeading: false,
-            menuActions: widget.menuActions,
-            bottom: AdminTabBar(
-              tabs: [
-                for (final g in AccountGroup.values)
-                  AdminTab(g.label, count: snap.hasData && g != AccountGroup.organization ? count(g) : null),
-              ],
-              selectedIndex: _tab,
-              onSelected: (i) => setState(() => _tab = i),
-            ),
+      builder: (context, snap) => StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+        stream: _orgs,
+        builder: (context, orgSnap) => _page(snap, orgSnap),
+      ),
+    );
+  }
+
+  Widget _page(AsyncSnapshot<List<DirectoryUser>> snap, AsyncSnapshot<QuerySnapshot<Map<String, dynamic>>> orgSnap) {
+    final users = snap.data ?? const <DirectoryUser>[];
+    final orgs = (orgSnap.data?.docs ?? const <QueryDocumentSnapshot<Map<String, dynamic>>>[]).toList()
+      ..sort((a, b) => ((a.data()['name'] as String?) ?? '').compareTo((b.data()['name'] as String?) ?? ''));
+    // Rescue volunteers' teams are organizations with kind 'independent';
+    // they are listed under the volunteers tab, not Organization.
+    final volunteerOrgIds = {for (final o in orgs) if (o.data()['kind'] == 'independent') o.id};
+    int count(AccountGroup g) => users.where((u) => groupOf(u, volunteerOrgIds: volunteerOrgIds) == g).length;
+    final group = AccountGroup.values[_tab];
+    final teamTab = group == AccountGroup.organization || group == AccountGroup.volunteers;
+    return Scaffold(
+      backgroundColor: AppColors.background,
+      appBar: AdminAppBar(
+        title: 'Users',
+        showLeading: false,
+        menuActions: widget.menuActions,
+        bottom: AdminTabBar(
+          tabs: [
+            for (final g in AccountGroup.values)
+              AdminTab(g.label,
+                  count: snap.hasData && orgSnap.hasData && g != AccountGroup.organization ? count(g) : null),
+          ],
+          selectedIndex: _tab,
+          onSelected: (i) => setState(() => _tab = i),
+        ),
+      ),
+      body: Column(
+        children: [
+          AdminSearchBar(
+            controller: _search,
+            hintText: 'Search name, email or phone…',
+            onChanged: (v) => setState(() => _query = v.trim().toLowerCase()),
           ),
-          body: Column(
-            children: [
-              AdminSearchBar(
-                controller: _search,
-                hintText: 'Search name, email or phone…',
-                onChanged: (v) => setState(() => _query = v.trim().toLowerCase()),
-              ),
-              Expanded(
-                child: AdminTabSwipe(
-                  index: _tab,
-                  count: AccountGroup.values.length,
-                  onSelected: (i) => setState(() => _tab = i),
-                  child: snap.hasError
-                      ? const AdminListMessage('Could not load users.')
-                      : !snap.hasData
+          Expanded(
+            child: AdminTabSwipe(
+              index: _tab,
+              count: AccountGroup.values.length,
+              onSelected: (i) => setState(() => _tab = i),
+              child: snap.hasError
+                  ? const AdminListMessage('Could not load users.')
+                  : teamTab && orgSnap.hasError
+                      ? const AdminListMessage('Could not load organizations.')
+                      : !snap.hasData || (teamTab && !orgSnap.hasData)
                           ? const Center(child: CircularProgressIndicator(color: AppColors.greenrspwn))
                           : group == AccountGroup.organization
-                              ? _organizationsView(users)
-                              : _groupView(users, group),
-                ),
-              ),
-            ],
+                              ? _teamsView(
+                                  users,
+                                  orgs.where((o) => !volunteerOrgIds.contains(o.id)).toList(),
+                                  group: group,
+                                  empty: 'No organizations yet.',
+                                )
+                              : group == AccountGroup.volunteers
+                                  ? _teamsView(
+                                      users,
+                                      orgs.where((o) => volunteerOrgIds.contains(o.id)).toList(),
+                                      group: group,
+                                      empty: 'No rescue volunteers yet.',
+                                      older: users
+                                          .where((u) => u.role == 'rescue_volunteer' && u.matches(_query))
+                                          .toList(),
+                                    )
+                                  : _groupView(users, group),
+            ),
           ),
-        );
-      },
+        ],
+      ),
     );
   }
 
@@ -123,30 +157,38 @@ class _SystemUsersPageState extends State<SystemUsersPage> {
     );
   }
 
-  Widget _organizationsView(List<DirectoryUser> users) {
+  /// Shelters (Organization tab) or rescue volunteers' teams (volunteers
+  /// tab), each with its roster; then sign-ups not on a team yet, and on the
+  /// volunteers tab the [older] 'rescue_volunteer' accounts.
+  Widget _teamsView(
+    List<DirectoryUser> users,
+    List<QueryDocumentSnapshot<Map<String, dynamic>>> orgs, {
+    required AccountGroup group,
+    required String empty,
+    List<DirectoryUser> older = const [],
+  }) {
     final byId = {for (final u in users) u.uid: u};
-    final unlinked = unlinkedOrganizationAccounts(users).where((u) => u.matches(_query)).toList();
-    return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-      stream: _orgs,
-      builder: (context, snap) {
-        if (snap.hasError) return const AdminListMessage('Could not load organizations.');
-        if (!snap.hasData) return const Center(child: CircularProgressIndicator(color: AppColors.greenrspwn));
-        final orgs = snap.data!.docs.toList()
-          ..sort((a, b) => ((a.data()['name'] as String?) ?? '').compareTo((b.data()['name'] as String?) ?? ''));
-        if (orgs.isEmpty && unlinked.isEmpty) return const AdminListMessage('No organizations yet.');
-        return ListView(
-          padding: const EdgeInsets.all(16),
-          children: [
-            for (final org in orgs)
-              _OrganizationSection(db: _db, org: org, usersById: byId, query: _query),
-            if (unlinked.isNotEmpty) ...[
-              const SizedBox(height: 8),
-              _SectionTitle('Not on an organization yet', subtitle: '${unlinked.length}'),
-              for (final u in unlinked) _UserTile(user: u),
-            ],
-          ],
-        );
-      },
+    final unlinked = unlinkedOrganizationAccounts(users, group: group).where((u) => u.matches(_query)).toList();
+    if (orgs.isEmpty && unlinked.isEmpty && older.isEmpty) return AdminListMessage(empty);
+    return ListView(
+      padding: const EdgeInsets.all(16),
+      children: [
+        for (final org in orgs) _OrganizationSection(db: _db, org: org, usersById: byId, query: _query),
+        if (unlinked.isNotEmpty) ...[
+          const SizedBox(height: 8),
+          _SectionTitle(
+            group == AccountGroup.volunteers ? 'Sign-up not finished' : 'Not on an organization yet',
+            subtitle: '${unlinked.length}',
+          ),
+          for (final u in unlinked) _UserTile(user: u),
+        ],
+        if (older.isNotEmpty) ...[
+          const SizedBox(height: 8),
+          _SectionTitle('Older volunteer accounts', subtitle: '${older.length}'),
+          const _Note('From the old volunteer sign-up, which is no longer offered.'),
+          for (final u in older) _UserTile(user: u),
+        ],
+      ],
     );
   }
 }
@@ -155,7 +197,7 @@ Widget _transporterChip(String status) {
   final (label, color) = switch (status) {
     'approved' => ('Verified', AppColors.success),
     'pending' => ('Pending', AppColors.warning),
-    'rejected' => ('Not approved', AppColors.error),
+    'rejected' => ('Rejected', AppColors.error),
     _ => ('No documents', AppColors.textSecondary),
   };
   return _Chip(label, color);
@@ -198,8 +240,15 @@ class _OrganizationSection extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               _SectionTitle(
-                name == null || name.isEmpty ? 'Unnamed organization' : name,
-                subtitle: snap.hasData ? '${roster.length} ${roster.length == 1 ? 'person' : 'people'}' : null,
+                name == null || name.isEmpty
+                    ? (d['kind'] == 'independent' ? 'Unnamed rescue volunteer' : 'Unnamed organization')
+                    : name,
+                subtitle: snap.hasData
+                    ? [
+                        if (d['kind'] == 'independent') _independentSummary(d),
+                        '${roster.length} ${roster.length == 1 ? 'person' : 'people'}',
+                      ].join(' · ')
+                    : null,
                 trailing: _orgStatusChip(status),
               ),
               if (snap.hasError) const _Note('Could not load this organization\'s members.'),
@@ -223,11 +272,22 @@ class _OrganizationSection extends StatelessWidget {
   }
 }
 
+/// A rescue volunteer's load: "1/3 cases · 2/5 animals" (kept by
+/// functions/independent_rescuers.js), plus "Paused" when they are.
+String _independentSummary(Map<String, dynamic> d) {
+  int n(String k, int fallback) => (d[k] as num?)?.toInt() ?? fallback;
+  return [
+    '${n('activeCaseCount', 0)}/${n('maxActiveCases', IndependentRescuer.maxActiveCases)} cases',
+    '${n('animalsInCareCount', 0)}/${n('maxAnimalsInCare', IndependentRescuer.maxAnimalsInCare)} animals',
+    if (d['acceptingCases'] == false) 'Paused',
+  ].join(' · ');
+}
+
 Widget _orgStatusChip(OrgVerificationStatus s) => switch (s) {
       OrgVerificationStatus.approved => const _Chip('Approved', AppColors.success),
       OrgVerificationStatus.pending => const _Chip('Under review', AppColors.warning),
       OrgVerificationStatus.requiresChanges => const _Chip('Needs changes', AppColors.warning),
-      OrgVerificationStatus.rejected => const _Chip('Not approved', AppColors.error),
+      OrgVerificationStatus.rejected => const _Chip('Rejected', AppColors.error),
       OrgVerificationStatus.draft => const _Chip('Not submitted', AppColors.textSecondary),
     };
 
@@ -325,7 +385,7 @@ class _UserTile extends StatelessWidget {
           overflow: TextOverflow.ellipsis,
           style: GoogleFonts.zain(fontSize: 13, color: AppColors.textSecondary),
         ),
-        trailing: trailing,
+        trailing: user.disabled ? const _Chip('Disabled', AppColors.error) : trailing,
         onTap: () => _showUserDetails(context, user, orgRoleLabel: orgRoleLabel, orgName: orgName),
       ),
     );
@@ -434,6 +494,36 @@ Future<void> _showUserDetails(BuildContext context, DirectoryUser u, {String? or
                   ),
                 ),
               const SizedBox(height: 4),
+              if (u.disabled)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: Text('This account is disabled and can\'t sign in.',
+                      style: GoogleFonts.zain(fontSize: 14, fontWeight: FontWeight.w700, color: AppColors.error)),
+                ),
+              if (!u.isManagedInConsole) ...[
+                Row(
+                  children: [
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        onPressed: () => _setDisabled(context, u, !u.disabled),
+                        icon: Icon(u.disabled ? Icons.lock_open : Icons.block, size: 18),
+                        label: Text(u.disabled ? 'Enable' : 'Disable'),
+                        style: AppButtons.outline,
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        onPressed: () => _removeUser(context, u),
+                        icon: const Icon(Icons.delete_outline, size: 18),
+                        label: const Text('Remove'),
+                        style: AppButtons.dangerOutline,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+              ],
               TextButton.icon(
                 onPressed: () async {
                   await Clipboard.setData(ClipboardData(text: u.uid));
@@ -450,4 +540,87 @@ Future<void> _showUserDetails(BuildContext context, DirectoryUser u, {String? or
       );
     },
   );
+}
+
+
+/// Runs a system-admin callable with a blocking spinner; shows the server's
+/// message on failure. True on success.
+Future<bool> _runAdminCall(BuildContext context, String name, Map<String, Object?> data) async {
+  showDialog<void>(
+    context: context,
+    barrierDismissible: false,
+    builder: (_) => const PopScope(canPop: false, child: Center(child: CircularProgressIndicator())),
+  );
+  try {
+    await FirebaseFunctions.instance.httpsCallable(name).call<Object?>(data);
+    if (context.mounted) Navigator.of(context, rootNavigator: true).pop();
+    return true;
+  } on FirebaseFunctionsException catch (e) {
+    if (context.mounted) {
+      Navigator.of(context, rootNavigator: true).pop();
+      ScaffoldMessenger.of(context).showSnackBar(appSnackBar(e.message ?? 'Something went wrong.', kind: AppMessageKind.error));
+    }
+  } catch (e) {
+    if (context.mounted) {
+      Navigator.of(context, rootNavigator: true).pop();
+      ScaffoldMessenger.of(context).showSnackBar(appSnackBar('Something went wrong: $e', kind: AppMessageKind.error));
+    }
+  }
+  return false;
+}
+
+/// Disable: blocks sign-in and signs them out of an open app; nothing is
+/// deleted. Enable undoes it.
+Future<void> _setDisabled(BuildContext context, DirectoryUser u, bool disable) async {
+  String? reason;
+  if (disable) {
+    reason = await showTextInputDialog(
+      context,
+      title: 'Disable ${u.name}?',
+      message: 'They are signed out and can\'t sign in until you enable the account again. Nothing is deleted.',
+      label: 'Reason (optional, kept with the account)',
+      confirmLabel: 'Disable',
+    );
+    if (reason == null) return;
+  } else {
+    final ok = await showConfirmActionDialog(
+      context,
+      title: 'Enable ${u.name}?',
+      message: 'They can sign in again.',
+      confirmLabel: 'Enable',
+    );
+    if (!ok) return;
+  }
+  if (!context.mounted) return;
+  final done = await _runAdminCall(context, 'adminSetUserDisabled', {
+    'uid': u.uid,
+    'disabled': disable,
+    if (reason != null && reason.isNotEmpty) 'reason': reason,
+  });
+  if (done && context.mounted) {
+    Navigator.of(context).pop(); // details sheet
+    ScaffoldMessenger.of(context).showSnackBar(appSnackBar(
+      disable ? '${u.name} was disabled.' : '${u.name} was enabled.',
+      kind: AppMessageKind.success,
+    ));
+  }
+}
+
+/// Remove: deletes the login and profile (same cleanup as Delete account).
+Future<void> _removeUser(BuildContext context, DirectoryUser u) async {
+  final ok = await showConfirmActionDialog(
+    context,
+    title: 'Remove ${u.name}?',
+    message: 'This permanently deletes their login and profile and removes them from their organization. '
+        'It can\'t be undone. Rescue reports they filed stay, without their name.\n\n'
+        'To only stop them signing in, use Disable instead.',
+    confirmLabel: 'Remove account',
+    destructive: true,
+  );
+  if (!ok || !context.mounted) return;
+  final done = await _runAdminCall(context, 'adminDeleteUser', {'uid': u.uid});
+  if (done && context.mounted) {
+    Navigator.of(context).pop(); // details sheet
+    ScaffoldMessenger.of(context).showSnackBar(appSnackBar('${u.name} was removed.', kind: AppMessageKind.success));
+  }
 }

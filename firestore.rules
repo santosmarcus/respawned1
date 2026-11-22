@@ -16,9 +16,8 @@ rules_version = '2';
 // adoptions (the public map, job board and the duplicate-application check
 // in adoption_application_service.dart query them unfiltered), organization
 // subcollections other than members/integrations, and every collection not
-// named below (collarTags, rescueSessions, petAlerts, ...). collarTags/
-// rescueSessions have specific rules further down, but the app still
-// creates and edits tags directly, so the catch-all keeps them open.
+// named below (petAlerts, ...). collarTags and rescueSessions have their own
+// rules further down and are excluded from the catch-all.
 //
 // Staff roles: users/{uid}.role 'admin'/'ngo_staff' (platform staff, set in
 // the console only) or membership of an approved organization. An
@@ -43,6 +42,24 @@ service cloud.firestore {
 
     function normalizedEmail() {
       return request.auth.token.email.lower();
+    }
+
+    // Null-safe sign-in email / verified phone (phone sign-in puts the
+    // number in the token as +639XXXXXXXXX; users.phone is self-edited
+    // and never trusted for this).
+    function myEmailOrEmpty() {
+      return request.auth.token.get('email', '').lower();
+    }
+    function myPhoneOrEmpty() {
+      return request.auth.token.get('phone_number', '');
+    }
+
+    // An invitation addressed to the signed-in account, by email or by
+    // verified mobile number. An empty side never matches.
+    function invitationIsMine(inv) {
+      return signedIn() && (
+        (inv.get('normalizedEmail', '') != '' && inv.get('normalizedEmail', '') == myEmailOrEmpty()) ||
+        (inv.get('normalizedPhone', '') != '' && inv.get('normalizedPhone', '') == myPhoneOrEmpty()));
     }
 
     function changedOnly(keys) {
@@ -132,10 +149,12 @@ service cloud.firestore {
     // (functions/org_permissions_sync.test.js keeps them in step).
     //
     // Members docs from before permissions keep working (same fallback as
-    // functions/org_access.js and the app): role 'carer' is Animal care, any
-    // other Staff is Full staff (+ Facebook posting with the old
+    // functions/org_access.js and the app): any Staff without a permissions
+    // list, including the old role 'carer' (carers were merged into Staff),
+    // gets the default Staff set (+ Facebook posting with the old
     // facebookPublisher flag), and an account linked through
-    // users.organizationId with no members doc is Full staff.
+    // users.organizationId with no members doc gets the default Staff set.
+    // Money permissions are never in the default; an Admin ticks them.
     //
     // An account acts only for the organization users/{uid}.organizationId
     // points at. That check comes first so everyone else stops before any
@@ -146,8 +165,8 @@ service cloud.firestore {
       return ['rescue', 'animals', 'care', 'adoptions', 'campaigns', 'financeView', 'financeManage', 'volunteers', 'insights', 'facebookPublish'];
     }
 
-    function fullStaffPerms() {
-      return ['rescue', 'animals', 'care', 'adoptions', 'campaigns', 'financeView', 'volunteers', 'insights'];
+    function defaultStaffPerms() {
+      return ['rescue', 'animals', 'care', 'adoptions', 'volunteers', 'insights'];
     }
 
     // Everything that works in the admin shell; daily care (and Facebook
@@ -157,22 +176,62 @@ service cloud.firestore {
       return ['rescue', 'animals', 'adoptions', 'campaigns', 'financeView', 'financeManage', 'volunteers', 'insights'];
     }
 
+    // Reading: every module is visible to Staff outside the care-tasks
+    // screen, read-only where they lack the permission (writes keep their
+    // own keys). Money (donor records, payments, expenses, transfers) stays
+    // with financeView/financeManage.
+    function readKeys() {
+      return opsKeys();
+    }
+
+    // The same plus daily care, for what the care-tasks screen reads.
+    function readOrCareKeys() {
+      return opsKeys().concat(['care']);
+    }
+
     function permsOf(m) {
       return m.get('permissions',
-        m.get('role', '') == 'carer' ? ['care'] :
-          (m.get('facebookPublisher', false) == true ? fullStaffPerms().concat(['facebookPublish']) : fullStaffPerms()));
+        m.get('facebookPublisher', false) == true ? defaultStaffPerms().concat(['facebookPublish']) : defaultStaffPerms());
+    }
+
+    // Independent rescuers (organizations/{id}.kind == 'independent'): the
+    // most a system admin may turn on, and what they have until then.
+    // Copied from `independent` in functions/org_permissions.json.
+    function independentPerms() {
+      return ['rescue', 'animals', 'care', 'adoptions', 'insights'];
+    }
+
+    function independentDefaultPerms() {
+      return ['rescue', 'animals', 'care'];
+    }
+
+    // What an organization has at all; nobody in it, owner included, gets
+    // more (functions/org_access.js orgEnabledPermissions).
+    function orgPermsOf(org) {
+      return org.get('kind', 'shelter') == 'independent'
+        ? org.get('enabledPermissions', independentDefaultPerms()).toSet().intersection(independentPerms().toSet())
+        : allPermKeys().toSet();
     }
 
     function memberHasAny(orgId, keys) {
       let mp = memberPath(orgId, request.auth.uid);
       let org = get(orgPath(orgId)).data;
-      return org.get('verificationStatus', 'approved') == 'approved' && (
+      let enabled = orgPermsOf(org);
+      return org.get('verificationStatus', 'approved') == 'approved' && enabled.hasAny(keys) && (
         org.get('ownerId', '') == request.auth.uid ||
-        (!exists(mp) && fullStaffPerms().hasAny(keys)) ||
+        (!exists(mp) && defaultStaffPerms().toSet().intersection(enabled).hasAny(keys)) ||
         (exists(mp) &&
           !(get(mp).data.get('status', 'active') in inactiveStatuses()) &&
-          (get(mp).data.get('role', '') == 'admin' || permsOf(get(mp).data).hasAny(keys)))
+          (get(mp).data.get('role', '') == 'admin' || permsOf(get(mp).data).toSet().intersection(enabled).hasAny(keys)))
       );
+    }
+
+    // An independent rescuer has room for one more member (memberCount is
+    // kept by functions/independent_rescuers.js). Shelters have no cap.
+    function orgHasRoomForMember(orgId) {
+      let org = get(orgPath(orgId)).data;
+      return org.get('kind', 'shelter') != 'independent' ||
+        org.get('memberCount', 1) < org.get('memberCap', 5);
     }
 
     // Active member of `orgId` (their own organization) with any of `keys`.
@@ -258,14 +317,26 @@ service cloud.firestore {
         return isPlatformStaff() && !changedAny(reviewFields().concat(['verificationStatus']));
       }
 
+      // Independent rescuers: the kind is chosen at sign-up and never
+      // changed by a client; modules and caps are set by a system admin
+      // (setIndependentLimits) and the counters by
+      // functions/independent_rescuers.js.
+      function independentFields() {
+        return ['kind', 'enabledPermissions', 'memberCap', 'maxActiveCases', 'maxAnimalsInCare',
+          'activeCaseCount', 'animalsInCareCount', 'memberCount', 'lastActiveAt', 'autoPausedAt'];
+      }
+
       allow read: if signedIn();
       allow create: if signedIn() &&
         request.resource.data.get('ownerId', '') == request.auth.uid &&
+        request.resource.data.get('kind', 'shelter') in ['shelter', 'independent'] &&
+        !request.resource.data.keys().hasAny(independentFields().removeAll(['kind'])) &&
         (isPlatformStaff() || (
           request.resource.data.get('verificationStatus', '') == 'draft' &&
           !('bootstrapped' in request.resource.data)
         ));
       allow update: if request.resource.data.get('ownerId', '') == resource.data.get('ownerId', '') &&
+        !changedAny(independentFields()) &&
         (platformStaffUpdateOk() || (isOrgAdmin(orgId) && verificationOk()));
       allow delete: if false;
     }
@@ -275,8 +346,11 @@ service cloud.firestore {
     // care budget, daily food use, riders wanted free; shelter_settings.dart).
     // Its members read them (the dashboard; settings/care lists the rounds
     // care staff tick); only its Admins change them.
+    // settings/home: an independent rescuer's home or foster pin, kept off
+    // the public organization doc; its Admins read it while signing up too.
     match /organizations/{orgId}/settings/{docId} {
       allow read: if isPlatformStaff() ||
+        (docId == 'home' && isOrgAdmin(orgId)) ||
         (docId == 'care' && isMemberOf(orgId)) ||
         (docId != 'care' && staffWith(orgId, opsKeys()));
       allow write: if isOrgAdmin(orgId);
@@ -286,7 +360,7 @@ service cloud.firestore {
     // field done.<area>__<task> = who and when). Staff with daily care or
     // animal records tick and untick; nobody deletes a day.
     match /organizations/{orgId}/careRounds/{day} {
-      allow read: if isPlatformStaff() || staffWith(orgId, ['care', 'animals']);
+      allow read: if isPlatformStaff() || staffWith(orgId, readOrCareKeys());
       allow create, update: if staffWith(orgId, ['care', 'animals']) &&
         request.resource.data.get('organizationId', '') == orgId;
       allow delete: if false;
@@ -307,7 +381,7 @@ service cloud.firestore {
     // Analytics gap 6: monthly summaries, written only by
     // writeAnalyticsSummaries / rebuildAnalyticsSummaries (dashboard_ops.js).
     match /organizations/{orgId}/analyticsSummaries/{month} {
-      allow read: if isPlatformStaff() || staffWith(orgId, ['insights']);
+      allow read: if isPlatformStaff() || staffWith(orgId, readKeys());
       allow write: if false;
     }
 
@@ -363,8 +437,9 @@ service cloud.firestore {
           invitationId is string && invitationId.size() > 0 &&
           exists(/databases/$(database)/documents/organizationInvitations/$(invitationId)) &&
           invitation.organizationId == orgId &&
-          invitation.normalizedEmail == normalizedEmail() &&
+          invitationIsMine(invitation) &&
           invitation.status == 'pending' &&
+          orgHasRoomForMember(orgId) &&
           request.resource.data.get('role', 'staff') == invitation.get('role', 'staff') &&
           request.resource.data.get('permissions', null) == invitation.get('permissions', null) &&
           request.resource.data.get('preset', null) == invitation.get('preset', null);
@@ -400,23 +475,33 @@ service cloud.firestore {
     // record usage, purchases and low-stock levels. Every change is a
     // movement row that names who made it and is never edited.
     match /organizations/{orgId}/stock/{itemId} {
-      allow read: if isPlatformStaff() || staffWith(orgId, ['care', 'animals']);
+      allow read: if isPlatformStaff() || staffWith(orgId, readOrCareKeys());
       allow create, update: if staffWith(orgId, ['care', 'animals']) &&
         request.resource.data.get('quantity', 0) is number &&
         request.resource.data.get('quantity', 0) >= 0;
       allow delete: if false;
     }
     match /organizations/{orgId}/stockMovements/{moveId} {
-      allow read: if isPlatformStaff() || staffWith(orgId, ['care', 'animals']);
+      allow read: if isPlatformStaff() || staffWith(orgId, readOrCareKeys());
       allow create: if staffWith(orgId, ['care', 'animals']) &&
         request.resource.data.get('byUid', '') == request.auth.uid;
       allow update, delete: if false;
     }
 
+    // Cash-outs: money taken out of PayMongo, the bank or the cash box, and
+    // which fund(s) it came from (functions/campaigns.js recordCashOut /
+    // assignCashOut / settleCashOut, functions/paymongo.js payouts). The
+    // people who can see the organization's money read them; every write
+    // goes through those functions.
+    match /organizations/{orgId}/cashOuts/{cashOutId} {
+      allow read: if staffWith(orgId, ['financeView', 'financeManage']);
+      allow write: if false;
+    }
+
     // Every other organization subcollection (communityReports,
     // activityLogs, ...) keeps its current open access.
     match /organizations/{orgId}/{sub}/{document=**} {
-      allow read, write: if signedIn() && !(sub in ['members', 'integrations', 'settings', 'stock', 'stockMovements',
+      allow read, write: if signedIn() && !(sub in ['members', 'integrations', 'settings', 'stock', 'stockMovements', 'cashOuts',
         'careRounds', 'alertClaims', 'analyticsSummaries']);
     }
 
@@ -438,20 +523,27 @@ service cloud.firestore {
 
       // The invited person may read and act on invitations addressed to
       // their own email.
-      allow read: if signedIn() &&
-        (resource.data.normalizedEmail == normalizedEmail() || managesOrg(resource.data.organizationId));
+      // A missing invitation (resource == null) is readable by the admins of
+      // the org its id starts with ({orgId}_{email}), so an admin's
+      // existence check never errors with permission-denied.
+      allow read: if signedIn() && (
+        (resource == null && managesOrg(invitationId.split('_')[0])) ||
+        (resource != null &&
+          (invitationIsMine(resource.data) || managesOrg(resource.data.organizationId))));
 
-      allow create: if managesOrg(request.resource.data.organizationId) && invitationAccessOk(request.resource.data);
+      allow create: if managesOrg(request.resource.data.organizationId) && invitationAccessOk(request.resource.data) &&
+        orgHasRoomForMember(request.resource.data.organizationId);
 
       // The invited person may only flip their own pending invitation to
       // accepted/rejected without touching org, email, or role.
       allow update: if (managesOrg(resource.data.organizationId) && invitationAccessOk(request.resource.data)) ||
         (
-          resource.data.normalizedEmail == normalizedEmail() &&
+          invitationIsMine(resource.data) &&
           resource.data.status == 'pending' &&
           request.resource.data.status in ['accepted', 'rejected'] &&
           request.resource.data.organizationId == resource.data.organizationId &&
           request.resource.data.email == resource.data.email &&
+          request.resource.data.get('normalizedPhone', '') == resource.data.get('normalizedPhone', '') &&
           request.resource.data.role == resource.data.role &&
           request.resource.data.get('permissions', null) == resource.data.get('permissions', null) &&
           request.resource.data.get('preset', null) == resource.data.get('preset', null)
@@ -517,7 +609,7 @@ service cloud.firestore {
           return get(/databases/$(database)/documents/events/$(eventId)).data;
         }
 
-        allow read: if isSelf(uid) || managesEventOrg(eventBefore().organizationId);
+        allow read: if isSelf(uid) || staffWith(eventBefore().organizationId, readKeys());
 
         // Attendance is staff-only, so a new sign-up can't arrive already
         // marked (volunteer badges count it).
@@ -708,23 +800,50 @@ service cloud.firestore {
         );
       }
 
+      // One number, one account: a profile's phone is the number verified
+      // by SMS on this account (Firebase Auth keeps a verified number on a
+      // single account), or empty. Older profiles keep what they have.
+      function phoneOk(data) {
+        return data.get('phone', '') in ['', request.auth.token.get('phone_number', '')];
+      }
+
       // volunteerStats (attendance counts and badges) is written only by the
       // syncVolunteerStats function (functions/volunteer_stats.js).
       function selfFieldsOk(data) {
         return data.get('role', '') in selfRoles() &&
+          phoneOk(data) &&
           !('volunteerStats' in data) &&
           !('transportStatus' in data) &&
+          !data.keys().hasAny(['disabled', 'disabledAt', 'disabledBy', 'disabledReason']) &&
           data.get('isVerified', false) == false &&
           data.get('transporterVerificationStatus', 'pending') == 'pending' &&
           (!('organizationId' in data) || data.organizationId == null || canLinkSelfTo(data.organizationId));
       }
 
+      // The vehicle facts used to match trips (transporter_suitability.dart,
+      // transportAssignments vehicleCarriesCase): a transporter changes
+      // vehicleType / maxAnimals only by resubmitting verification (status
+      // back to 'pending' for staff review), except that an account
+      // registered before capacity was asked may declare it once (1-20).
+      function transporterVehicleSelfOk() {
+        let before = resource.data.get('transporterVerification', {});
+        let after = request.resource.data.get('transporterVerification', {});
+        return request.resource.data.get('transporterVerificationStatus', '') == 'pending' || (
+          after.get('vehicleType', null) == before.get('vehicleType', null) &&
+          (after.get('maxAnimals', null) == before.get('maxAnimals', null) ||
+            (!('maxAnimals' in before) && after.get('maxAnimals', 0) is int &&
+              after.get('maxAnimals', 0) >= 1 && after.get('maxAnimals', 0) <= 20))
+        );
+      }
+
       function selfUpdateOk() {
         let data = request.resource.data;
         return (!changedAny(['role']) || data.get('role', '') in selfRoles()) &&
-          !changedAny(['volunteerStats', 'transportStatus']) &&
+          (!changedAny(['phone']) || phoneOk(data)) &&
+          !changedAny(['volunteerStats', 'transportStatus', 'disabled', 'disabledAt', 'disabledBy', 'disabledReason']) &&
           (!changedAny(['isVerified']) || data.get('isVerified', false) == false) &&
           (!changedAny(['transporterVerificationStatus']) || data.get('transporterVerificationStatus', '') == 'pending') &&
+          (!changedAny(['transporterVerification']) || transporterVehicleSelfOk()) &&
           (!changedAny(['organizationId']) ||
             !('organizationId' in data) || data.organizationId == null ||
             canLinkSelfTo(data.organizationId));
@@ -742,12 +861,13 @@ service cloud.firestore {
       }
 
       // TransporterApplicationRepository.review — organization staff with
-      // the volunteers permission (and platform staff) decide a pet transporter's verification, only for
-      // an account that actually applied, and only those two fields.
+      // the volunteers permission, platform staff and system admins decide
+      // a pet transporter's verification, only for an account that actually
+      // applied, and only those two fields.
       function staffTransporterReview() {
         let data = request.resource.data;
-        return (isPlatformStaff() || myStaffWith(['volunteers'])) &&
-          resource.data.get('role', '') == 'pet_transporter' &&
+        return (isPlatformStaff() || isSystemAdmin() || myStaffWith(['volunteers'])) &&
+          resource.data.get('role', '') in ['pet_transporter', 'rescue_volunteer'] &&
           exists(/databases/$(database)/documents/transporterApplications/$(uid)) &&
           changedOnly(['isVerified', 'transporterVerificationStatus']) &&
           (
@@ -806,7 +926,8 @@ service cloud.firestore {
       // The owner's copy of each collar tag; staff toggle QR codes on it
       // (admin_qr.dart).
       match /collarTags/{tagId} {
-        allow read, write: if isSelf(uid) || isPlatformStaff() || myStaffWith(['rescue']);
+        allow read: if isSelf(uid) || isPlatformStaff() || myStaffWith(readKeys());
+        allow write: if isSelf(uid) || isPlatformStaff() || myStaffWith(['rescue']);
       }
       match /history/{itemId} {
         allow read: if isSelf(uid);
@@ -859,8 +980,28 @@ service cloud.firestore {
         (isPlatformStaff() || myStaffWith(['rescue']));
     }
 
+    // An independent rescuer sees an unowned case only if it is listed in
+    // the case's nearbyIndependentIds (assignCaseToServiceAreas,
+    // functions/index.js). Read directly (no default) so the rescuer's query
+    // must filter nearbyIndependentIds array-contains their organization.
+    // Shelters see the whole unowned pool.
+    function poolCaseVisibleToMe(data) {
+      return get(orgPath(myOrgId())).data.get('kind', 'shelter') != 'independent' ||
+        myOrgId() in data.nearbyIndependentIds;
+    }
+
+    // ...and works it (accepts it, adds to it) only once the shelters' head
+    // start has passed (independentsOpenAt).
+    function poolCaseOpenToMe(data) {
+      return get(orgPath(myOrgId())).data.get('kind', 'shelter') != 'independent' ||
+        (myOrgId() in data.get('nearbyIndependentIds', []) &&
+          data.get('independentsOpenAt', request.time) <= request.time);
+    }
+
     function canStaffCase(data) {
-      return canRecordOf(data.get('organizationId', ''), ['rescue']) ||
+      return (data.get('organizationId', '') != '' && canRecordOf(data.get('organizationId', ''), ['rescue'])) ||
+        (data.get('organizationId', '') == '' &&
+          (isPlatformStaff() || (myStaffWith(['rescue']) && poolCaseOpenToMe(data)))) ||
         isReferralTarget(data);
     }
 
@@ -874,19 +1015,24 @@ service cloud.firestore {
     function isVerifiedResponder() {
       return isTransporterRole() && (
         (myRole() == 'pet_transporter' && userDoc().get('isVerified', false) == true) ||
-        (myRole() == 'rescue_volunteer' &&
+        (myRole() == 'rescue_volunteer' && (
+          userDoc().get('isVerified', false) == true ||
           get(/databases/$(database)/documents/volunteerApplications/$(request.auth.uid)).data
-            .get('status', '') == 'approved')
+            .get('status', '') == 'approved'))
       );
     }
 
     // Rejected as a healthy, low-urgency animal (not a lost pet): open to
     // Community Adoption, so the public may read it and claim its animals
     // (community_adoption_eligibility.dart).
+    // Also a Pet Surrender while listed (status 'community_adoption', set
+    // when it is filed): the organization does not facilitate surrenders.
     function isCommunityAdoptable(data) {
-      return data.get('status', '') == 'rejected' &&
-        data.get('rejectionReason', '') == 'healthyAnimalLowUrgency' &&
-        data.get('rescueType', '').lower() != 'lost pet';
+      return (data.get('status', '') == 'rejected' &&
+          data.get('rejectionReason', '') == 'healthyAnimalLowUrgency' &&
+          data.get('rescueType', '').lower() != 'lost pet') ||
+        (data.get('status', '') == 'community_adoption' &&
+          data.get('rescueType', '').lower() in ['pet surrender', 'surrender']);
     }
 
     // Holds the case through an accepted assignment or a legacy direct claim.
@@ -943,6 +1089,13 @@ service cloud.firestore {
         ));
     }
 
+    // Read-only access to a case's records for the owning organization's
+    // Staff without the rescue permission (every module is readable).
+    function isCaseReader(caseId) {
+      return isCaseParticipant(caseId) ||
+        canRecordOf(get(casePath(caseId)).data.get('organizationId', ''), readKeys());
+    }
+
     function canWorkCase(caseId) {
       let data = get(casePath(caseId)).data;
       return canStaffCase(data) ||
@@ -954,9 +1107,11 @@ service cloud.firestore {
       // be cleared (a decline un-assigns).
       function riderFieldsSelfOnly() {
         let data = request.resource.data;
-        return (!changedAny(['riderId']) || data.get('riderId', null) == request.auth.uid || data.get('riderId', null) == null) &&
-          (!changedAny(['assignedVolunteerId']) ||
-            data.get('assignedVolunteerId', null) == request.auth.uid || data.get('assignedVolunteerId', null) == null);
+                // Taking the case (becoming the rider) needs a verified account.
+                return (!changedAny(['riderId']) || data.get('riderId', null) == null ||
+                    (data.get('riderId', null) == request.auth.uid && isVerifiedResponder())) &&
+                  (!changedAny(['assignedVolunteerId']) || data.get('assignedVolunteerId', null) == null ||
+                    (data.get('assignedVolunteerId', null) == request.auth.uid && isVerifiedResponder()));
       }
 
       function transporterUpdate() {
@@ -985,8 +1140,45 @@ service cloud.firestore {
             'verification', 'liveProofRequest', 'reportEvidence',
             // Rescue gaps 6/10: the adoption request mirror and the pickup
             // window belong to staff and the backend.
-            'adoptionRequest', 'adopterPickup']) &&
-          (!changedAny(['currentAssignmentId']) || !('currentAssignmentId' in request.resource.data));
+            'adoptionRequest', 'adopterPickup',
+            // The urgency is assessed from the report when it is filed
+            // (urgency_assessment.dart); the reporter can't re-rate it.
+            'urgency', 'urgencyAssessment']) &&
+          (!changedAny(['currentAssignmentId']) || !('currentAssignmentId' in request.resource.data)) &&
+          reporterInvolvementChangeOk() &&
+          reporterSurrenderStatusOk();
+      }
+
+      // Pet Surrender withdrawal (CommunityAdoptionRequestRepository.
+      // withdrawSurrender): the only status change a reporter may make in
+      // or out of 'community_adoption' / 'withdrawn' is an active surrender
+      // going to 'withdrawn', with a reason. A withdrawn case stays as it
+      // is (no second withdrawal, no reopening).
+      function reporterSurrenderStatusOk() {
+        let before = resource.data.get('status', '');
+        let after = request.resource.data.get('status', '');
+        let involved = before in ['community_adoption', 'withdrawn'] ||
+          after in ['community_adoption', 'withdrawn'] ||
+          changedAny(['surrenderWithdrawal']);
+        return !changedAny(['status', 'surrenderWithdrawal']) || !involved || (
+          resource.data.get('rescueType', '').lower() in ['pet surrender', 'surrender'] &&
+          before in ['community_adoption', 'pending'] &&
+          after == 'withdrawn' &&
+          request.resource.data.get('surrenderWithdrawal', null) is map &&
+          request.resource.data.surrenderWithdrawal.get('reason', '') is string &&
+          request.resource.data.surrenderWithdrawal.reason != ''
+        );
+      }
+
+      // A reporter-led Neglect or Abuse report may be turned into a request
+      // for the organization's help (independent_report_section.dart); no
+      // other change to orgInvolvement / abuseReportPath by the reporter.
+      function reporterInvolvementChangeOk() {
+        return !changedAny(['orgInvolvement', 'abuseReportPath']) || (
+          resource.data.get('orgInvolvement', '') == 'independent_report' &&
+          request.resource.data.get('orgInvolvement', '') == 'org_assist' &&
+          request.resource.data.get('abuseReportPath', '') == 'org_assistance'
+        );
       }
 
       // track_case_page.dart: register interest, then report arrival.
@@ -1062,8 +1254,12 @@ service cloud.firestore {
         isCommunityAdoptable(resource.data) ||
         isPlatformStaff() ||
         (resource.data.get('referredToOrgId', '') == myOrgId() && myOrgId() != '' && myStaffWith(['rescue'])) ||
-        canRecordOf(resource.data.organizationId, ['rescue', 'adoptions', 'animals']) ||
+        // Transporters first: they stop here, before the staff lookups.
         isVerifiedResponder() ||
+        // Staff: their own organization's cases, and the unowned pool
+        // (only the part opened to them for an independent rescuer).
+        (resource.data.organizationId != '' && canRecordOf(resource.data.organizationId, readKeys())) ||
+        (resource.data.organizationId == '' && myStaffWith(readKeys()) && poolCaseVisibleToMe(resource.data)) ||
         isOfferedTransporter(caseId, resource.data)
       );
       // Reporters file unowned reports only; an organization claims a case
@@ -1073,13 +1269,32 @@ service cloud.firestore {
           request.resource.data.get('organizationId', '') == '') ||
         canRecordOf(request.resource.data.get('organizationId', ''), ['rescue'])
       );
+      // CaseReferralRepository.withdraw: only the referring side (staff of
+      // the organization that owns the case, with rescue, or the shared
+      // pool for an unowned case) takes a referral back; the organization
+      // it was referred to answers it with accept or decline instead.
+      function referralWithdrawOk() {
+        return request.resource.data.get('referralOutcome', {}).get('status', '') != 'withdrawn' ||
+          !changedAny(['referralOutcome']) ||
+          canRecordOf(resource.data.get('organizationId', ''), ['rescue']);
+      }
+
       // The cheap, document-only checks run first so the ones with lookups
       // stay inside Firestore's 1,000-expression budget
       // (rules-tests/tests/expression-budget.test.js).
+      // The first organization to accept a case owns it
+      // (CaseStatusRepository.acceptCase): staff stamp their organization
+      // only on an unowned case, or on one referred to them.
+      function claimOk() {
+        return !changedAny(['organizationId']) || isPlatformStaff() ||
+          resource.data.get('organizationId', '') == '' ||
+          resource.data.get('referredToOrgId', '') == request.resource.data.get('organizationId', '');
+      }
+
       allow update: if signedIn() && (
         communityClaimUpdate() ||
         clearOfferPointer() ||
-        (canStaffCase(resource.data) && orgStampOk(['rescue'])) ||
+        (canStaffCase(resource.data) && orgStampOk(['rescue']) && claimOk() && referralWithdrawOk()) ||
         reporterUpdate() ||
         transporterUpdate() ||
         willingAdopterUpdate() ||
@@ -1094,7 +1309,7 @@ service cloud.firestore {
       }
       // The case timeline (who did what): the people working the case.
       match /activityLogs/{logId} {
-        allow read: if isCaseParticipant(caseId);
+        allow read: if isCaseReader(caseId);
         allow create: if signedIn();
         allow update, delete: if canStaffCase(get(casePath(caseId)).data);
       }
@@ -1104,19 +1319,40 @@ service cloud.firestore {
         allow read, write: if isCaseParticipant(caseId);
       }
       match /tracking/{pointId} {
-        allow read: if isCaseParticipant(caseId);
+        allow read: if isCaseReader(caseId);
         allow write: if canWorkCase(caseId);
       }
 
       // Offers: staff create and manage them; the offered transporter
       // answers their own (TransportAssignmentRepository).
       match /transportAssignments/{assignmentId} {
-        allow read: if isCaseParticipant(caseId) || resource.data.get('riderId', '') == request.auth.uid;
-        allow create: if canStaffCase(get(casePath(caseId)).data);
+        allow read: if isCaseReader(caseId) || resource.data.get('riderId', '') == request.auth.uid;
+        // The transporter's vehicle must carry every animal on the case
+        // (core/utils/transport_suitability.dart): a motorcycle one
+        // animal, any other vehicle up to its declared maxAnimals (one
+        // when not declared). Demo riders (debug builds) have no account.
+        function vehicleCarriesCase() {
+          let offer = request.resource.data;
+          let animals = get(casePath(caseId)).data.get('animals', []);
+          let count = animals is list && animals.size() > 0 ? animals.size() : 1;
+          let vehicle = get(/databases/$(database)/documents/users/$(offer.riderId)).data
+            .get('transporterVerification', {});
+          let type = vehicle.get('vehicleType', '').lower();
+          let cap = vehicle.get('maxAnimals', 1);
+          let isMotorcycle = type.matches('.*(motor|scooter|moped).*');
+          return offer.get('isDemo', false) == true || (
+            type != '' &&
+            ((isMotorcycle && count == 1) || (!isMotorcycle && cap is int && count <= cap))
+          );
+        }
+
+        allow create: if canStaffCase(get(casePath(caseId)).data) && vehicleCarriesCase();
         allow update: if canStaffCase(get(casePath(caseId)).data) || (
-          resource.data.get('riderId', '') == request.auth.uid &&
-          changedOnly(['status', 'respondedAt', 'acceptedAt', 'rejectedAt', 'rejectionReason', 'vehicle', 'plate', 'completedAt'])
-        ) || (
+                    resource.data.get('riderId', '') == request.auth.uid &&
+                    changedOnly(['status', 'respondedAt', 'acceptedAt', 'rejectedAt', 'rejectionReason', 'vehicle', 'plate', 'completedAt']) &&
+                    // Accepting an offer needs a verified account; declining doesn't.
+                    (request.resource.data.get('status', '') != 'accepted' || isVerifiedResponder())
+                  ) || (
           // reconcileStaleOffer from any participant's screen.
           isCaseParticipant(caseId) &&
           changedOnly(['status', 'respondedAt']) &&
@@ -1141,7 +1377,7 @@ service cloud.firestore {
       // transporter working it.
       match /{sub}/{docId=**} {
         allow read: if !(sub in ['communityReports', 'activityLogs', 'messages', 'tracking', 'transportAssignments', 'expenses']) &&
-          isCaseParticipant(caseId);
+          isCaseReader(caseId);
         allow write: if !(sub in ['communityReports', 'activityLogs', 'messages', 'tracking', 'transportAssignments', 'expenses']) &&
           canWorkCase(caseId);
       }
@@ -1168,7 +1404,7 @@ service cloud.firestore {
 
     function canReadAnimalMedical(animalId) {
       let data = get(animalPath(animalId)).data;
-      return canRecordOf(data.get('organizationId', ''), ['rescue', 'animals', 'adoptions']) ||
+      return canRecordOf(data.get('organizationId', ''), readKeys()) ||
         staffWith(data.get('organizationId', ''), ['care']);
     }
 
@@ -1192,6 +1428,45 @@ service cloud.firestore {
         request.resource.data.get('adoptionReadiness', null) is map;
     }
 
+    // ---- Collar tags (QR and NFC; core/utils/animal_tag_codes.dart) ----
+    // animalTags/{code} registers each code to one animal. getAfter, so the
+    // registry entry and the animal update written in one transaction
+    // (AnimalRecordRepository.registerTag) are checked together.
+    function tagPath(code) {
+      return /databases/$(database)/documents/animalTags/$(code);
+    }
+
+    function tagRegisteredTo(animalId, code) {
+      return code is string && code != '' &&
+        existsAfter(tagPath(code)) &&
+        getAfter(tagPath(code)).data.get('animalId', '') == animalId &&
+        getAfter(tagPath(code)).data.get('active', false) == true;
+    }
+
+    function hasRegisteredTag(animalId) {
+      return tagRegisteredTo(animalId, request.resource.data.get('qrTagId', '')) ||
+        tagRegisteredTo(animalId, request.resource.data.get('nfcTagId', ''));
+    }
+
+    // A new or changed tag code on the animal must be registered to it.
+    function tagFieldsOk(animalId) {
+      return (!changedAny(['qrTagId']) || request.resource.data.get('qrTagId', '') == '' ||
+          tagRegisteredTo(animalId, request.resource.data.qrTagId)) &&
+        (!changedAny(['nfcTagId']) || request.resource.data.get('nfcTagId', '') == '' ||
+          tagRegisteredTo(animalId, request.resource.data.nfcTagId));
+    }
+
+    // Adoptable needs a registered collar tag: to become adoptable (from
+    // any other status, a released reservation included), and to stay
+    // adoptable while a tag is changed or removed. An animal listed before
+    // this rule, without a tag, can still be re-saved as long as its tags
+    // aren't touched. Not overridable, unlike the readiness checklist.
+    function collarTagOnUpdateOk(animalId) {
+      return request.resource.data.get('adoptionStatus', '') != 'adoptable' ||
+        (resource.data.get('adoptionStatus', '') == 'adoptable' && !changedAny(['qrTagId', 'nfcTagId'])) ||
+        hasRegisteredTag(animalId);
+    }
+
     // The full animal record: the owning organization's staff and carers,
     // platform staff, and the user it is reserved for or adopted by. Staff
     // list queries filter on organizationId (AnimalRecordRepository's
@@ -1209,16 +1484,20 @@ service cloud.firestore {
         isPlatformStaff() ||
         data.get('reservedForUserId', '') == request.auth.uid ||
         data.get('adoptedByUserId', '') == request.auth.uid ||
-        canRecordOf(data.organizationId, ['rescue', 'animals', 'adoptions']) ||
+        canRecordOf(data.organizationId, readKeys()) ||
         staffWith(data.organizationId, ['care']));
     }
 
     match /animals/{animalId} {
       allow read: if canReadAnimal(resource.data);
+      // A new record has no registered tag yet (tags are registered to an
+      // existing record), so it can't be created adoptable.
       allow create: if canRecordOf(request.resource.data.get('organizationId', ''), ['rescue', 'animals', 'adoptions']) &&
-        readinessOnCreateOk();
+        readinessOnCreateOk() &&
+        request.resource.data.get('adoptionStatus', '') != 'adoptable' &&
+        request.resource.data.get('qrTagId', '') == '' && request.resource.data.get('nfcTagId', '') == '';
       allow update: if canStaffAnimal(resource.data) && orgStampOk(['rescue', 'animals', 'adoptions']) &&
-        readinessOnUpdateOk();
+        readinessOnUpdateOk() && tagFieldsOk(animalId) && collarTagOnUpdateOk(animalId);
       allow delete: if isPlatformStaff();
 
       // Dose records: daily care staff of the owning org record the doses
@@ -1265,6 +1544,32 @@ service cloud.firestore {
     // function (functions/public_animals.js): the fields meant for the
     // public and a yes/no health summary. Exists while the animal is not
     // archived, hidden or deceased.
+    // Collar tag registry (AnimalRecordRepository.registerTag): one doc per
+    // QR/NFC code, the doc id being the code. Anyone signed in may look up
+    // a scanned code (it only names the animal, whose public profile is
+    // readable anyway). The animal's staff register codes for it and
+    // retire them; a code never moves to another animal, is never
+    // reactivated and never deleted, so it can't be reused for a
+    // different animal.
+    match /animalTags/{code} {
+      allow get: if signedIn();
+      allow list: if signedIn() && canStaffAnimal(resource.data);
+      allow create: if code.matches('^[A-Z0-9]{6,16}$') &&
+        request.resource.data.get('code', '') == code &&
+        request.resource.data.get('type', '') in ['qr', 'nfc'] &&
+        request.resource.data.get('active', false) == true &&
+        request.resource.data.get('animalId', '') is string &&
+        request.resource.data.animalId != '' &&
+        canStaffAnimal(get(animalPath(request.resource.data.animalId)).data) &&
+        request.resource.data.get('organizationId', '') ==
+          get(animalPath(request.resource.data.animalId)).data.get('organizationId', '');
+      allow update: if canStaffAnimal(get(animalPath(resource.data.animalId)).data) &&
+        resource.data.get('active', false) == true &&
+        request.resource.data.get('active', true) == false &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['active', 'deactivatedAt']);
+      allow delete: if false;
+    }
+
     match /publicAnimals/{animalId} {
       allow read: if signedIn();
       allow write: if false;
@@ -1330,7 +1635,7 @@ service cloud.firestore {
       allow read: if signedIn() && (
         resource.data.personal.adopterId == request.auth.uid ||
         isPlatformStaff() ||
-        staffWith(resource.data.organizationId, ['adoptions'])
+        staffWith(resource.data.organizationId, readKeys())
       );
       // Rescue gaps 6/10: an adoption request for a rescued animal, from the
       // reporter who said they want to adopt it or the user who registered
@@ -1367,7 +1672,11 @@ service cloud.firestore {
       allow delete: if false;
 
       match /{sub}/{docId=**} {
-        allow read, write: if signedIn() && (
+        allow read: if signedIn() && (
+          isAdopterOf(get(adoptionPath(adoptionId)).data) ||
+          canRecordOf(get(adoptionPath(adoptionId)).data.get('organizationId', ''), readKeys())
+        );
+        allow write: if signedIn() && (
           isAdopterOf(get(adoptionPath(adoptionId)).data) ||
           canStaffAdoption(get(adoptionPath(adoptionId)).data)
         );
@@ -1378,7 +1687,8 @@ service cloud.firestore {
     //
     // volunteerApplications/{uid}: the applicant writes their own, always as
     // pending (an edit goes back for review) and never the review fields.
-    // Approved organization staff (not carers) read and review them.
+    // Organization staff with the Volunteers permission, platform staff and
+    // system admins read and review them.
     match /volunteerApplications/{uid} {
       function applicantWriteOk() {
         return isSelf(uid) &&
@@ -1387,10 +1697,10 @@ service cloud.firestore {
           !request.resource.data.keys().hasAny(['reviewedBy', 'reviewedAt', 'reviewNote']);
       }
 
-      allow read: if isSelf(uid) || isPlatformStaff() || myStaffWith(['volunteers']);
+      allow read: if isSelf(uid) || isPlatformStaff() || isSystemAdmin() || myStaffWith(readKeys());
       allow create: if applicantWriteOk();
       allow update: if applicantWriteOk() || (
-        (isPlatformStaff() || myStaffWith(['volunteers'])) &&
+        (isPlatformStaff() || isSystemAdmin() || myStaffWith(['volunteers'])) &&
         changedOnly(['status', 'reviewedBy', 'reviewedAt', 'reviewNote']) &&
         request.resource.data.status in ['approved', 'rejected'] &&
         request.resource.data.get('reviewedBy', '') == request.auth.uid
@@ -1415,10 +1725,10 @@ service cloud.firestore {
           !request.resource.data.keys().hasAny(['reviewedBy', 'reviewedAt', 'reviewNote']);
       }
 
-      allow read: if isSelf(uid) || isPlatformStaff() || myStaffWith(['volunteers']);
+      allow read: if isSelf(uid) || isPlatformStaff() || isSystemAdmin() || myStaffWith(readKeys());
       allow create: if applicantWriteOk();
       allow update: if applicantWriteOk() || (
-        (isPlatformStaff() || myStaffWith(['volunteers'])) &&
+        (isPlatformStaff() || isSystemAdmin() || myStaffWith(['volunteers'])) &&
         changedOnly(['status', 'reviewedBy', 'reviewedAt', 'reviewNote']) &&
         request.resource.data.status in ['approved', 'rejected'] &&
         request.resource.data.get('reviewedBy', '') == request.auth.uid
@@ -1438,7 +1748,7 @@ service cloud.firestore {
       // functions/audit_logs.js), through a query that filters on it. Each
       // rider's busy status for every organization is on their user doc
       // (transportStatus, functions/rider_status.js).
-      allow read: if canReadOrgRecord(['rescue']) || resource.data.get('riderId', '') == request.auth.uid;
+      allow read: if canReadOrgRecord(readKeys()) || resource.data.get('riderId', '') == request.auth.uid;
     }
 
     // Vaccinations, care records, medication orders and doses (animals) and
@@ -1454,7 +1764,7 @@ service cloud.firestore {
     }
 
     function medicalKeys() {
-      return ['rescue', 'animals', 'care', 'adoptions', 'insights'];
+      return readOrCareKeys();
     }
 
     // Dashboard: vaccine status, overdue deworming, flea & tick and vet
@@ -1491,7 +1801,7 @@ service cloud.firestore {
     function canReadOrgLog() {
       return isPlatformStaff() ||
         (resource.data.get('organizationId', '') != '' &&
-          staffWith(resource.data.get('organizationId', ''), ['insights', 'rescue', 'animals']));
+          staffWith(resource.data.get('organizationId', ''), readKeys()));
     }
 
     match /{path=**}/managementLogs/{docId} {
@@ -1512,7 +1822,7 @@ service cloud.firestore {
     // adoption by functions/audit_logs.js). The adopter reads through the
     // per-adoption rule.
     match /{path=**}/followUps/{docId} {
-      allow read: if canReadOrgRecord(['adoptions']);
+      allow read: if canReadOrgRecord(readKeys());
     }
 
     // ---- General expenses ----------------------------------------------------
@@ -1547,7 +1857,7 @@ service cloud.firestore {
     match /auditLogs/{entryId} {
       allow read: if isPlatformStaff() ||
         (resource.data.get('organizationId', '') != '' &&
-          staffWith(resource.data.get('organizationId', ''), ['insights']));
+          staffWith(resource.data.get('organizationId', ''), readKeys()));
       allow create: if signedIn() &&
         request.resource.data.get('actorId', request.auth.uid) == request.auth.uid &&
         request.resource.data.get('category', null) is string &&
@@ -1561,58 +1871,208 @@ service cloud.firestore {
       allow update, delete: if false;
     }
 
-    // ---- Community Adoption check-ins (Adoption gap 10) ---------------------
-    // Written by the backend (scheduleCommunityAdoptionCheckIn). The adopter
-    // answers once, with a photo and a note; staff of the organizations in
-    // the area read them (queries filter on organizationIds).
-    match /communityAdoptionCheckIns/{checkInId} {
-      allow read: if signedIn() && (
-        resource.data.get('adopterId', '') == request.auth.uid ||
-        isPlatformStaff() ||
-        (myOrgId() != '' && myOrgId() in resource.data.get('organizationIds', []) && myStaffWith(['adoptions']))
-      );
-      allow update: if signedIn() &&
-        resource.data.get('adopterId', '') == request.auth.uid &&
-        resource.data.get('status', '') == 'requested' &&
-        changedOnly(['status', 'photoUrl', 'note', 'submittedAt']) &&
-        request.resource.data.status == 'submitted';
-      allow create, delete: if false;
-    }
+        match /communityAdoptionCheckIns/{checkInId} {
+          // The reporter who rehomed the animal (communityAdoptions/{id} shares
+          // the check-in's id) sees the adopter's check-in and updates too.
+          function isRehomer() {
+            return get(/databases/$(database)/documents/communityAdoptions/$(checkInId))
+              .data.get('rehomedById', '') == request.auth.uid;
+          }
 
-    // ---- Collar tags / rescue sessions -------------------------------------
-    // Not excluded from the catch-all below (see the header note), so these
-    // only add to its open access today.
+          function canReadCheckIn(data) {
+            return signedIn() && (
+              data.get('adopterId', '') == request.auth.uid ||
+              isPlatformStaff() ||
+              (myOrgId() != '' && myOrgId() in data.get('organizationIds', []) && myStaffWith(readKeys())) ||
+              isRehomer()
+            );
+          }
 
-    match /collarTags/{tagId} {
-      allow get: if signedIn() &&
-        (resource.data.qrEnabled == true || request.auth.uid == resource.data.ownerId);
+          allow read: if canReadCheckIn(resource.data);
+          allow update: if signedIn() &&
+            resource.data.get('adopterId', '') == request.auth.uid &&
+            resource.data.get('status', '') == 'requested' &&
+            changedOnly(['status', 'photoUrl', 'note', 'submittedAt']) &&
+            request.resource.data.status == 'submitted';
+          allow create, delete: if false;
 
-      allow update: if signedIn() &&
-        request.auth.uid == resource.data.ownerId &&
-        changedOnly(['status', 'lastSeenLat', 'lastSeenLng', 'lastSeenAddress', 'lostAt', 'activeRescueSessionId']);
-    }
+          // Post-adoption updates (CommunityPostAdoptionUpdateForm in
+          // lib/features/adoption/post_adoption_page.dart, the same questions as a
+          // shelter follow-up): the adopter sends them as often as they like
+          // until the 2-week check-in is due, then answers the check-in once it
+          // is requested (kind 'checkin'). Read like the check-in.
+          match /updates/{updateId} {
+            function checkIn() {
+              return get(/databases/$(database)/documents/communityAdoptionCheckIns/$(checkInId)).data;
+            }
+            allow read: if canReadCheckIn(checkIn());
+            allow create: if signedIn() &&
+              checkIn().get('adopterId', '') == request.auth.uid &&
+              request.resource.data.authorId == request.auth.uid &&
+              request.resource.data.keys().hasOnly([
+                'authorId', 'kind', 'howIsPetDoing', 'healthConcerns', 'healthConcernsOther',
+                'vaccinated', 'images', 'notes', 'createdAt'
+              ]) &&
+              request.resource.data.kind in ['update', 'checkin'] &&
+              request.resource.data.images is list &&
+              request.resource.data.images.size() >= 1 &&
+              request.resource.data.images.size() <= 5 &&
+              request.resource.data.get('notes', '') is string &&
+              request.resource.data.get('notes', '').size() <= 1000 &&
+              (request.resource.data.kind == 'checkin'
+                ? checkIn().get('status', '') == 'requested'
+                : request.time < checkIn().dueAt);
+            allow update, delete: if false;
+          }
+        }
 
-    match /rescueSessions/{sessionId} {
-      allow create: if false;
-      allow get: if signedIn();
-      allow list: if false;
-      allow update: if signedIn() &&
-        request.auth.uid == get(/databases/$(database)/documents/collarTags/$(resource.data.tagId)).data.ownerId &&
-        changedOnly(['chatEnabledByOwner', 'status']);
+    // ---- Community Adoption requests -----------------------------------------
+    // community_adoption_request_repository.dart. Someone interested in a
+    // report open for Community Adoption creates a request to that report's
+    // reporter (never their own report). Only the two of them read it and
+    // its messages. The reporter chooses or declines, the adopter can
+    // withdraw, each signs only their own side of the agreement, and the
+    // request is completed once both have signed.
+    match /communityAdoptionRequests/{requestId} {
+      function isParty(d) {
+        return signedIn() &&
+          (d.get('adopterId', '') == request.auth.uid || d.get('listerId', '') == request.auth.uid);
+      }
+      function requestDoc() {
+        return get(/databases/$(database)/documents/communityAdoptionRequests/$(requestId)).data;
+      }
+      function statusChangeOk() {
+        let before = resource.data.get('status', '');
+        let after = request.resource.data.get('status', '');
+        return !changedAny(['status']) ||
+          (request.auth.uid == resource.data.listerId &&
+            before in ['pending', 'selected'] && after in ['selected', 'declined']) ||
+          (request.auth.uid == resource.data.adopterId &&
+            before in ['pending', 'selected'] && after == 'withdrawn') ||
+          (before == 'selected' && after == 'completed' &&
+            request.resource.data.get('listerSignature', null) is map &&
+            request.resource.data.get('adopterSignature', null) is map);
+      }
+
+      allow read: if isParty(resource.data);
+      allow create: if signedIn() &&
+        request.resource.data.adopterId == request.auth.uid &&
+        request.resource.data.listerId != request.auth.uid &&
+        request.resource.data.status == 'pending' &&
+        get(/databases/$(database)/documents/cases/$(request.resource.data.caseId)).data.get('reporterId', '') ==
+          request.resource.data.listerId &&
+        // Only while the case is open for Community Adoption: a withdrawn
+        // surrender (or a claimed-out listing) takes no new inquiries.
+        isCommunityAdoptable(get(/databases/$(database)/documents/cases/$(request.resource.data.caseId)).data);
+      allow update: if isParty(resource.data) &&
+        !changedAny(['caseId', 'listerId', 'adopterId', 'animalIndexes', 'createdAt']) &&
+        (!changedAny(['listerSignature']) || request.auth.uid == resource.data.listerId) &&
+        (!changedAny(['adopterSignature']) || request.auth.uid == resource.data.adopterId) &&
+        (!changedAny(['listerSignature', 'adopterSignature']) || resource.data.status == 'selected') &&
+        statusChangeOk();
+      allow delete: if false;
 
       match /messages/{messageId} {
-        allow read: if signedIn();
+        allow read: if isParty(requestDoc());
+        allow create: if isParty(requestDoc()) && request.resource.data.senderId == request.auth.uid;
+        allow update, delete: if false;
+      }
+    }
+
+    // ---- Collar tags / scan chats ------------------------------------------
+    // collarTags/{tagId}: a pet's collar ID (lib/features/collartag). Anyone
+    // signed in (anonymous web scanners included) can open one tag by its id
+    // (unguessable; the QR/NFC link carries it), but only the owner lists or
+    // edits theirs. Staff approve QR codes and record NFC chips. Lost/found
+    // fields are the owner's (CollarTagLostFound); scan pins and the latest
+    // chat id are written by getOrCreateRescueSession.
+    match /collarTags/{tagId} {
+      function staffFields() {
+        return ['qrEnabled', 'nfcWritten', 'nfcWrittenAt', 'nfcUrl'];
+      }
+      function isTagStaff() {
+        return isPlatformStaff() || myStaffWith(['rescue']);
+      }
+      // A shelter animal's collar tag (AnimalCollarTagRepository):
+      // collarTags/animal-{animalId}, a copy of the animal record with no
+      // owner, written by the animal's own staff (and the
+      // syncAnimalCollarTag function). Never carries an ownerId.
+      function isAnimalRecordTagWrite() {
+        let animalId = request.resource.data.get('animalId', '');
+        return animalId is string && animalId != '' &&
+          tagId == 'animal-' + animalId &&
+          request.resource.data.get('source', '') == 'animal_record' &&
+          !('ownerId' in request.resource.data) &&
+          exists(animalPath(animalId)) &&
+          canStaffAnimal(get(animalPath(animalId)).data);
+      }
+
+      allow get: if signedIn();
+      allow list: if signedIn() &&
+        (resource.data.get('ownerId', '') == request.auth.uid ||
+          isPlatformStaff() || myStaffWith(readKeys()));
+      allow create: if signedIn() && (
+        (request.resource.data.get('ownerId', '') == request.auth.uid &&
+          !request.resource.data.keys().hasAny(staffFields())) ||
+        isAnimalRecordTagWrite()
+      );
+      allow update: if signedIn() && (
+        (request.auth.uid == resource.data.get('ownerId', '') &&
+          request.resource.data.get('ownerId', '') == request.auth.uid &&
+          !changedAny(staffFields())) ||
+        (isTagStaff() && changedOnly(staffFields())) ||
+        (resource.data.get('source', '') == 'animal_record' &&
+          resource.data.get('animalId', '') == request.resource.data.get('animalId', '') &&
+          isAnimalRecordTagWrite())
+      );
+      allow delete: if signedIn() &&
+        (request.auth.uid == resource.data.get('ownerId', '') || isPlatformStaff());
+    }
+
+    // rescueSessions/{id}: one private chat per person who scanned a lost
+    // pet's tag, with its owner. Created by getOrCreateRescueSession only.
+    // Sessions from before chats were per finder have no finderId/ownerId:
+    // the tag's owner and any signed-in finder can still use those.
+    match /rescueSessions/{sessionId} {
+      function tagOwner(data) {
+        return get(/databases/$(database)/documents/collarTags/$(data.tagId)).data.get('ownerId', '');
+      }
+      function isLegacy(data) {
+        return !('finderId' in data);
+      }
+      function isSessionOwner(data) {
+        return signedIn() &&
+          (data.get('ownerId', '') == request.auth.uid ||
+            (isLegacy(data) && tagOwner(data) == request.auth.uid));
+      }
+      function isSessionFinder(data) {
+        return signedIn() &&
+          (data.get('finderId', '') == request.auth.uid || isLegacy(data));
+      }
+
+      allow create: if false;
+      allow get: if isSessionOwner(resource.data) || isSessionFinder(resource.data);
+      allow list: if signedIn() && resource.data.get('ownerId', '') == request.auth.uid;
+      allow update: if isSessionOwner(resource.data) &&
+        changedOnly(['chatEnabledByOwner', 'status', 'resolvedAt']);
+      allow delete: if false;
+
+      match /messages/{messageId} {
+        function session() {
+          return get(/databases/$(database)/documents/rescueSessions/$(sessionId)).data;
+        }
+        allow read: if isSessionOwner(session()) || isSessionFinder(session());
         allow create: if signedIn() &&
-          get(/databases/$(database)/documents/rescueSessions/$(sessionId)).data.chatEnabledByOwner == true &&
-          get(/databases/$(database)/documents/rescueSessions/$(sessionId)).data.status != 'resolved' &&
-          request.resource.data.keys().hasOnly(['sender', 'text', 'sentAt']) &&
-          request.resource.data.sender in ['owner', 'finder'] &&
-          (request.resource.data.sender == 'finder' ||
-           request.auth.uid == get(
-             /databases/$(database)/documents/collarTags/$(
-               get(/databases/$(database)/documents/rescueSessions/$(sessionId)).data.tagId
-             )
-           ).data.ownerId);
+          session().get('chatEnabledByOwner', false) == true &&
+          session().get('status', 'active') != 'resolved' &&
+          request.resource.data.keys().hasOnly(['sender', 'senderId', 'text', 'sentAt']) &&
+          request.resource.data.get('senderId', request.auth.uid) == request.auth.uid &&
+          request.resource.data.text is string &&
+          request.resource.data.text.size() > 0 &&
+          request.resource.data.text.size() <= 2000 &&
+          ((request.resource.data.sender == 'owner' && isSessionOwner(session())) ||
+            (request.resource.data.sender == 'finder' && isSessionFinder(session()) &&
+              !isSessionOwner(session())));
         allow update, delete: if false;
       }
     }
@@ -1622,6 +2082,69 @@ service cloud.firestore {
     match /referralShares/{token}/{document=**} {
       allow read, write: if false;
     }
+
+    // Lost/found matches, written only by scorePetAlertMatches
+    // (functions/pet_matching.js). Readable by any signed-in user, like the
+    // petAlerts they link (the tracking page lists them for anyone viewing a
+    // report). Platform staff can only change the review status.
+    match /possibleMatches/{matchId} {
+      allow read: if signedIn();
+      allow create, delete: if false;
+      allow update: if isPlatformStaff() &&
+        changedOnly(['status', 'reviewedBy', 'reviewedAt']) &&
+        request.resource.data.status in ['pending_review', 'verified', 'resolved', 'rejected'];
+    }
+
+        // Private chat between the person who filed a lost/found report and
+        // someone messaging them about it (lib/features/rescue/pet_alert_chat.dart,
+        // functions/pet_alerts.js). ID: {alertId}_{inquirerId}. Only the two of
+        // them can read it. The person who filed the report decides whether it
+        // is the right match; either of them can record the reunion. Last-message
+        // previews and decision notes are written by Cloud Functions.
+        match /petAlertChats/{chatId} {
+          function isChatParty(data) {
+            return signedIn() &&
+              (request.auth.uid == data.reporterId || request.auth.uid == data.inquirerId);
+          }
+
+          // A chat that doesn't exist yet can be read (the app checks whether
+          // you already have one before starting it).
+          allow read: if signedIn() && (resource == null || isChatParty(resource.data));
+
+          allow create: if signedIn() &&
+            request.resource.data.inquirerId == request.auth.uid &&
+            chatId == request.resource.data.alertId + '_' + request.auth.uid &&
+            request.resource.data.reporterId ==
+              get(/databases/$(database)/documents/petAlerts/$(request.resource.data.alertId)).data.reporterId &&
+            request.resource.data.reporterId != request.auth.uid &&
+            request.resource.data.matchStatus == 'pending';
+
+          allow update: if isChatParty(resource.data) &&
+            changedOnly(['matchStatus', 'matchDecidedAt', 'matchDecidedBy', 'reunitedAt', 'reunitedBy']) &&
+            (request.resource.data.matchStatus == resource.data.matchStatus ||
+              (request.auth.uid == resource.data.reporterId &&
+                request.resource.data.matchStatus in ['pending', 'confirmed', 'rejected'])) &&
+            // The reunion can only be recorded once the match is confirmed.
+            (request.resource.data.get('reunitedAt', null) == resource.data.get('reunitedAt', null) ||
+              resource.data.matchStatus == 'confirmed');
+
+          allow delete: if false;
+
+          match /messages/{messageId} {
+            function chat() {
+              return get(/databases/$(database)/documents/petAlertChats/$(chatId)).data;
+            }
+            allow read: if isChatParty(chat());
+            allow create: if isChatParty(chat()) &&
+              request.resource.data.senderId == request.auth.uid &&
+              request.resource.data.get('kind', 'text') == 'text' &&
+              request.resource.data.text is string &&
+              request.resource.data.text.size() > 0 &&
+              request.resource.data.text.size() <= 2000;
+            allow update, delete: if false;
+          }
+        }
+
 
     // ---- Everything else ---------------------------------------------------
     // Any signed-in user, except the collections with their own blocks above.
@@ -1634,7 +2157,11 @@ service cloud.firestore {
         'manualDonationRefs', 'paymongoWebhookEvents',
         'users', 'cases', 'publicCases', 'animals', 'publicAnimals', 'adoptions', 'volunteerApplications',
         'transporterApplications', 'auditLogs', 'orgExpenses', 'communityAdoptionCheckIns',
-        'referralShares'
+        'communityAdoptionRequests',
+        'referralShares', 'possibleMatches', 'petAlertChats',
+        'collarTags', 'rescueSessions',
+        // Shelter animal collar tag registry: its own block above.
+        'animalTags'
       ]);
     }
   }

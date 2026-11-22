@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 import 'package:respawnd1/app_theme.dart';
+import 'package:respawnd1/core/models/rescue/org_involvement.dart';
 import 'package:respawnd1/core/models/rescue/rescue_case.dart';
 import 'package:respawnd1/core/models/rescue/rescue_status.dart';
 import 'package:respawnd1/core/utils/animal_treatment_state.dart';
@@ -82,6 +83,11 @@ class RescueCaseCard extends StatelessWidget {
   /// other tab.
   final ClosureCardInfo? closureInfo;
 
+  /// Closed-tab only — one bold line saying how the case left the pipeline:
+  /// "Referred to X · waiting 5h", "Intaked", "Cancelled". Computed by the
+  /// caller; null on every other tab.
+  final String? outcomeNote;
+
   /// Restricts the species-summary/animal-count line to only the animals
   /// currently in this stage (spec §7: "card/page must show only the
   /// animals relevant to that stage") — e.g. 'intake' on the Intake tab so
@@ -99,6 +105,7 @@ class RescueCaseCard extends StatelessWidget {
     this.pendingOfferNote,
     this.rejectionInfo,
     this.closureInfo,
+    this.outcomeNote,
     this.stageFilter,
   });
 
@@ -191,7 +198,13 @@ class RescueCaseCard extends StatelessWidget {
                         ),
                       ],
                       const SizedBox(width: 6),
-                      UrgencyChip(urgency: c.urgency),
+                      // In treatment the chip follows the latest treatment
+                      // log's condition; the reported urgency never changes.
+                      if (isTreatmentStage && (c.isDeceased || (c.currentCondition ?? '').isNotEmpty))
+                        TreatmentConditionChip(condition: c.isDeceased ? 'Deceased' : c.currentCondition!)
+                      // Surrenders carry no urgency: no "Unrated" chip.
+                      else if (c.orgInvolvement.ratesUrgency)
+                        UrgencyChip(urgency: c.urgency),
                     ],
                   ),
                   const SizedBox(height: 2),
@@ -208,6 +221,10 @@ class RescueCaseCard extends StatelessWidget {
                     overflow: TextOverflow.ellipsis,
                   ),
                   const SizedBox(height: 3),
+                  if (c.orgInvolvement != OrgInvolvement.orgAssist) ...[
+                    OrgInvolvementChip(involvement: c.orgInvolvement),
+                    const SizedBox(height: 3),
+                  ],
                   if (pendingOfferNote != null)
                     Text(
                       pendingOfferNote!,
@@ -225,6 +242,17 @@ class RescueCaseCard extends StatelessWidget {
                     ),
                   if (dateTimeLine.isNotEmpty)
                     Text(dateTimeLine, style: GoogleFonts.zain(fontSize: 10, color: AppColors.textSecondary)),
+                  if (outcomeNote != null)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 3),
+                      child: Text(
+                        outcomeNote!,
+                        style: GoogleFonts.zain(
+                            fontSize: 11, fontWeight: FontWeight.w700, color: AppColors.textPrimary),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
                   if (rejectionInfo != null) ..._rejectionInfoLines(rejectionInfo!),
                   if (closureInfo != null) ..._closureInfoLines(closureInfo!),
                   const SizedBox(height: 4),
@@ -232,8 +260,13 @@ class RescueCaseCard extends StatelessWidget {
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
                       Expanded(
+                        // Align keeps the chip its own width; straight
+                        // inside Expanded it stretched across the card.
                         child: showStatusChip
-                            ? RescueStatusChip(status: c.status)
+                            ? Align(
+                                alignment: Alignment.centerLeft,
+                                child: RescueStatusChip(status: c.status),
+                              )
                             : Text(
                           c.status == RescueStatus.accepted
                               ? 'Accepted · Clinic selection required'

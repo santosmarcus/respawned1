@@ -500,6 +500,8 @@
           try {
             await addDoc(collection(db, "rescueSessions", sessionId, "messages"), {
               sender: "finder",
+              // firestore.rules checks this is the chat's finder.
+              senderId: auth.currentUser.uid,
               text,
               sentAt: serverTimestamp(),
             });
@@ -527,12 +529,10 @@
 
       let initialTagData = null;
       try {
-        // Anonymous auth mirrors the "finder" role the app already grants
-        // any signed-in-but-non-owner user — see resolveScannedTagId in
-        // scan_tag_flow.dart. Firestore rules must allow any authenticated
-        // user (not just non-anonymous ones) to read collarTags/{tagId},
-        // read/write rescueSessions/{sessionId}, and its messages
-        // subcollection, exactly as they already do for in-app finders.
+        // Anonymous auth gives this browser its own finder account: it can
+        // read the tag, and getOrCreateRescueSession opens a chat between
+        // this finder and the owner that only the two of them can read
+        // (firestore.rules, rescueSessions).
         await new Promise((resolve, reject) => {
           onAuthStateChanged(auth, (user) => {
             if (user) return resolve(user);

@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 
+import 'package:respawnd1/core/models/organization/org_permission.dart';
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/core/models/adoption/adoption_application.dart';
 import 'package:respawnd1/core/models/adoption/return_request.dart';
@@ -59,9 +60,38 @@ class _ReturnDetailsPageState extends ConsumerState<ReturnDetailsPage> {
   }
 
   Future<void> _approve() async {
-    final confirmed = await showConfirmActionDialog(context, title: 'Approve Return?', message: 'You can set the retrieval schedule next.', confirmLabel: 'Approve Return');
+    // An independent rescuer already at its animal limit takes the animal
+    // back anyway (it was theirs), but is told to hand one on.
+    final full = await _independentAtAnimalLimit();
+    if (!mounted) return;
+    final confirmed = await showConfirmActionDialog(
+      context,
+      title: 'Approve Return?',
+      message: full
+          ? "You're already at your limit of animals in care. You can still take this animal back; "
+              'then transfer it or another animal to a partner shelter from its animal record.'
+          : 'You can set the retrieval schedule next.',
+      confirmLabel: 'Approve Return',
+    );
     if (!confirmed) return;
     await _run(() => ref.read(adoptionApplicationRepositoryProvider).approveReturn(applicationId: widget.applicationId, actorName: _actorName));
+  }
+
+  Future<bool> _independentAtAnimalLimit() async {
+    try {
+      final uid = FirebaseAuth.instance.currentUser?.uid;
+      if (uid == null) return false;
+      final db = FirebaseFirestore.instance;
+      final orgId = (await db.collection('users').doc(uid).get()).data()?['organizationId'] as String? ?? '';
+      if (orgId.isEmpty) return false;
+      final org = (await db.collection('organizations').doc(orgId).get()).data();
+      if (org?['kind'] != 'independent') return false;
+      final inCare = (org?['animalsInCareCount'] as num?)?.toInt() ?? 0;
+      final max = (org?['maxAnimalsInCare'] as num?)?.toInt() ?? IndependentRescuer.maxAnimalsInCare;
+      return inCare >= max;
+    } catch (_) {
+      return false;
+    }
   }
 
   Future<void> _decline() async {

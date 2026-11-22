@@ -245,7 +245,7 @@ class BookAppointmentStep extends StatelessWidget {
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
-                    '$form.appointmentType  ·  ${formatAdoptionDate(form.appointmentDate!)}  ·  $form.appointmentTime',
+                    [form.appointmentType, formatAdoptionDate(form.appointmentDate!), form.appointmentTime].whereType<String>().where((p) => p.isNotEmpty).join('  ·  '),
                     style: GoogleFonts.zain(
                       fontSize: 13,
                       fontWeight: FontWeight.w600,

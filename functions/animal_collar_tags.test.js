@@ -13,7 +13,7 @@ test('copies the animal and organization onto the collar tag', () => {
       name: 'Mochi', age: '2 years', sex: 'Female', breed: '', species: 'Cat',
       size: 'Small', coatLength: 'Short', spayedNeutered: true, vaccinated: false,
       photoUrls: ['not-a-url', 'https://x/y.jpg'], chronicConditions: 'Asthma',
-      specialNeedsTypes: ['Blind'], organizationId: 'org1',
+      specialNeedsTypes: ['Blind'], organizationId: 'org1', qrTagId: 'ABCD2345',
     },
     {name: 'Paws Org', contactNumber: '0917', email: 'a@b.c'},
   );
@@ -28,5 +28,7 @@ test('copies the animal and organization onto the collar tag', () => {
   assert.strictEqual(tag.ownerName, 'Paws Org');
   assert.strictEqual(tag.ownerMobile, '0917');
   assert.strictEqual(tag.qrEnabled, true);
+  assert.strictEqual(tag.animalQrCode, 'ABCD2345');
+  assert.strictEqual(tag.animalNfcCode, '');
   assert.strictEqual(tag.archived, false);
 });

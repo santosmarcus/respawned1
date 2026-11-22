@@ -66,8 +66,14 @@ class _AnimalPageState extends ConsumerState<AnimalPage> {
           : (animal.badge != null ? [animal.badge!] : []),
       rescueBackground: animal.rescueBackground,
       description: animal.description,
-      organization: 'ResPAWnd Partner',
-      orgSubtitle: 'Verified rescue organization',
+      organization: animal.independentRescuerName == null
+          ? 'ResPAWnd Partner'
+          : animal.independentRescuerName!.isEmpty
+              ? 'Rescue volunteer'
+              : 'Rescue volunteer · ${animal.independentRescuerName}',
+      orgSubtitle: animal.independentRescuerName == null
+          ? 'Verified rescue organization'
+          : 'Verified by ResPAWnd. Fosters at home with a small team.',
     );
   }
 
@@ -236,6 +242,7 @@ class _AnimalPageState extends ConsumerState<AnimalPage> {
         children: [
           AnimalImageGallery(
             photoUrls: animal.photoUrls,
+            captions: animal.photoCaptions,
             height: 260,
             backgroundColor: animal.cardColor,
             overlays: [

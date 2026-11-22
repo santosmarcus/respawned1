@@ -99,10 +99,10 @@ class _RescueAdoptionRequestCardState extends ConsumerState<RescueAdoptionReques
 
   Future<void> _decline(CaseAdoptionRequest r) async {
     final reason = await showTextInputDialog(context,
-        title: 'Decline adoption request',
+        title: 'Reject adoption request',
         message: '${r.adopterName} is told the request was not approved.',
         label: 'Reason',
-        confirmLabel: 'Decline',
+        confirmLabel: 'Reject',
         destructive: true,
         required: true);
     if (reason == null || !mounted) return;
@@ -114,7 +114,7 @@ class _RescueAdoptionRequestCardState extends ConsumerState<RescueAdoptionReques
         actorUid: widget.actorUid,
         actorName: widget.actorName,
       ),
-      'Request declined.',
+      'Request rejected.',
     );
   }
 
@@ -172,7 +172,7 @@ class _RescueAdoptionRequestCardState extends ConsumerState<RescueAdoptionReques
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             if (request != null) ...[
-              line('${request.adopterName} · ${request.status.label}', weight: FontWeight.w700),
+              line('${request.adopterName} · ${_adminStatusLabel(request.status)}', weight: FontWeight.w700),
               if (request.closedReason != null) line(request.closedReason!, color: AppColors.textSecondary),
               _RequestDetails(applicationId: request.applicationId),
               if (request.status == RescueAdoptionStatus.pending) ...[
@@ -185,7 +185,7 @@ class _RescueAdoptionRequestCardState extends ConsumerState<RescueAdoptionReques
                     child: OutlinedButton(
                       onPressed: _busy || !owned ? null : () => _decline(request),
                       style: AppButtons.dangerOutline,
-                      child: const Text('Decline'),
+                      child: const Text('Reject'),
                     ),
                   ),
                   const SizedBox(width: 10),
@@ -332,3 +332,7 @@ class _RequestDetails extends StatelessWidget {
     );
   }
 }
+
+/// Staff see "Rejected"; the adopter's own app keeps the model's softer
+/// "Not approved" (RescueAdoptionStatus.label).
+String _adminStatusLabel(RescueAdoptionStatus s) => s == RescueAdoptionStatus.rejected ? 'Rejected' : s.label;

@@ -140,12 +140,14 @@ class ActivityFeed extends StatelessWidget {
                         rejectedAt = hts.toDate();
                       }
                     }
-                    communityAdoptionEligible = isCommunityAdoptionEligible(
-                      status: rawStatus,
-                      rejectionReason: reasonName,
-                      rescueType: data['rescueType'] as String?,
-                    );
                   }
+                  // Rejected as healthy, or a Pet Surrender listed for
+                  // Community Adoption as soon as it is filed.
+                  communityAdoptionEligible = isCommunityAdoptionEligible(
+                    status: rawStatus,
+                    rejectionReason: data['rejectionReason'] as String?,
+                    rescueType: data['rescueType'] as String?,
+                  );
 
                   items.add(ActivityItem(
                     id: doc.id,
@@ -209,11 +211,18 @@ class ActivityFeed extends StatelessWidget {
 
                   final status = (data['status'] as String? ?? 'open').toLowerCase();
                   if (dismissedStatuses.contains(status)) continue;
+                  // Reunited (or resolved) reports move to History once the
+                  // reporter has seen the success page (ReunitedSuccessPage).
+                  if ((status == 'reunited' || status == 'resolved') &&
+                      (data['reporterAcknowledgedReunion'] == true || status == 'resolved')) {
+                    continue;
+                  }
 
                   final kind = data['type'] as String? ?? 'lost'; // 'lost' | 'found'
                   final statusLabel = switch (status) {
                     'verified' => 'Match verified — coordinating handover',
                     'resolved' => 'Resolved',
+                    'reunited' => 'Reunited with owner — tap to finish',
                     _ => kind == 'lost'
                         ? 'Searching for possible matches'
                         : 'Checking against open lost pet alerts',

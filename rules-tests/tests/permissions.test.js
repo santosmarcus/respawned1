@@ -28,6 +28,7 @@ beforeEach(async () => {
     await db.doc('auditLogs/l1').set({ organizationId: 'orgA', category: 'adoptions', action: 'x', actorId: 'ownerA' });
     await db.doc('volunteerApplications/rider').set({ uid: 'rider', status: 'pending' });
     await db.doc('organizations/orgA/settings/shelter').set({ maxCapacity: 20 });
+    await db.doc('organizations/orgA/cashOuts/co1').set({ organizationId: 'orgA', amount: 500, status: 'needs_assignment' });
   });
 });
 
@@ -74,6 +75,19 @@ describe('money', () => {
     await assertFails(as('careA').doc('cases/ownedA/expenses/e1').get());
   });
 
+  test('cash-outs: anyone who sees the money reads them, nobody writes from the app', async () => {
+    for (const uid of ['treasurerA', 'fullA', 'adminA', 'ownerA']) {
+      await assertSucceeds(as(uid).doc('organizations/orgA/cashOuts/co1').get());
+    }
+    for (const uid of ['rescueA', 'careA', 'adoptA', 'noPermsA', 'admin', 'staffB', 'adopter']) {
+      await assertFails(as(uid).doc('organizations/orgA/cashOuts/co1').get());
+    }
+    for (const uid of ['treasurerA', 'adminA']) {
+      await assertFails(as(uid).doc('organizations/orgA/cashOuts/co1').update({ status: 'assigned' }));
+      await assertFails(as(uid).collection('organizations/orgA/cashOuts').add({ amount: 1, status: 'needs_assignment' }));
+    }
+  });
+
   test('the platform account gets money only through its membership', async () => {
     await assertSucceeds(as('platformMemberA').doc('donationPayments/p1').get());
     await assertFails(as('admin').doc('donationPayments/p1').get());
@@ -81,12 +95,14 @@ describe('money', () => {
 });
 
 describe('operations', () => {
-  test('rescue cases: rescue staff work them, others do not', async () => {
+  test('rescue cases: rescue staff work them, other Staff read only, carers not at all', async () => {
     await assertSucceeds(as('rescueA').doc('cases/ownedA').update({ note: 'x' }));
     await assertSucceeds(as('fullA').doc('cases/ownedA').update({ note: 'y' }));
     await assertFails(as('treasurerA').doc('cases/ownedA').update({ note: 'z' }));
     await assertFails(as('careA').doc('cases/ownedA').update({ note: 'z' }));
-    await assertFails(as('treasurerA').doc('cases/ownedA').get());
+    // Every module is readable to Staff outside the care-tasks screen.
+    await assertSucceeds(as('treasurerA').doc('cases/ownedA').get());
+    await assertFails(as('careA').doc('cases/ownedA').get());
     await assertSucceeds(as('adoptA').doc('cases/ownedA').get());
     await assertSucceeds(as('rescueA').collection('cases').where('organizationId', '==', '').get());
     await assertFails(as('careA').collection('cases').where('organizationId', '==', '').get());
@@ -103,7 +119,8 @@ describe('operations', () => {
     // Analytics (insights) counts health records, so the treasurer may read them;
     // other organizations' staff may not.
     await assertFails(as('staffB').doc('animals/a1/vaccinations/v1').get());
-    await assertFails(as('treasurerA').doc('animals/a1').get());
+    await assertSucceeds(as('treasurerA').doc('animals/a1').get());
+    await assertSucceeds(as('treasurerA').doc('animals/a1/vaccinations/v1').get());
   });
 
   test('daily care: care staff record their own doses only', async () => {
@@ -115,26 +132,30 @@ describe('operations', () => {
     await assertFails(as('treasurerA').doc('organizations/orgA/stock/s1').set({ name: 'Food', quantity: 3 }));
   });
 
-  test('adoptions: adoption staff only', async () => {
+  test('adoptions: adoption staff work them, other Staff read only', async () => {
     await assertSucceeds(as('adoptA').doc('adoptions/ad1').get());
     await assertSucceeds(as('adoptA').doc('adoptions/ad1').update({ note: 'called' }));
-    await assertFails(as('rescueA').doc('adoptions/ad1').get());
+    await assertSucceeds(as('rescueA').doc('adoptions/ad1').get());
+    await assertFails(as('rescueA').doc('adoptions/ad1').update({ note: 'x' }));
+    await assertFails(as('careA').doc('adoptions/ad1').get());
     await assertFails(as('treasurerA').doc('adoptions/ad1').update({ note: 'x' }));
   });
 
-  test('volunteers, events and applications: volunteer staff only', async () => {
+  test('volunteers, events and applications: volunteer staff manage, other Staff read', async () => {
     await assertSucceeds(as('fullA').doc('volunteerApplications/rider').get());
-    await assertFails(as('rescueA').doc('volunteerApplications/rider').get());
+    await assertSucceeds(as('rescueA').doc('volunteerApplications/rider').get());
+    await assertFails(as('careA').doc('volunteerApplications/rider').get());
+    await assertFails(as('rescueA').doc('volunteerApplications/rider').update({ status: 'approved', reviewedBy: 'rescueA' }));
     await assertSucceeds(as('fullA').doc('events/e1').update({ title: 'Feeding day' }));
     await assertFails(as('careA').doc('events/e1').update({ title: 'x' }));
     await assertSucceeds(upload('fullA', 'events/orgA/cover.jpg'));
     await assertFails(upload('treasurerA', 'events/orgA/cover.jpg'));
   });
 
-  test('audit log and analytics: insights only', async () => {
+  test('audit log and analytics: every Staff member but carers reads them', async () => {
     await assertSucceeds(as('rescueA').doc('auditLogs/l1').get());
     await assertSucceeds(as('treasurerA').doc('auditLogs/l1').get());
-    await assertFails(as('adoptA').doc('auditLogs/l1').get());
+    await assertSucceeds(as('adoptA').doc('auditLogs/l1').get());
     await assertFails(as('careA').doc('auditLogs/l1').get());
   });
 
@@ -160,12 +181,13 @@ describe('fallbacks', () => {
     await assertSucceeds(as('noPermsA').doc('users/noPermsA').get());
   });
 
-  test('legacy staff act as Full staff, legacy carers as Animal care', async () => {
-    await assertSucceeds(as('staffA').doc('cases/ownedA').update({ note: 'legacy' }));
-    await assertSucceeds(as('staffA').doc('donations/d1').get());
-    await assertFails(as('staffA').doc('donationPayments/p1').get());
-    await assertSucceeds(as('carerA').doc('animals/a1/medicationDoses/d9').set({ givenBy: 'carerA' }));
-    await assertFails(as('carerA').doc('cases/ownedA').get());
+  test('legacy staff and legacy carers both get the default Staff set, without money', async () => {
+    for (const uid of ['legacyStaffA', 'legacyCarerA']) {
+      await assertSucceeds(as(uid).doc('cases/ownedA').update({ note: 'legacy' }));
+      await assertSucceeds(as(uid).doc('animals/a1/medicationDoses/d9').set({ givenBy: uid }));
+      await assertFails(as(uid).doc('donations/d1').get());
+      await assertFails(as(uid).doc('donationPayments/p1').get());
+    }
   });
 });
 
@@ -188,6 +210,36 @@ describe('who changes access', () => {
     await assertFails(as('fullA').doc('organizationInvitations/i2').set(invite()));
     await assertFails(as('fullA').doc('organizationInvitations/i3').set(invite({ role: 'admin' })));
     await assertFails(as('adminA').doc('organizationInvitations/i4').set(invite({ permissions: ['everything'] })));
+  });
+
+  test('an Admin can check for an invitation that does not exist yet', async () => {
+    // createInvitation used to read the doc in a transaction first; a missing
+    // invitation must not be permission-denied for its org's Admins.
+    await assertSucceeds(as('adminA').doc('organizationInvitations/orgA_new@example.com').get());
+    await assertFails(as('fullA').doc('organizationInvitations/orgA_new@example.com').get());
+    await assertFails(as('staffB').doc('organizationInvitations/orgA_new@example.com').get());
+  });
+
+  test('a phone invitation is matched by the verified sign-in number only', async () => {
+    await env.withSecurityRulesDisabled((ctx) => ctx.firestore().doc('organizationInvitations/orgA_phone_639171234567').set({
+      organizationId: 'orgA', email: '', normalizedEmail: '', phone: '09171234567', normalizedPhone: '+639171234567',
+      status: 'pending', role: 'staff', permissions: presets.animalCare, preset: 'animalCare',
+    }));
+    const path = 'organizationInvitations/orgA_phone_639171234567';
+    const right = env.authenticatedContext('stranger', { phone_number: '+639171234567' }).firestore();
+    const wrong = env.authenticatedContext('reporter', { phone_number: '+639999999999' }).firestore();
+    // No email on a phone-only account must not match an invitation's empty email.
+    const noEmail = env.authenticatedContext('adopter', {}).firestore();
+    await assertSucceeds(right.doc(path).get());
+    await assertFails(wrong.doc(path).get());
+    await assertFails(noEmail.doc(path).get());
+    await assertSucceeds(right.collection('organizationInvitations')
+      .where('normalizedPhone', '==', '+639171234567').where('status', '==', 'pending').get());
+    const member = { uid: 'stranger', organizationId: 'orgA', role: 'staff', status: 'active',
+      invitationId: 'orgA_phone_639171234567', permissions: presets.animalCare, preset: 'animalCare' };
+    await assertFails(wrong.doc('organizations/orgA/members/reporter').set({ ...member, uid: 'reporter' }));
+    await assertSucceeds(right.doc('organizations/orgA/members/stranger').set(member));
+    await assertSucceeds(right.doc(path).update({ status: 'accepted' }));
   });
 
   test('accepting copies the invitation access exactly', async () => {

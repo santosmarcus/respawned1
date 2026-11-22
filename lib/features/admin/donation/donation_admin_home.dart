@@ -1,309 +1,336 @@
+import 'package:respawnd1/features/admin/donation/cash_out_sheets.dart';
+import 'package:respawnd1/features/admin/widgets/view_only.dart';
+import 'package:respawnd1/core/models/organization/org_permission.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 import 'package:respawnd1/app_theme.dart';
-import 'package:respawnd1/features/admin/donation/refund_request_page.dart';
+import 'package:respawnd1/core/widgets/app_dialogs.dart';
+import 'package:respawnd1/features/admin/stock/stock_page.dart';
+import 'package:respawnd1/features/admin/widgets/admin_app_bar.dart';
 import 'package:respawnd1/features/admin/widgets/admin_drawer.dart';
+import 'package:respawnd1/features/admin/widgets/admin_tab_bar.dart';
+import 'package:respawnd1/features/admin/widgets/donation_admin.dart';
 import 'package:respawnd1/features/donation/models.dart';
 
+import 'case_costs_tab.dart';
 import 'donation_admin_create.dart';
+import 'donation_admin_filters.dart';
 import 'donation_admin_info.dart';
 import 'donation_admin_providers.dart';
+import 'package:respawnd1/features/adminhome/dashboard/financial_report_export.dart';
+import 'package:respawnd1/features/adminhome/dashboard/shelter_settings.dart';
 import 'donation_admin_records.dart';
 import 'donation_admin_search.dart';
-import 'sponsorable_animals.dart';
-import 'expense_oversight_page.dart';
-import 'package:respawnd1/features/admin/stock/stock_page.dart';
-import 'package:respawnd1/features/admin/widgets/donation_admin.dart';
+import 'donation_admin_sheets.dart';
+import 'general_expenses_page.dart';
+import 'refund_request_page.dart';
 
-/// Lifecycle statuses still "being tracked" (drafts included so admins can
-/// find and publish them). Ended listings are reached through View All.
-const _currentStatuses = {'draft', 'active', 'paused'};
-
-/// Finished listings that stay on the home screen until every peso is
-/// allocated and an admin archives them.
-const _completedStatuses = {'goal_met', 'goal_not_met', 'closed'};
-
-/// Ongoing listings shown per section on the home screen; the rest are in View All.
+/// Ongoing listings shown per section on the Campaigns tab; the rest are in
+/// View all.
 const _homeListLimit = 3;
 
-class DonationAdminHomeScreen extends ConsumerWidget {
-  const DonationAdminHomeScreen({super.key});
+enum DonationAdminTab {
+  campaigns('Campaigns'),
+  inKind('In Kind'),
+  refunds('Refunds'),
+  caseCosts('Case costs');
 
-  void _openListing(BuildContext context, DonationListing l) =>
-      Navigator.push(context, MaterialPageRoute(builder: (_) => DonationAdminInfoPage(campaignId: l.id)));
+  const DonationAdminTab(this.label);
+  final String label;
+}
 
-  /// Current and past listings of one type (search page, all statuses).
-  void _openAll(BuildContext context, {required bool sponsorships}) => Navigator.push(
-    context,
-    MaterialPageRoute(
-      builder: (_) => DonationAdminSearchPage(
-        initialTab: sponsorships ? 2 : 1,
-        title: sponsorships ? 'All Sponsorships' : 'All Donations',
-      ),
-    ),
-  );
+/// Admin Donations: campaigns and sponsorships, in-kind stock, refund
+/// requests and every case's treatment costs, one tab each.
+class DonationAdminHomeScreen extends ConsumerStatefulWidget {
+  const DonationAdminHomeScreen({super.key, this.initialTab = DonationAdminTab.campaigns});
 
-  void _openCompleted(BuildContext context) => Navigator.push(
-    context,
-    MaterialPageRoute(
-      builder: (_) => DonationAdminSearchPage(initialStatuses: _completedStatuses, title: 'Completed Campaigns'),
-    ),
-  );
+  /// The tab it opens on: Refunds from the dashboard's refund requests card.
+  final DonationAdminTab initialTab;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final campaigns = ref.watch(adminCampaignsProvider);
-    final recent = ref.watch(recentDonationsProvider);
-    final needsDecision = ref.watch(campaignsNeedingDecisionProvider).asData?.value ?? const [];
+  ConsumerState<DonationAdminHomeScreen> createState() => _DonationAdminHomeScreenState();
+}
+
+class _DonationAdminHomeScreenState extends ConsumerState<DonationAdminHomeScreen> {
+  static const _helpText = 'Campaigns: create a donation campaign or a sponsorship with New Campaign, then open a '
+      'listing to track funds, record offline donations, confirm in-kind items and review its history. Up to three '
+      'ongoing listings show per section; View all lists every current and past one.\n\n'
+      'In Kind: stock on hand. Received in-kind donations are added automatically.\n'
+      'Refunds: donors\' refund requests to approve or decline.';
+
+  late DonationAdminTab _tab = widget.initialTab;
+
+  void _selectTab(int i) => setState(() => _tab = DonationAdminTab.values[i]);
+
+  Future<void> _newCampaign() async {
+    final type = await showModalBottomSheet<String>(
+      context: context,
+      backgroundColor: AppColors.background,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
+      builder: (_) => const _NewCampaignSheet(),
+    );
+    if (type == null || !mounted) return;
+    Navigator.push(context, MaterialPageRoute(builder: (_) => DonationAdminCreatePage(initialType: type)));
+  }
+
+  /// Create buttons only for people who may create (the tabs stay
+  /// readable for everyone).
+  Widget? _fab() => switch (_tab) {
+        DonationAdminTab.campaigns when ref.watch(canEditProvider(OrgPermission.campaigns)) =>
+          _YellowFab(label: 'New Campaign', onPressed: _newCampaign),
+        DonationAdminTab.inKind when canEditAny(ref, const [OrgPermission.care, OrgPermission.animals]) =>
+          _YellowFab(label: 'Add item', onPressed: () => addStockItem(context, ref)),
+        _ => null,
+      };
+
+  @override
+  Widget build(BuildContext context) {
+    final canFinance = ref.watch(canManageFinancesProvider).asData?.value ?? false;
+    final canViewFinance = ref.watch(canViewFinancesProvider).asData?.value ?? false;
     final openRefunds = (ref.watch(allDonationsProvider).asData?.value ?? const [])
         .where((d) => d.refundRequest?.isOpen ?? false)
         .length;
+    // Money taken out with no fund yet: a pop-up once for people who manage
+    // money, and the banner above the tabs for everyone who sees money.
+    listenForUnassignedCashOuts(context, ref);
 
     return Scaffold(
       backgroundColor: AppColors.background,
       drawer: const AdminDrawer(active: AdminModule.donations),
-      body: Builder(
-        builder: (context) => Column(
+      appBar: AdminAppBar(
+        title: 'Donations',
+        menuActions: [
+          // A payment that isn't for a particular campaign goes to the
+          // organization's General fund.
+          if (canFinance)
+            AdminMenuAction(
+              label: 'Record donation (General fund)',
+              icon: Icons.add_card_outlined,
+              onTap: () => showAdminSheet(context, const OfflineDonationSheet()),
+            ),
+          // Money leaving PayMongo, the bank, GCash or the cash box, and
+          // which fund it came from (cash_out_sheets.dart).
+          if (canFinance)
+            AdminMenuAction(
+              label: 'Record money taken out',
+              icon: Icons.outbox_outlined,
+              onTap: () => showRecordCashOutSheet(context),
+            ),
+          if (canViewFinance)
+            AdminMenuAction(
+              label: 'Money taken out',
+              icon: Icons.account_balance_wallet_outlined,
+              onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const CashOutsPage())),
+            ),
+          if (canFinance)
+            AdminMenuAction(
+              label: 'General expenses',
+              icon: Icons.receipt_long_outlined,
+              onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const GeneralExpensesPage())),
+            ),
+          // financeView or financeManage, the same people who see donor
+          // records and donation reports.
+          if (canViewFinance)
+            AdminMenuAction(
+              label: 'Monthly financial report',
+              icon: Icons.summarize_outlined,
+              onTap: () => runMonthlyFinancialReport(context, ref),
+            ),
+          if (canFinance)
+            AdminMenuAction(
+              label: 'Set approval rule',
+              icon: Icons.verified_user_outlined,
+              onTap: () => showShelterSetupSheet(context),
+            ),
+          AdminMenuAction(
+            label: 'Help',
+            icon: Icons.lightbulb_outline,
+            onTap: () =>
+                showInfoDialog(context, title: 'Donations', message: _helpText, closeLabel: 'Got it'),
+          ),
+        ],
+        bottom: AdminTabBar(
+          tabs: [
+            for (final t in DonationAdminTab.values) AdminTab(t.label, count: t == DonationAdminTab.refunds ? openRefunds : null),
+          ],
+          selectedIndex: _tab.index,
+          onSelected: _selectTab,
+        ),
+      ),
+      floatingActionButton: _fab(),
+      body: Column(
+        children: [
+          const CashOutReminderBanner(),
+          Expanded(
+            child: AdminTabSwipe(
+              index: _tab.index,
+              count: DonationAdminTab.values.length,
+              onSelected: _selectTab,
+              child: switch (_tab) {
+                DonationAdminTab.campaigns => const _CampaignsTab(),
+                DonationAdminTab.inKind => const StockTab(),
+                DonationAdminTab.refunds => const RefundRequestsTab(),
+                DonationAdminTab.caseCosts => const CaseCostsTab(),
+              },
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _YellowFab extends StatelessWidget {
+  final String label;
+  final VoidCallback onPressed;
+  const _YellowFab({required this.label, required this.onPressed});
+
+  @override
+  Widget build(BuildContext context) => FloatingActionButton.extended(
+        backgroundColor: AppColors.yellowrspwn,
+        foregroundColor: AppColors.textPrimary,
+        onPressed: onPressed,
+        icon: const Icon(Icons.add),
+        label: Text(label, style: GoogleFonts.tiltWarp(fontSize: 14)),
+      );
+}
+
+/// New Campaign: donation campaign or sponsorship. Pops the listing type.
+class _NewCampaignSheet extends StatelessWidget {
+  const _NewCampaignSheet();
+
+  @override
+  Widget build(BuildContext context) {
+    Widget option(String type, String title, String subtitle) => InkWell(
+          onTap: () => Navigator.pop(context, type),
+          child: Container(
+            padding: const EdgeInsets.symmetric(vertical: 14),
+            decoration: const BoxDecoration(border: Border(bottom: BorderSide(color: AppColors.slaterspwn))),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      FieldLabel(title),
+                      Text(subtitle, style: GoogleFonts.zain(fontSize: 14, color: AppColors.textSecondary)),
+                    ],
+                  ),
+                ),
+                const Icon(Icons.chevron_right, color: AppColors.textPrimary),
+              ],
+            ),
+          ),
+        );
+    return SafeArea(
+      top: false,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(20, 16, 20, 12),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            DonationAdminHeader(
-              title: 'Donation/Sponsorship',
-              onMenu: () => Scaffold.of(context).openDrawer(),
-              helpText: 'Create a campaign, or use "Sponsor an Animal" to pick an animal that is ready to be sponsored '
-                  '(the form fills itself from the animal record). Then open a listing to track funds, record offline '
-                  'donations, confirm in-kind items and review its history. The home screen shows up to three '
-                  'ongoing listings per section; "View All" lists every current and past one.',
-            ),
-            Expanded(
-              child: ListView(
-                padding: const EdgeInsets.fromLTRB(20, 28, 20, 28),
-                children: [
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                    children: [
-                      _ProcessItem(
-                        icon: Icons.assignment_outlined,
-                        label: 'Create a\nCampaign',
-                        onTap: () =>
-                            Navigator.push(context, MaterialPageRoute(builder: (_) => const DonationAdminCreatePage())),
-                      ),
-                      _ProcessItem(
-                        icon: Icons.pets,
-                        label: 'Sponsor an\nAnimal',
-                        onTap: () => Navigator.push(
-                            context, MaterialPageRoute(builder: (_) => const SponsorAnimalPickerPage())),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 16),
-                  // Donation gaps 5, 6 and 7.
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                    children: [
-                      _ProcessItem(
-                        icon: Icons.inventory_2_outlined,
-                        label: 'In-Kind\nStock',
-                        onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const StockPage())),
-                      ),
-                      _ProcessItem(
-                        icon: Icons.fact_check_outlined,
-                        label: 'Approvals &\nReceipts',
-                        onTap: () =>
-                            Navigator.push(context, MaterialPageRoute(builder: (_) => const ExpenseOversightPage())),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 16),
-                  // Refund request flow.
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                    children: [
-                      _ProcessItem(
-                        icon: Icons.undo,
-                        label: openRefunds == 0 ? 'Refund\nRequests' : 'Refund\nRequests ($openRefunds)',
-                        onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const RefundRequestsPage())),
-                      ),
-                    ],
-                  ),
-
-                  // Not in the Figma frame: deadline decisions must stay
-                  // visible somewhere, so they only appear when one is pending.
-                  if (needsDecision.isNotEmpty) ...[
-                    const SizedBox(height: 24),
-                    Text('Needs your decision', style: GoogleFonts.tiltWarp(fontSize: 18, color: AppColors.textPrimary)),
-                    const SizedBox(height: 2),
-                    Text('These campaigns ended below their goal. Decide whether to extend them.',
-                        style: GoogleFonts.zain(fontSize: 14, color: AppColors.textSecondary)),
-                    const SizedBox(height: 10),
-                    for (final c in needsDecision) CampaignCard(listing: c, onTap: () => _openListing(context, c)),
-                  ],
-
-                  const SizedBox(height: 24),
-                  _SectionHeader(
-                    title: 'Donation Tracking',
-                    action: 'View All Donations',
-                    onAction: () => _openAll(context, sponsorships: false),
-                  ),
-                  const SizedBox(height: 6),
-                  _trackingList(context, campaigns, type: 'donation', empty: 'No active donation campaigns.'),
-
-                  const SizedBox(height: 16),
-                  _SectionHeader(
-                    title: 'Sponsorship Tracking',
-                    action: 'View All Sponsorships',
-                    onAction: () => _openAll(context, sponsorships: true),
-                  ),
-                  const SizedBox(height: 6),
-                  _trackingList(context, campaigns, type: 'sponsorship', empty: 'No active sponsorships.'),
-                  Align(
-                    alignment: Alignment.centerLeft,
-                    child: TextButton.icon(
-                      onPressed: () =>
-                          Navigator.push(context, MaterialPageRoute(builder: (_) => const SponsorAnimalPickerPage())),
-                      icon: const Icon(Icons.add, size: 18, color: AppColors.textPrimary),
-                      label: Text('Choose animals ready to be sponsored',
-                          style: GoogleFonts.zain(fontSize: 15, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
-                    ),
-                  ),
-
-                  const SizedBox(height: 16),
-                  _SectionHeader(
-                    title: 'Completed',
-                    action: 'View All Completed',
-                    onAction: () => _openCompleted(context),
-                  ),
-                  Text('Stays here until every peso is allocated, then it can be archived.',
-                      style: GoogleFonts.zain(fontSize: 13, color: AppColors.textSecondary)),
-                  const SizedBox(height: 6),
-                  _completedList(context, campaigns),
-
-                  const SizedBox(height: 28),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: Text('Recent Donations',
-                            style: GoogleFonts.zain(fontSize: 18, color: AppColors.textPrimary)),
-                      ),
-                      TextButton(
-                        onPressed: () =>
-                            Navigator.push(context, MaterialPageRoute(builder: (_) => const DonationRecordsPage())),
-                        child: Text('View all', style: GoogleFonts.zain(fontSize: 15, color: AppColors.textPrimary)),
-                      ),
-                    ],
-                  ),
-                  recent.when(
-                    loading: () => const Padding(
-                      padding: EdgeInsets.all(24),
-                      child: Center(child: CircularProgressIndicator(color: AppColors.textPrimary)),
-                    ),
-                    error: (e, _) =>
-                        Text('Could not load donations: $e', style: GoogleFonts.zain(fontSize: 14, color: Colors.redAccent)),
-                    data: (items) => items.isEmpty
-                        ? Text('No donations yet.', style: GoogleFonts.zain(fontSize: 15, color: AppColors.textSecondary))
-                        : Column(children: [for (final d in items) DonationRecordCard(record: d)]),
-                  ),
-                ],
-              ),
-            ),
+            Text('New Campaign',
+                textAlign: TextAlign.center, style: GoogleFonts.tiltWarp(fontSize: 17, color: AppColors.textPrimary)),
+            const SizedBox(height: 6),
+            option('donation', 'Campaign', 'Raise funds toward a goal, like a surgery or supplies.'),
+            option('sponsorship', 'Sponsorship', 'Monthly support for one animal. Choose the animal in the form.'),
           ],
         ),
       ),
     );
   }
-
-  /// Finished, not yet archived listings; the most unallocated money first.
-  /// (Ones still waiting for an extend/close decision are listed above.)
-  Widget _completedList(BuildContext context, AsyncValue<List<DonationListing>> campaigns) {
-    final all = campaigns.asData?.value ?? const <DonationListing>[];
-    final items = all.where((l) => _completedStatuses.contains(l.status) && !l.needsExtensionDecision).toList()
-      ..sort((a, b) => b.availableBalance.compareTo(a.availableBalance));
-    if (items.isEmpty) {
-      return Padding(
-        padding: const EdgeInsets.symmetric(vertical: 6),
-        child: Text('No completed campaigns.', style: GoogleFonts.zain(fontSize: 15, color: AppColors.textSecondary)),
-      );
-    }
-    return Column(children: [
-      for (final l in items.take(_homeListLimit)) CampaignCard(listing: l, onTap: () => _openListing(context, l)),
-    ]);
-  }
-
-  Widget _trackingList(BuildContext context, AsyncValue<List<DonationListing>> campaigns,
-      {required String type, required String empty}) {
-    return campaigns.when(
-      loading: () => const Padding(
-        padding: EdgeInsets.all(16),
-        child: Center(child: CircularProgressIndicator(color: AppColors.textPrimary)),
-      ),
-      error: (e, _) => Text('Could not load listings: $e', style: GoogleFonts.zain(fontSize: 14, color: Colors.redAccent)),
-      data: (all) {
-        // Ended-by-date listings the hourly job hasn't processed yet still
-        // read as "active"; isEnded keeps them out of the current list.
-        final items = all
-            .where((l) => l.type == type && _currentStatuses.contains(l.status) && (l.isDraft || l.status == 'paused' || !l.isEnded))
-            .toList();
-        if (items.isEmpty) {
-          return Padding(
-            padding: const EdgeInsets.symmetric(vertical: 6),
-            child: Text(empty, style: GoogleFonts.zain(fontSize: 15, color: AppColors.textSecondary)),
-          );
-        }
-        return Column(children: [
-          for (final l in items.take(_homeListLimit)) CampaignCard(listing: l, onTap: () => _openListing(context, l)),
-        ]);
-      },
-    );
-  }
 }
 
-class _SectionHeader extends StatelessWidget {
-  final String title;
-  final String action;
-  final VoidCallback onAction;
-  const _SectionHeader({required this.title, required this.action, required this.onAction});
+class _CampaignsTab extends ConsumerWidget {
+  const _CampaignsTab();
+
+  void _openListing(BuildContext context, DonationListing l) =>
+      Navigator.push(context, MaterialPageRoute(builder: (_) => DonationAdminInfoPage(campaignId: l.id)));
+
+  void _openAll(BuildContext context, {String? type}) =>
+      Navigator.push(context, MaterialPageRoute(builder: (_) => DonationAdminSearchPage(initialType: type)));
 
   @override
-  Widget build(BuildContext context) {
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.center,
-      children: [
-        Expanded(child: Text(title, style: GoogleFonts.tiltWarp(fontSize: 19, color: AppColors.textPrimary))),
-        InkWell(
-          onTap: onAction,
-          child: Padding(
-            padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 2),
-            child: Text(action, style: GoogleFonts.zain(fontSize: 16, color: AppColors.textPrimary)),
+  Widget build(BuildContext context, WidgetRef ref) {
+    final campaigns = ref.watch(adminCampaignsProvider);
+    final recent = ref.watch(recentDonationsProvider);
+    final needsDecision = ref.watch(campaignsNeedingDecisionProvider).asData?.value ?? const <DonationListing>[];
+
+    Widget current(String type, String empty) => campaigns.when(
+          loading: () => const Padding(
+            padding: EdgeInsets.all(16),
+            child: Center(child: CircularProgressIndicator(color: AppColors.textPrimary)),
           ),
+          error: (e, _) =>
+              Text('Could not load listings: $e', style: GoogleFonts.zain(fontSize: 14, color: AppColors.error)),
+          data: (all) {
+            final items = currentListings(all, type);
+            if (items.isEmpty) return _Muted(empty);
+            return Column(children: [
+              for (final l in items.take(_homeListLimit)) CampaignCard(listing: l, onTap: () => _openListing(context, l)),
+            ]);
+          },
+        );
+
+    return ListView(
+      // Bottom padding keeps the last row clear of the FAB.
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 96),
+      children: [
+        // Deadline decisions only appear while one is pending.
+        if (needsDecision.isNotEmpty) ...[
+          const DonationSectionHeader(
+            'Needs your decision',
+            help: 'These campaigns ended below their goal. Decide whether to extend them.',
+          ),
+          for (final c in needsDecision) CampaignCard(listing: c, onTap: () => _openListing(context, c)),
+          const SizedBox(height: 16),
+        ],
+        DonationSectionHeader('Donations', action: 'View all', onAction: () => _openAll(context, type: 'donation')),
+        current('donation', 'No ongoing donation campaigns.'),
+        const SizedBox(height: 16),
+        DonationSectionHeader('Sponsorships',
+            action: 'View all', onAction: () => _openAll(context, type: 'sponsorship')),
+        current('sponsorship', 'No ongoing sponsorships.'),
+        const SizedBox(height: 12),
+        Center(
+          child: OutlinedButton(
+            style: AppButtons.outline,
+            onPressed: () => _openAll(context),
+            child: const Text('View all campaigns'),
+          ),
+        ),
+        const SizedBox(height: 24),
+        DonationSectionHeader(
+          'Recent Donations',
+          action: 'View all',
+          onAction: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const DonationRecordsPage())),
+        ),
+        recent.when(
+          loading: () => const Padding(
+            padding: EdgeInsets.all(24),
+            child: Center(child: CircularProgressIndicator(color: AppColors.textPrimary)),
+          ),
+          error: (e, _) =>
+              Text('Could not load donations: $e', style: GoogleFonts.zain(fontSize: 14, color: AppColors.error)),
+          data: (items) => items.isEmpty
+              ? const _Muted('No donations yet.')
+              : Column(children: [for (final d in items) DonationRecordCard(record: d)]),
         ),
       ],
     );
   }
 }
 
-class _ProcessItem extends StatelessWidget {
-  final IconData icon;
-  final String label;
-  final VoidCallback onTap;
-  const _ProcessItem({required this.icon, required this.label, required this.onTap});
+class _Muted extends StatelessWidget {
+  final String text;
+  const _Muted(this.text);
 
   @override
-  Widget build(BuildContext context) {
-    return InkWell(
-      borderRadius: BorderRadius.circular(12),
-      onTap: onTap,
-      child: Padding(
-        padding: const EdgeInsets.all(8),
-        child: Column(
-          children: [
-            Icon(icon, size: 40, color: AppColors.textPrimary),
-            const SizedBox(height: 6),
-            Text(label,
-                textAlign: TextAlign.center,
-                style: GoogleFonts.zain(fontSize: 13, height: 1.1, color: AppColors.textPrimary)),
-          ],
-        ),
-      ),
-    );
-  }
+  Widget build(BuildContext context) => Padding(
+        padding: const EdgeInsets.symmetric(vertical: 6),
+        child: Text(text, style: GoogleFonts.zain(fontSize: 15, color: AppColors.textSecondary)),
+      );
 }

@@ -5,11 +5,11 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/features/generalhome/home_screen.dart';
-import 'package:respawnd1/features/organization/organization_member_pending_page.dart';
+import 'package:respawnd1/main.dart' show AuthWrapper;
 import 'package:respawnd1/features/organization/signup/organization_about_screen.dart';
-import 'package:respawnd1/features/pettransporter/service_screen.dart';
 import 'package:respawnd1/features/pettransporter/transporter_verification_screen.dart';
 import 'package:respawnd1/core/widgets/app_messages.dart';
+import 'package:respawnd1/core/models/organization/org_permission.dart';
 
 class OnboardingRoleScreen extends StatefulWidget {
   final String firstName;
@@ -28,6 +28,10 @@ class OnboardingRoleScreen extends StatefulWidget {
   @override
   State<OnboardingRoleScreen> createState() => _OnboardingRoleScreenState();
 }
+
+/// Not a users.role: saved as role 'organization' with signupKind
+/// 'independent', and the organization is created with kind 'independent'.
+const _independentRescuer = 'independent_rescuer';
 
 class _OnboardingRoleScreenState extends State<OnboardingRoleScreen> {
   String? _selectedRole;
@@ -49,10 +53,11 @@ class _OnboardingRoleScreenState extends State<OnboardingRoleScreen> {
       color: AppColors.pinkrspwn,
     ),
     _UserTypeOption(
-      role: 'rescue_volunteer',
+      role: _independentRescuer,
       title: 'Rescue Volunteer',
       description:
-      'Registered responder who can take on rescue cases when partner organizations are unavailable.',
+      'Rescue on your own or with a small team: take nearby cases and referrals, keep animal records, '
+          'transport rescues yourself and rehome them. Reviewed before you start.',
       color: AppColors.greenrspwn,
     ),
     _UserTypeOption(
@@ -101,7 +106,8 @@ class _OnboardingRoleScreenState extends State<OnboardingRoleScreen> {
         'lastName': widget.lastName,
         'name': fullName,
         'phone': widget.phone,
-        'role': _selectedRole,
+        'role': _selectedRole == _independentRescuer ? 'organization' : _selectedRole,
+        if (_selectedRole == _independentRescuer) 'signupKind': OrgKind.independent.name,
         // 'address': widget.address ?? '',
         'isVerified': false,
         'updatedAt': FieldValue.serverTimestamp(),
@@ -126,8 +132,12 @@ class _OnboardingRoleScreenState extends State<OnboardingRoleScreen> {
             ),
           );
           return;
-        } else if (_selectedRole == 'rescue_volunteer') {
-          nextPage = const ServiceScreen();
+        } else if (_selectedRole == _independentRescuer) {
+          Navigator.push(
+            context,
+            MaterialPageRoute(builder: (_) => const OrganizationAboutScreen(kind: OrgKind.independent)),
+          );
+          return;
         } else if (_selectedRole == 'organization') {
           Navigator.push(
             context,
@@ -139,7 +149,7 @@ class _OnboardingRoleScreenState extends State<OnboardingRoleScreen> {
           // the organization-creation wizard at all; they land straight on
           // the same "no organization joined yet" + invitations page
           // AuthWrapper would show on a restart for this role.
-          nextPage = const OrganizationMemberPendingPage();
+          nextPage = const AuthWrapper();
         } else {
           nextPage = const HomeScreen();
         }
@@ -193,7 +203,9 @@ class _OnboardingRoleScreenState extends State<OnboardingRoleScreen> {
                           setState(() => _selectedRole = option.role),
                       child: AnimatedContainer(
                         duration: const Duration(milliseconds: 180),
-                        height: 140,
+                        // Grows with the text (a fixed 140 overflowed the
+                        // longer descriptions on narrow phones / large fonts).
+                        constraints: const BoxConstraints(minHeight: 140),
                         padding: const EdgeInsets.all(20),
                         decoration: BoxDecoration(
                           color: option.color,

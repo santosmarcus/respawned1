@@ -99,6 +99,37 @@ class DonationAdminService {
         'inKindDescription': inKindDescription,
       });
 
+  /// Money taken out (functions/campaigns.js recordCashOut). [lines] (may
+  /// be empty: decide later) are {campaignId, category, label, amount}.
+  static Future<Map<String, dynamic>> recordCashOut({
+    required String requestId,
+    required String source,
+    required double amount,
+    DateTime? occurredAt,
+    String? note,
+    List<Map<String, dynamic>> lines = const [],
+  }) =>
+      _call('recordCashOut', {
+        'requestId': requestId,
+        'source': source,
+        'amount': amount,
+        if (occurredAt != null) 'occurredAtMs': occurredAt.millisecondsSinceEpoch,
+        if (note != null && note.trim().isNotEmpty) 'note': note.trim(),
+        'lines': lines,
+      });
+
+  /// Which fund(s) a waiting cash-out came from (assignCashOut).
+  static Future<Map<String, dynamic>> assignCashOut({
+    required String cashOutId,
+    required String requestId,
+    required List<Map<String, dynamic>> lines,
+  }) =>
+      _call('assignCashOut', {'cashOutId': cashOutId, 'requestId': requestId, 'lines': lines});
+
+  /// The spending was already recorded elsewhere (settleCashOut).
+  static Future<void> settleCashOut({required String cashOutId, required String note}) =>
+      _call('settleCashOut', {'cashOutId': cashOutId, 'note': note});
+
   static Future<void> reallocateExcess({
     required String sourceCampaignId,
     required String destinationCampaignId,

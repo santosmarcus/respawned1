@@ -1,13 +1,27 @@
 rules_version = '2';
 
 // Cloud Storage rules. Paths mirror the app's upload call sites; anything
-// not listed is denied. Staff checks read Firestore (firestore.get/exists),
-// the same documents and the same organization permissions as
-// firestore.rules (Admins and the owner can do everything; Staff what
-// members/{uid}.permissions allow, with the same legacy fallback):
+// not listed is denied. Staff checks read Firestore (firestore.get/exists)
+// with the same organization permissions as firestore.rules (Admins can do
+// everything; Staff what members/{uid}.permissions allow):
 //   - platform staff = users/{uid}.role 'admin'/'ngo_staff' (no money);
-//   - an account acts only for the organization users/{uid}.organizationId
-//     points at.
+//   - organization staff = an active members/{uid} doc of that
+//     organization (owners have one, role 'admin').
+//
+// LIMIT: a Storage rules evaluation may read at most TWO Firestore
+// documents (firebase.google.com/docs/storage/security/rules-conditions).
+// Going over makes the evaluation error, which denies the upload. The
+// emulator does not enforce this, so the rules tests can't catch it. Every
+// check below is ordered so the usual caller reads no more than two:
+//   - staffWith(orgId)  members doc                      (1)
+//   - myStaffWith       users doc + members doc          (2)
+//   - isPlatform        users doc                        (1)
+//   - path checks       the record's doc + members doc   (2)
+// Because of the limit, Storage can't also read organizations/{orgId}: the
+// organization's approval is enforced by firestore.rules on the records
+// that point at these files, not here. Accounts linked to an organization
+// with no members doc (the legacy default Staff fallback in firestore.rules)
+// get no Storage staff access; give them a members doc.
 //
 // Downloads in the app go through tokenized download URLs, which bypass
 // these rules; read rules here govern getDownloadURL/list from the SDK.
@@ -38,61 +52,54 @@ service firebase.storage {
 
     // ---- Organization permissions (see firestore.rules) ---------------------
 
-    function orgData(orgId) {
-      return firestore.get(/databases/(default)/documents/organizations/$(orgId)).data;
-    }
-
-    function hasMemberDoc(orgId) {
-      return firestore.exists(/databases/(default)/documents/organizations/$(orgId)/members/$(request.auth.uid));
-    }
-
+    // One read (get only, no exists(), so it is one document access). A
+    // missing doc makes the calling branch error, which denies it.
     function memberData(orgId) {
       return firestore.get(/databases/(default)/documents/organizations/$(orgId)/members/$(request.auth.uid)).data;
     }
 
-    function fullStaffPerms() {
-      return ['rescue', 'animals', 'care', 'adoptions', 'campaigns', 'financeView', 'volunteers', 'insights'];
+    function isActiveMember(m) {
+      return !(m.get('status', 'active') in ['inactive', 'removed', 'disabled']);
+    }
+
+    function defaultStaffPerms() {
+      return ['rescue', 'animals', 'care', 'adoptions', 'volunteers', 'insights'];
     }
 
     function permsOf(m) {
       return m.get('permissions',
-        m.get('role', '') == 'carer' ? ['care'] :
-          (m.get('facebookPublisher', false) == true ? fullStaffPerms().concat(['facebookPublish']) : fullStaffPerms()));
+        m.get('facebookPublisher', false) == true ? defaultStaffPerms().concat(['facebookPublish']) : defaultStaffPerms());
     }
 
+    // Active member of `orgId` that is an Admin or has any of `keys`.
+    // Reads the members doc only.
     function memberHasAny(orgId, keys) {
-      return orgData(orgId).get('verificationStatus', 'approved') == 'approved' && (
-        orgData(orgId).get('ownerId', '') == request.auth.uid ||
-        (!hasMemberDoc(orgId) && fullStaffPerms().hasAny(keys)) ||
-        (hasMemberDoc(orgId) &&
-          !(memberData(orgId).get('status', 'active') in ['inactive', 'removed', 'disabled']) &&
-          (memberData(orgId).get('role', '') == 'admin' || permsOf(memberData(orgId)).hasAny(keys)))
-      );
+      return isActiveMember(memberData(orgId)) &&
+        (memberData(orgId).get('role', '') == 'admin' || permsOf(memberData(orgId)).hasAny(keys));
     }
 
-    // Active member of `orgId` (their own organization) with any of `keys`.
+    // Staff of `orgId` with any of `keys`. Reads the members doc only.
     function staffWith(orgId, keys) {
-      return signedIn() && orgId is string && orgId != '' && myOrg() == orgId && memberHasAny(orgId, keys);
+      return signedIn() && orgId is string && orgId != '' && memberHasAny(orgId, keys);
     }
 
+    // Staff of the caller's own organization. Reads users + members.
     function myStaffWith(keys) {
       return signedIn() && myOrg() != '' && memberHasAny(myOrg(), keys);
     }
 
-    // A record owned by `orgId` ('' = not owned yet): platform staff, or
-    // that organization's staff with any of `keys` (the caller's own for '').
+    // A record owned by `orgId` ('' = not owned yet): that organization's
+    // staff with any of `keys`, platform staff, or for '' the caller's own
+    // organization's staff. Org staff are checked first so they read one
+    // document besides the record.
     function recordStaff(orgId, keys) {
-      return isPlatform() || (orgId != '' && staffWith(orgId, keys)) || (orgId == '' && myStaffWith(keys));
+      return (orgId != '' && staffWith(orgId, keys)) || isPlatform() || (orgId == '' && myStaffWith(keys));
     }
 
-    // The owner, or an active Admin member.
+    // An active Admin member (owners have an Admin members doc). Reads the
+    // members doc only.
     function isOrgAdminOf(orgId) {
-      return signedIn() && (
-        orgData(orgId).get('ownerId', '') == request.auth.uid ||
-        (hasMemberDoc(orgId) &&
-          memberData(orgId).get('role', '') == 'admin' &&
-          !(memberData(orgId).get('status', 'active') in ['inactive', 'removed', 'disabled']))
-      );
+      return signedIn() && isActiveMember(memberData(orgId)) && memberData(orgId).get('role', '') == 'admin';
     }
 
     // Uploads are capped at 100 MB (rescue videos are the largest). The app's
@@ -112,9 +119,10 @@ service firebase.storage {
     }
 
     // transporter_verification_screen.dart — ID and vehicle documents, read
-    // by the staff who verify transporters.
+    // by the staff and system admins who verify transporters.
     match /transporter_verifications/{uid}/{file=**} {
-      allow read: if isSelf(uid) || isPlatform() || myStaffWith(['volunteers']);
+      allow read: if isSelf(uid) || isPlatform() || myStaffWith(['volunteers']) ||
+        (signedIn() && userData().get('role', '') == 'system_admin');
       allow write: if isSelf(uid) && mediaUpload();
     }
 
@@ -122,6 +130,17 @@ service firebase.storage {
     match /collar_tags/{uid}/{file=**} {
       allow read: if signedIn();
       allow write: if isSelf(uid) && mediaUpload();
+    }
+
+    // ---- Lost / found pet alerts --------------------------------------------
+
+    // rescue_report_service.dart (submitLostPetReport) — photos and videos
+    // for a lost or found pet alert, stored under the group's first alert.
+    // Only that alert's reporter uploads; anyone signed in can view them.
+    match /petAlerts/{alertId}/{file} {
+      allow read: if signedIn();
+      allow write: if signedIn() && mediaUpload() &&
+        firestore.get(/databases/(default)/documents/petAlerts/$(alertId)).data.get('reporterId', '') == request.auth.uid;
     }
 
     // ---- Rescue cases --------------------------------------------------------
@@ -150,13 +169,20 @@ service firebase.storage {
         return caseData().get('verification', {}).get('riderId', '') == request.auth.uid;
       }
 
+      // The case's organization, or for an unowned report the organization
+      // checking it (verifyingOrganizationId), so their staff read only the
+      // case + their members doc.
+      function caseStaffOrg() {
+        return caseOrg() != '' ? caseOrg() : caseData().get('verifyingOrganizationId', '');
+      }
+
       // rescue_report_service.dart (media_N), transit_case_service.dart
       // (pickup/clinic/shelter verification photos), the reporter's live
       // proof (proof_N) and the verification visit photos (verify_N).
       match /{file} {
         allow read: if signedIn();
         allow write: if signedIn() && mediaUpload() &&
-          (isReporter() || isAssignedTransporter() || isVerifyingRider() || recordStaff(caseOrg(), ['rescue']));
+          (isReporter() || isAssignedTransporter() || isVerifyingRider() || recordStaff(caseStaffOrg(), ['rescue']));
       }
 
       // community_report_section.dart — anyone can attach a sighting photo.
@@ -210,7 +236,7 @@ service firebase.storage {
       allow read: if (folder == 'images' && signedIn()) ||
         (folder != 'images' && (recordStaff(animalOrgId(), ['rescue', 'animals', 'adoptions']) || staffWith(animalOrgId(), ['care'])));
       allow write: if mediaUpload() && (
-        (folder == 'images' && (isPlatform() || myStaffWith(['rescue', 'animals', 'adoptions']))) ||
+        (folder == 'images' && (myStaffWith(['rescue', 'animals', 'adoptions']) || isPlatform())) ||
         (folder in ['careUpdates', 'doseMedia'] && recordStaff(animalOrgId(), ['care', 'animals'])) ||
         (!(folder in ['images', 'careUpdates', 'doseMedia']) && recordStaff(animalOrgId(), ['rescue', 'animals']))
       );
@@ -247,7 +273,7 @@ service firebase.storage {
 
     match /organizations/{orgId} {
       // organization_profile_edit_page.dart — the org's Admins (and platform
-      // staff, who may edit org profiles).
+      // staff, who may edit org profiles). Members doc, then users doc.
       match /profile/{file=**} {
         allow read: if signedIn();
         allow write: if (isOrgAdminOf(orgId) || isPlatform()) && mediaUpload();
@@ -276,7 +302,7 @@ service firebase.storage {
     // organization who handle volunteers and events, or platform staff.
     match /events/{orgId}/{file} {
       allow read: if signedIn();
-      allow write: if mediaUpload() && (isPlatform() || staffWith(orgId, ['volunteers']));
+      allow write: if mediaUpload() && (staffWith(orgId, ['volunteers']) || isPlatform());
     }
 
     // ---- Donations ---------------------------------------------------------------

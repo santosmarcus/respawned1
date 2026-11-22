@@ -13,7 +13,7 @@ import 'package:respawnd1/features/admin/widgets/admin_tab_bar.dart';
 
 /// The one review flow for applications people send the organization
 /// (volunteers, pet transporters): the same tabs, card, approve and
-/// not-approve steps, and note rules for every kind.
+/// reject steps, and note rules for every kind.
 
 /// What an application card shows.
 class ApplicationSummary {
@@ -44,7 +44,7 @@ class ApplicationSummary {
 enum ApplicationTab {
   pending('Under review'),
   approved('Approved'),
-  rejected('Not approved');
+  rejected('Rejected');
 
   const ApplicationTab(this.label);
   final String label;
@@ -70,10 +70,10 @@ Future<bool> reviewApplication(
   } else {
     note = await showTextInputDialog(
       context,
-      title: 'Not approve this application?',
+      title: 'Reject this application?',
       message: 'The applicant sees this status and your note.',
       label: 'Note to the applicant',
-      confirmLabel: 'Not approve',
+      confirmLabel: 'Reject',
       destructive: true,
     );
     if (note == null) return false;
@@ -83,7 +83,7 @@ Future<bool> reviewApplication(
   try {
     await save(FirebaseAuth.instance.currentUser?.uid ?? '', note);
     messenger.showSnackBar(appSnackBar(
-      approve ? 'Application approved.' : 'Application not approved.',
+      approve ? 'Application approved.' : 'Application rejected.',
       kind: AppMessageKind.success,
     ));
     return true;
@@ -93,7 +93,7 @@ Future<bool> reviewApplication(
   }
 }
 
-/// A tabbed, searchable list of applications with approve / not-approve on
+/// A tabbed, searchable list of applications with approve / reject on
 /// each card.
 class ApplicationReviewPage<A> extends StatefulWidget {
   const ApplicationReviewPage({
@@ -104,9 +104,15 @@ class ApplicationReviewPage<A> extends StatefulWidget {
     required this.summarize,
     required this.approveMessage,
     required this.save,
+    this.showBackButton = true,
+    this.menuActions = const [],
   });
 
   final String title;
+
+  /// False when the page is a root tab (the system admin console).
+  final bool showBackButton;
+  final List<AdminMenuAction> menuActions;
 
   /// Plural, lower case: "volunteers".
   final String noun;
@@ -153,6 +159,8 @@ class _ApplicationReviewPageState<A> extends State<ApplicationReviewPage<A>> {
       appBar: AdminAppBar(
         title: widget.title,
         showDrawerButton: false,
+        showLeading: widget.showBackButton,
+        menuActions: widget.menuActions,
         bottom: AdminTabBar(
           tabs: [for (final t in ApplicationTab.values) AdminTab(t.label)],
           selectedIndex: _tab.index,
@@ -266,7 +274,7 @@ class ApplicationCard extends StatelessWidget {
               children: [
                 if (onReject != null)
                   Expanded(
-                    child: OutlinedButton(onPressed: onReject, style: AppButtons.dangerOutline, child: const Text('Not approve')),
+                    child: OutlinedButton(onPressed: onReject, style: AppButtons.dangerOutline, child: const Text('Reject')),
                   ),
                 if (onReject != null && onApprove != null) const SizedBox(width: 10),
                 if (onApprove != null)

@@ -1,10 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:respawnd1/features/generalhome/notifications_screen.dart';
-import 'package:respawnd1/features/generalhome/user_profile.dart';
 import 'package:respawnd1/app_theme.dart';
-import 'package:respawnd1/features/generalhome/home_screen.dart';
 import 'package:respawnd1/core/repos/volunteer_event_repository.dart';
+import 'package:respawnd1/core/utils/user_autofill.dart';
+import 'package:respawnd1/core/utils/validators.dart';
 import 'volunteer_page.dart';
 import 'volunteer_signup_success.dart';
 import 'package:respawnd1/core/widgets/app_messages.dart';
@@ -28,6 +27,24 @@ class _VolunteerSignUpPageState extends State<VolunteerSignUpPage> {
   bool _isLoading = false;
 
   @override
+  void initState() {
+    super.initState();
+    _prefill();
+  }
+
+  /// Fills in what the profile already has, so joining is one tap for most
+  /// people; nothing they've typed is overwritten.
+  Future<void> _prefill() async {
+    final me = await UserAutofill.load();
+    if (me == null || !mounted) return;
+    setState(() {
+      fillIfEmpty(_nameController, me.fullName);
+      fillIfEmpty(_emailController, me.email);
+      fillIfEmpty(_mobileController, me.phone);
+    });
+  }
+
+  @override
   void dispose() {
     _nameController.dispose();
     _emailController.dispose();
@@ -48,8 +65,11 @@ class _VolunteerSignUpPageState extends State<VolunteerSignUpPage> {
     final email = _emailController.text.trim();
     final mobile = _mobileController.text.trim();
 
-    if (name.isEmpty || email.isEmpty || mobile.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(appSnackBar('Please fill in all fields.', kind: AppMessageKind.error));
+    final problem = AppValidators.required(name, fieldName: 'Full name') ??
+        AppValidators.email(email) ??
+        AppValidators.phFlexiblePhone(mobile);
+    if (problem != null) {
+      ScaffoldMessenger.of(context).showSnackBar(appSnackBar(problem, kind: AppMessageKind.error));
       return;
     }
 
@@ -112,49 +132,18 @@ class _VolunteerSignUpPageState extends State<VolunteerSignUpPage> {
             style: GoogleFonts.tiltWarp(
                 fontSize: 20, color: AppColors.textPrimary)),
       ),
-      bottomNavigationBar: BottomNavigationBar(
-        currentIndex: 0,
-        items: const [
-          BottomNavigationBarItem(
-              icon: Icon(Icons.home_outlined),
-              activeIcon: Icon(Icons.home),
-              label: 'Home'),
-          BottomNavigationBarItem(
-              icon: Icon(Icons.notifications_outlined),
-              activeIcon: Icon(Icons.notifications),
-              label: 'Notifications'),
-          BottomNavigationBarItem(
-              icon: Icon(Icons.person_outline),
-              activeIcon: Icon(Icons.person),
-              label: 'My Profile'),
-        ],
-        onTap: (index) {
-          if (index == 0) {
-            Navigator.pushReplacement(
-              context,
-              MaterialPageRoute(builder: (context) => const HomeScreen()),
-            );
-          }
-          else if (index == 1) {
-            Navigator.pushReplacement(
-              context,
-              MaterialPageRoute(builder: (context) => const NotificationsScreen()),
-            );
-          }
-          else if (index == 2) {
-            Navigator.pushReplacement(
-              context,
-              MaterialPageRoute(builder: (context) => const UserProfile()),
-            );
-          }
-        },
-      ),
-      body: Padding(
+      body: SingleChildScrollView(
         padding: const EdgeInsets.symmetric(horizontal: 24),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const SizedBox(height: 32),
+            const SizedBox(height: 16),
+            Text(widget.event.title,
+                style: GoogleFonts.tiltWarp(fontSize: 17, color: AppColors.textPrimary)),
+            const SizedBox(height: 2),
+            Text('${widget.event.date} · ${widget.event.time}',
+                style: GoogleFonts.zain(fontSize: 13, color: AppColors.textSecondary)),
+            const SizedBox(height: 24),
 
             _fieldLabel('Full Name'),
             const SizedBox(height: 6),
@@ -178,9 +167,13 @@ class _VolunteerSignUpPageState extends State<VolunteerSignUpPage> {
                 controller: _mobileController,
                 keyboardType: TextInputType.phone),
 
-            const Spacer(),
-
-            SizedBox(
+          ],
+        ),
+      ),
+      bottomNavigationBar: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(24, 8, 24, 16),
+          child: SizedBox(
               width: double.infinity,
               child: ElevatedButton(
                 onPressed: _isLoading ? null : _handleSignUp,
@@ -195,9 +188,6 @@ class _VolunteerSignUpPageState extends State<VolunteerSignUpPage> {
                         fontSize: 16, color: AppColors.textPrimary)),
               ),
             ),
-
-            const SizedBox(height: 32),
-          ],
         ),
       ),
     );

@@ -1,42 +1,22 @@
-import 'dart:io';
-
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:image_picker/image_picker.dart';
 
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/core/utils/app_date_format.dart';
-import 'package:respawnd1/core/widgets/app_dialogs.dart';
+import 'package:respawnd1/features/adoption/post_adoption_page.dart';
 
-/// Adoption gap 10: one light check-in two weeks after a Community Adoption
+/// Adoption gap 10: one check-in two weeks after a Community Adoption
 /// (communityAdoptionCheckIns/{id}, scheduled by
-/// scheduleCommunityAdoptionCheckIn in functions/adoption_ops.js). No
-/// interview, agreement or schedule — just a photo and a line.
+/// scheduleCommunityAdoptionCheckIn in functions/index.js), answered on the
+/// post-adoption page (CommunityPostAdoptionPage in post_adoption_page.dart).
 CollectionReference<Map<String, dynamic>> get _checkIns =>
     FirebaseFirestore.instance.collection('communityAdoptionCheckIns');
 
 /// Shown on Home when the signed-in user owes a check-in.
 class CommunityCheckInBanner extends StatelessWidget {
   const CommunityCheckInBanner({super.key});
-
-  Future<void> _submit(BuildContext context, DocumentSnapshot<Map<String, dynamic>> d) async {
-    final photo = await ImagePicker().pickImage(source: ImageSource.camera, imageQuality: 80);
-    if (photo == null || !context.mounted) return;
-    final note = await showTextInputDialog(context,
-        title: 'How is ${d.data()?['animalName'] ?? 'your animal'}?', label: 'A short update', confirmLabel: 'Send', required: true);
-    if (note == null) return;
-    final ref = FirebaseStorage.instance.ref('communityAdoptions/${d.id}/checkin.jpg');
-    await ref.putFile(File(photo.path));
-    await d.reference.update({
-      'status': 'submitted',
-      'photoUrl': await ref.getDownloadURL(),
-      'note': note,
-      'submittedAt': FieldValue.serverTimestamp(),
-    });
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -58,9 +38,15 @@ class CommunityCheckInBanner extends StatelessWidget {
                     leading: const Icon(Icons.pets, color: AppColors.textPrimary),
                     title: Text('Check in on ${d.data()['animalName'] ?? 'your adopted animal'}',
                         style: GoogleFonts.zain(fontSize: 16, fontWeight: FontWeight.w700)),
-                    subtitle: const Text('Send a photo and a short update.'),
-                    trailing: const Icon(Icons.photo_camera),
-                    onTap: () => _submit(context, d),
+                    subtitle: const Text('Send your 2-week post-adoption check-in.'),
+                    trailing: const Icon(Icons.chevron_right),
+                    // The same post-adoption page as Home > Post Adoption.
+                    onTap: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => CommunityPostAdoptionPage(adoptionId: d.id),
+                      ),
+                    ),
                   ),
                 ),
             ],
@@ -101,6 +87,13 @@ class CommunityAdoptionsStaffPage extends StatelessWidget {
                 Card(
                   color: AppColors.surface,
                   child: ListTile(
+                    // Opens the adopter's post-adoption updates, read-only.
+                    onTap: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => CommunityPostAdoptionPage(adoptionId: d.id),
+                      ),
+                    ),
                     leading: d.data()['photoUrl'] is String
                         ? Image.network(d.data()['photoUrl'] as String, width: 48, height: 48, fit: BoxFit.cover)
                         : const Icon(Icons.pets),

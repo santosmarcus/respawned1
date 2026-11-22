@@ -105,3 +105,24 @@ test('an LGU referral shows only the media staff attached', () => {
   const orgReferral = buildReferralSnapshot({caseId: 'x', c: withVideo, referral: {type: 'anotherOrganization'}, org});
   assert.deepStrictEqual(orgReferral.photoUrls, ['https://firebasestorage.googleapis.com/a.jpg']);
 });
+
+test('shared-link referral: answers set the case state', () => {
+  const {linkReferralUpdate} = require('./referral_share_rules');
+  const link = {referralId: 'r1', state: 'waiting', previousStatus: 'pending_review'};
+  const at = 'now';
+  const taken = linkReferralUpdate(link, 'r1', {response: 'will_handle', name: 'Brgy 5', contact: '0917'}, at);
+  assert.strictEqual(taken.state, 'accepted');
+  assert.strictEqual(taken.answeredByName, 'Brgy 5');
+  assert.strictEqual(taken.answeredByContact, '0917');
+  assert.strictEqual(taken.previousStatus, 'pending_review');
+  assert.strictEqual(linkReferralUpdate(link, 'r1', {response: 'cannot_handle', name: 'A', note: 'full'}, at).state, 'declined');
+  assert.strictEqual(linkReferralUpdate(link, 'r1', {response: 'need_info', name: 'A', note: '?'}, at).state, 'needs_info');
+});
+
+test('shared-link referral: other referrals and taken cases are left alone', () => {
+  const {linkReferralUpdate} = require('./referral_share_rules');
+  const answer = {response: 'cannot_handle', name: 'B', note: 'no'};
+  assert.strictEqual(linkReferralUpdate(undefined, 'r1', answer, 'now'), null);
+  assert.strictEqual(linkReferralUpdate({referralId: 'r2', state: 'waiting'}, 'r1', answer, 'now'), null);
+  assert.strictEqual(linkReferralUpdate({referralId: 'r1', state: 'accepted'}, 'r1', answer, 'now'), null);
+});

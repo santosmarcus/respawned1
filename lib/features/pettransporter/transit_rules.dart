@@ -120,6 +120,15 @@ int capabilityDeclineCount(Map<String, dynamic> tally) {
 ({String status, String label, bool completesTransit}) statusAfterTreatmentAccepted(
     Map<String, dynamic> caseData,
     ) {
+  // An independent rescuer has no shelter: the rescuer collects the animal
+  // from the clinic, so the transporter's trip ends there.
+  if (caseData['ownerKind'] == 'independent') {
+    return (
+    status: 'in_treatment',
+    label: 'Treatment accepted. The rescuer will collect the animal from the clinic. Transport completed.',
+    completesTransit: true,
+    );
+  }
   final request = caseData['adoptionRequest'];
   final confirmedAdopter = request is Map && request['status'] == 'approved';
   if (confirmedAdopter) {

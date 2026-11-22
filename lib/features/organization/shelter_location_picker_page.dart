@@ -95,15 +95,17 @@ class _ShelterLocationPickerPageState extends ConsumerState<ShelterLocationPicke
   @override
   void initState() {
     super.initState();
-    final name = widget.initialName;
-    final placeId = widget.initialPlaceId;
+    // A saved pin only needs its coordinates to show again; older saves may
+    // have no name or place id.
     final lat = widget.initialLat;
     final lng = widget.initialLng;
-    if (name != null && name.isNotEmpty && placeId != null && lat != null && lng != null) {
+    if (lat != null && lng != null) {
+      final name = widget.initialName?.trim() ?? '';
+      final address = widget.initialAddress?.trim() ?? '';
       _selected = ClinicSearchResult(
-        placeId: placeId,
-        name: name,
-        address: widget.initialAddress ?? '',
+        placeId: widget.initialPlaceId ?? '',
+        name: name.isNotEmpty ? name : (address.isNotEmpty ? address : 'Saved location'),
+        address: address,
         lat: lat,
         lng: lng,
       );
@@ -160,7 +162,7 @@ class _ShelterLocationPickerPageState extends ConsumerState<ShelterLocationPicke
           organizationId: widget.organizationId!,
           name: selected.name,
           address: selected.address,
-          placeId: selected.placeId,
+          placeId: selected.placeId.isEmpty ? null : selected.placeId,
           lat: selected.lat,
           lng: selected.lng,
         );
@@ -233,6 +235,10 @@ class _ShelterLocationPickerPageState extends ConsumerState<ShelterLocationPicke
                 child: SizedBox(
                   height: 140,
                   child: GoogleMap(
+                    // A lite-mode map is a still image that only reads
+                    // initialCameraPosition once; a new key per pin rebuilds
+                    // it so the preview moves to each new selection.
+                    key: ValueKey('shelter-map-${selected.lat},${selected.lng}'),
                     initialCameraPosition: CameraPosition(target: LatLng(selected.lat, selected.lng), zoom: 15),
                     markers: {
                       Marker(markerId: const MarkerId('shelter'), position: LatLng(selected.lat, selected.lng)),

@@ -8,7 +8,8 @@ import 'package:image_picker/image_picker.dart';
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/features/collartag/collar_tag_data_model.dart';
 import 'package:respawnd1/features/collartag/collar_id_tag_screen.dart';
-import 'package:respawnd1/features/collartag/collar_tag_list_screen.dart';
+import 'package:respawnd1/features/collartag/collar_tag_form_screen.dart';
+import 'package:respawnd1/features/collartag/lost_pet_location_picker.dart';
 import 'package:respawnd1/core/models/adoption/adoption_application.dart';
 import 'package:respawnd1/core/models/adoption/follow_up_record.dart';
 import 'package:respawnd1/core/models/adoption/return_request.dart';
@@ -192,8 +193,8 @@ class PostAdoptionMonitoringPage extends StatelessWidget {
                                           isReturnApproved
                                               ? 'Your return request has been approved. Tap to view pick-up details.'
                                               : returnRequest.isOrgInitiated
-                                                  ? 'The organization has initiated a return. It is awaiting processing.'
-                                                  : 'A return request has been submitted and is awaiting processing.',
+                                              ? 'The organization has initiated a return. It is awaiting processing.'
+                                              : 'A return request has been submitted and is awaiting processing.',
                                           style: GoogleFonts.zain(
                                             fontSize: 12,
                                             fontWeight: FontWeight.w600,
@@ -284,14 +285,14 @@ class PostAdoptionMonitoringPage extends StatelessWidget {
                               return InkWell(
                                 onTap: viewable
                                     ? () => Navigator.push(
-                                          context,
-                                          MaterialPageRoute(
-                                            builder: (_) => PostAdoptionFollowUpDetailPage(
-                                              adoptionId: adoptionId,
-                                              followUpId: f.id,
-                                            ),
-                                          ),
-                                        )
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (_) => PostAdoptionFollowUpDetailPage(
+                                      adoptionId: adoptionId,
+                                      followUpId: f.id,
+                                    ),
+                                  ),
+                                )
                                     : null,
                                 child: Padding(
                                   padding: const EdgeInsets.symmetric(
@@ -457,6 +458,28 @@ class PostAdoptionMonitoringPage extends StatelessWidget {
             ),
             const SizedBox(height: 10),
             _DialogOptionButton(
+              icon: Icons.nfc,
+              label: _resolveCollarTagId(data) == null
+                  ? 'Link ID Tag'
+                  : 'Change Linked ID Tag',
+              onTap: () async {
+                Navigator.pop(dialogContext);
+                final linked = await _linkIdTag(
+                  context,
+                  adoptionId: adoptionId,
+                  animalName: animalName,
+                  data: data,
+                );
+                if (linked != null && !linked.created && context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(appSnackBar(
+                    'ID tag linked to $animalName.',
+                    kind: AppMessageKind.success,
+                  ));
+                }
+              },
+            ),
+            const SizedBox(height: 10),
+            _DialogOptionButton(
               icon: Icons.assignment_return_outlined,
               label: isReturnRequested
                   ? 'Return Already Requested'
@@ -496,25 +519,8 @@ class PostAdoptionMonitoringPage extends StatelessWidget {
   // already verified), which is what distinguishes it from a "fresh",
   // unidentified lost/stray report filed through the general Rescue form. ----
 
-  // Single integration point for wiring in the animal-info-page → adoption
-  // listing tag mirroring later. Not implemented yet (set aside per
-  // requirements), but every read in this file goes through here so that
-  // whichever convention the mirroring lands on, only this method needs to
-  // change — nothing else in the report-lost flow does.
-  //
-  // Currently checked, in order:
-  //   1. Top-level 'collarTagId' on the adoption doc — the simplest form of
-  //      mirroring, written once when the animal's tag is linked.
-  //   2. 'personal.collarTagId' — nested alongside the other animal fields
-  //      already mirrored here (animalName, organizationName), in case the
-  //      mirror write-path follows that existing convention instead.
-  //
-  // Deferred / not yet implemented:
-  //   3. A live fallback lookup by animalId (e.g. reading
-  //      'animals/{animalId}.collarTagId' directly) for the window before
-  //      mirroring exists. Add it here — and only here — once the animal
-  //      document's field name/collection is finalized; this would make the
-  //      method async, so callers already `await` it in anticipation.
+  // The ID tag linked to this adoption: top-level 'collarTagId' (written by
+  // Link ID Tag, _linkIdTag), or 'personal.collarTagId' for older records.
   String? _resolveCollarTagId(Map<String, dynamic> data) {
     final direct = data['collarTagId'] as String?;
     if (direct != null && direct.isNotEmpty) return direct;
@@ -524,6 +530,114 @@ class PostAdoptionMonitoringPage extends StatelessWidget {
     if (nested != null && nested.isNotEmpty) return nested;
 
     return null;
+  }
+
+  // ---- Link ID Tag: picks one of the adopter's registered collar tags, or
+  // creates one for the adopted pet, and saves it on the adoption
+  // (adoptions/{id}.collarTagId, read by _resolveCollarTagId). The tag gets
+  // linkedAdoptionId back. Returns null when nothing was linked; `created`
+  // is true for a new tag (the user is then on its ID card). ----
+  Future<({String tagId, bool created})?> _linkIdTag(
+      BuildContext context, {
+        required String adoptionId,
+        required String animalName,
+        required Map<String, dynamic> data,
+      }) async {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return null;
+
+    final picked = await showModalBottomSheet<String>(
+      context: context,
+      backgroundColor: AppColors.background,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (_) => _LinkTagSheet(
+        uid: uid,
+        animalName: animalName,
+        currentTagId: _resolveCollarTagId(data),
+      ),
+    );
+    if (picked == null || !context.mounted) return null;
+
+    String? tagId = picked;
+    var created = false;
+    if (picked == _LinkTagSheet.createNew) {
+      final prefill = await _tagPrefill(data, animalName);
+      if (!context.mounted) return null;
+      tagId = await Navigator.push<String>(
+        context,
+        MaterialPageRoute(
+          builder: (_) => CollarTagFormScreen(prefill: prefill),
+        ),
+      );
+      created = true;
+      if (tagId == null) return null;
+    }
+
+    try {
+      final db = FirebaseFirestore.instance;
+      await db.collection('adoptions').doc(adoptionId).update({
+        'collarTagId': tagId,
+        'collarTagLinkedAt': FieldValue.serverTimestamp(),
+      });
+      // The tag remembers the adoption too (both copies of it).
+      final link = {'linkedAdoptionId': adoptionId};
+      await Future.wait([
+        db.collection('collarTags').doc(tagId).set(link, SetOptions(merge: true)),
+        db.collection('users').doc(uid).collection('collarTags').doc(tagId)
+            .set(link, SetOptions(merge: true)),
+      ]).catchError((_) => <void>[]);
+      if (created && context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(appSnackBar(
+          'ID tag created and linked to $animalName. Use Mark as Lost on '
+              'the ID card if $animalName is missing.',
+          kind: AppMessageKind.success,
+        ));
+      }
+      return (tagId: tagId, created: created);
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(appSnackBar(
+          'Could not link the ID tag: $e',
+          kind: AppMessageKind.error,
+        ));
+      }
+      return null;
+    }
+  }
+
+  /// A new tag's starting details from the adopted animal's record.
+  Future<Map<String, dynamic>> _tagPrefill(
+      Map<String, dynamic> data, String animalName) async {
+    final personal = (data['personal'] as Map?) ?? {};
+    final out = <String, dynamic>{
+      'name': animalName,
+      'species': personal['species'],
+    };
+    final animalId = personal['animalRecordId'] as String?;
+    if (animalId == null || animalId.isEmpty) return out;
+    try {
+      final a = (await FirebaseFirestore.instance
+          .collection('animals')
+          .doc(animalId)
+          .get())
+          .data();
+      if (a == null) return out;
+      return {
+        ...out,
+        'species': a['species'] ?? personal['species'],
+        'breed': a['breed'],
+        'sex': a['sex'],
+        'description': a['description'],
+        'spayedNeutered': a['spayedNeutered'] == true,
+        'vaccinated': a['vaccinated'] == true,
+        'allergies': a['allergies'],
+      };
+    } catch (_) {
+      return out;
+    }
   }
 
   Future<void> _reportLostPet(
@@ -583,57 +697,42 @@ class PostAdoptionMonitoringPage extends StatelessWidget {
 
       if (!context.mounted) return;
       final confirmed = await showConfirmActionDialog(context, title: 'Report $animalName as lost?', message: 'This uses $animalName\'s registered ID tag. Their status '
-                'switches to "Lost", your contact info becomes visible to '
-                'anyone who scans the tag, and you\'ll be notified here to '
-                'chat the moment someone finds them.', confirmLabel: 'Report Lost');
+          'switches to "Lost", $animalName shows on the Explore Reports map '
+          'and nearby users are alerted, and you\'ll be notified here to '
+          'chat the moment someone scans the tag.', confirmLabel: 'Report Lost');
 
       if (confirmed != true || !context.mounted) return;
 
-      final uid = FirebaseAuth.instance.currentUser?.uid;
-      final ownerId = tag.ownerId ?? uid;
+      // Where the pet was last seen: the map pin and the nearby alerts.
+      final lastSeen = await Navigator.push<PickedLostLocation>(
+        context,
+        MaterialPageRoute(
+          builder: (_) => LastSeenLocationPicker(petName: animalName),
+        ),
+      );
+      if (lastSeen == null || !context.mounted) return;
 
-      final update = <String, dynamic>{
-        'status': 'lost',
-        // Marks this as originating from an already-identified adopted pet
-        // (verified via its registered tag) rather than a fresh, unknown
-        // sighting — admin/matching views can rely on the tag scan instead
-        // of heuristic species/photo matching.
-        'lastReportSource': 'adoption',
-        'linkedAdoptionId': adoptionId,
-      };
-
-      await tagRef.set(update, SetOptions(merge: true));
-
-      if (ownerId != null) {
-        await FirebaseFirestore.instance
-            .collection('users')
-            .doc(ownerId)
-            .collection('collarTags')
-            .doc(collarTagId)
-            .set(update, SetOptions(merge: true));
-      }
-
-      // Cross-post to the shared Lost & Found board so the community can
-      // help keep an eye out too — flagged with the same 'adoption' source
-      // so it's treated as identity-verified rather than a fresh report.
+      // Same as "Mark as Lost" on the ID card: the tag goes lost and a Lost
+      // & Found report with the pin is opened, flagged as coming from this
+      // adoption (identity verified by the registered tag).
       final personal = (data['personal'] as Map?) ?? {};
-      await FirebaseFirestore.instance.collection('petAlerts').add({
-        'type': 'lost',
-        'source': 'adoption',
-        'collarTagId': collarTagId,
-        'linkedAdoptionId': adoptionId,
-        'reporterId': uid,
-        'petName': tag.name.isNotEmpty ? tag.name : animalName,
-        'species': personal['species'],
-        'breed': tag.breed,
-        'colorMarkings': tag.colorMarkings,
-        'photoUrls': tag.petImageUrl != null && tag.petImageUrl!.isNotEmpty
-            ? [tag.petImageUrl]
-            : [],
-        'status': 'open',
-        'createdAt': Timestamp.now(),
-        'serverCreatedAt': FieldValue.serverTimestamp(),
-      });
+      if (tag.name.isEmpty) tag.name = animalName;
+      await CollarTagLostFound.markLost(
+        tag,
+        lat: lastSeen.lat,
+        lng: lastSeen.lng,
+        address: lastSeen.address,
+        species: personal['species'] as String?,
+        extraTagFields: {
+          'lastReportSource': 'adoption',
+          'linkedAdoptionId': adoptionId,
+        },
+        extraAlertFields: {
+          'source': 'adoption',
+          'linkedAdoptionId': adoptionId,
+        },
+      );
+      final update = <String, dynamic>{'status': 'lost'};
 
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -680,12 +779,11 @@ class PostAdoptionMonitoringPage extends StatelessWidget {
               fontSize: 16, color: AppColors.textPrimary),
         ),
         content: Text(
-          '$animalName doesn\'t have a registered collar/NFC ID tag linked '
-              'to this adoption yet. Linking one gives the fastest path to '
-              'reunification if $animalName ever goes missing — anyone who '
-              'scans the tag can reach you directly.\n\nYou can still file '
-              'a basic lost report now, or link a tag first for the full '
-              'scan-and-chat reunification flow.',
+          '$animalName doesn\'t have a collar/NFC ID tag linked to this '
+              'adoption yet. Link one of your registered tags (or create one '
+              'now) for the fastest path home: anyone who scans the tag can '
+              'reach you directly.\n\nYou can still file a basic lost report '
+              'without a tag.',
           style:
           GoogleFonts.zain(fontSize: 13.5, color: AppColors.textSecondary),
         ),
@@ -709,13 +807,22 @@ class PostAdoptionMonitoringPage extends StatelessWidget {
                 style: GoogleFonts.zain(color: AppColors.textPrimary)),
           ),
           ElevatedButton(
-            onPressed: () {
+            onPressed: () async {
               Navigator.pop(dialogContext);
-              Navigator.push(
+              final linked = await _linkIdTag(
                 context,
-                MaterialPageRoute(
-                  builder: (_) => const CollarTagHomeScreen(),
-                ),
+                adoptionId: adoptionId,
+                animalName: animalName,
+                data: data,
+              );
+              // A tag that already existed: carry on with the report. A
+              // new one opens its ID card, where Mark as Lost does the same.
+              if (linked == null || linked.created || !context.mounted) return;
+              _reportLostPet(
+                context,
+                adoptionId: adoptionId,
+                animalName: animalName,
+                data: {...data, 'collarTagId': linked.tagId},
               );
             },
             style: AppButtons.primary,
@@ -733,24 +840,41 @@ class PostAdoptionMonitoringPage extends StatelessWidget {
         required String animalName,
         required Map<String, dynamic> data,
       }) async {
+    // Where the pet was last seen. Without it the report never reached the
+    // map, nearby users or matching (they all need a location).
+    final lastSeen = await Navigator.push<PickedLostLocation>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => LastSeenLocationPicker(petName: animalName),
+      ),
+    );
+    if (lastSeen == null || !context.mounted) return;
+
     try {
       final uid = FirebaseAuth.instance.currentUser?.uid;
       final personal = (data['personal'] as Map?) ?? {};
 
-      await FirebaseFirestore.instance.collection('petAlerts').add({
+      final ref = await FirebaseFirestore.instance.collection('petAlerts').add({
         'type': 'lost',
         // No verified tag on file yet — matching still has to fall back to
         // manual/heuristic review, same as a fresh report, so this is kept
         // distinguishable from the tag-verified 'adoption' source above.
         'source': 'adoption_no_tag',
         'linkedAdoptionId': adoptionId,
+        'groupId': null,
         'reporterId': uid,
         'petName': animalName,
         'species': personal['species'],
+        'address': lastSeen.address,
+        'lat': lastSeen.lat,
+        'lng': lastSeen.lng,
+        'lastSeenDate': Timestamp.now(),
+        'photoUrls': [],
         'status': 'open',
         'createdAt': Timestamp.now(),
         'serverCreatedAt': FieldValue.serverTimestamp(),
       });
+      await ref.update({'groupId': ref.id});
 
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -859,19 +983,19 @@ class PostAdoptionFollowUpDetailPage extends StatelessWidget {
   }
 
   Widget _detail(String label, String value) => Padding(
-        padding: const EdgeInsets.only(bottom: 8),
-        child: Row(
-          children: [
-            SizedBox(
-              width: 90,
-              child: Text(label, style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary)),
-            ),
-            Expanded(
-              child: Text(value, style: GoogleFonts.zain(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
-            ),
-          ],
+    padding: const EdgeInsets.only(bottom: 8),
+    child: Row(
+      children: [
+        SizedBox(
+          width: 90,
+          child: Text(label, style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary)),
         ),
-      );
+        Expanded(
+          child: Text(value, style: GoogleFonts.zain(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
+        ),
+      ],
+    ),
+  );
 }
 
 class _AnswersViewer extends StatelessWidget {
@@ -1006,6 +1130,144 @@ class _MoreOptionsButton extends StatelessWidget {
           ),
           child: const Icon(Icons.more_vert,
               size: 26, color: AppColors.textPrimary),
+        ),
+      ),
+    );
+  }
+}
+
+/// The adopter's registered collar tags to link to an adoption, plus
+/// "Create a new ID tag". Pops with the chosen tag's id, or [createNew].
+class _LinkTagSheet extends StatelessWidget {
+  static const createNew = '__create_new__';
+
+  final String uid;
+  final String animalName;
+  final String? currentTagId;
+
+  const _LinkTagSheet({
+    required this.uid,
+    required this.animalName,
+    required this.currentTagId,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return SafeArea(
+      child: ConstrainedBox(
+        constraints: BoxConstraints(
+            maxHeight: MediaQuery.of(context).size.height * 0.75),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 16, 16, 12),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text('Link an ID tag to $animalName',
+                  style: GoogleFonts.tiltWarp(
+                      fontSize: 16, color: AppColors.textPrimary)),
+              const SizedBox(height: 4),
+              Text(
+                'Pick the collar tag $animalName wears, or create one.',
+                style: GoogleFonts.zain(
+                    fontSize: 13, color: AppColors.textSecondary),
+              ),
+              const SizedBox(height: 12),
+              Flexible(
+                child: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+                  stream: FirebaseFirestore.instance
+                      .collection('users')
+                      .doc(uid)
+                      .collection('collarTags')
+                      .snapshots(),
+                  builder: (context, snap) {
+                    if (!snap.hasData) {
+                      return const Padding(
+                        padding: EdgeInsets.all(20),
+                        child: Center(
+                          child: CircularProgressIndicator(
+                              color: AppColors.greenrspwn),
+                        ),
+                      );
+                    }
+                    final tags = snap.data!.docs
+                        .map((d) => CollarTagData.fromFirestore(d.data(), d.id))
+                        .toList();
+                    if (tags.isEmpty) {
+                      return Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                        child: Text(
+                          'You have no registered ID tags yet.',
+                          textAlign: TextAlign.center,
+                          style: GoogleFonts.zain(
+                              fontSize: 13, color: AppColors.textSecondary),
+                        ),
+                      );
+                    }
+                    return ListView.separated(
+                      shrinkWrap: true,
+                      itemCount: tags.length,
+                      separatorBuilder: (_, _) => const SizedBox(height: 8),
+                      itemBuilder: (context, i) {
+                        final t = tags[i];
+                        final linked = t.tagId == currentTagId;
+                        return ListTile(
+                          onTap: () => Navigator.pop(context, t.tagId),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(14),
+                            side: BorderSide(
+                              color: linked
+                                  ? AppColors.greenrspwn
+                                  : AppColors.slaterspwn,
+                              width: 1.5,
+                            ),
+                          ),
+                          leading: CircleAvatar(
+                            backgroundColor: AppColors.lavenderrspwn,
+                            backgroundImage: t.petImageUrl?.isNotEmpty == true
+                                ? NetworkImage(t.petImageUrl!)
+                                : null,
+                            child: t.petImageUrl?.isNotEmpty == true
+                                ? null
+                                : const Icon(Icons.pets,
+                                color: AppColors.textPrimary),
+                          ),
+                          title: Text(
+                            t.name.isEmpty ? 'Unnamed pet' : t.name,
+                            style: GoogleFonts.zain(
+                                fontSize: 15,
+                                fontWeight: FontWeight.w700,
+                                color: AppColors.textPrimary),
+                          ),
+                          subtitle: Text(
+                            [
+                              if (t.breed.isNotEmpty) t.breed,
+                              if (t.status == 'lost') 'Reported lost',
+                            ].join(' · '),
+                            style: GoogleFonts.zain(
+                                fontSize: 12.5,
+                                color: AppColors.textSecondary),
+                          ),
+                          trailing: linked
+                              ? const Icon(Icons.check_circle,
+                              color: AppColors.greenrspwn)
+                              : null,
+                        );
+                      },
+                    );
+                  },
+                ),
+              ),
+              const SizedBox(height: 12),
+              ElevatedButton.icon(
+                onPressed: () => Navigator.pop(context, createNew),
+                style: AppButtons.primary,
+                icon: const Icon(Icons.add, size: 18),
+                label: Text('Create a new ID tag for $animalName',
+                    style: GoogleFonts.zain(fontWeight: FontWeight.w600)),
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -2033,7 +2295,7 @@ class _ReturnApprovedPageState extends State<ReturnApprovedPage> {
                               Expanded(
                                 child: Text(
                                   'Pick Up Visit  ·  ${_formatDate(pickupDate)} ${pickupDate.hour.toString().padLeft(2, '0')}:${pickupDate.minute.toString().padLeft(2, '0')}'
-                                  '${pickupAddress != null && pickupAddress.isNotEmpty ? '  ·  $pickupAddress' : ''}',
+                                      '${pickupAddress != null && pickupAddress.isNotEmpty ? '  ·  $pickupAddress' : ''}',
                                   style: GoogleFonts.zain(
                                     fontSize: 13,
                                     fontWeight: FontWeight.w600,
@@ -2090,7 +2352,9 @@ class _ReturnApprovedPageState extends State<ReturnApprovedPage> {
   }
 }
 
-// Home-screen "Post Adoption
+// Home-screen "Post Adoption": shelter adoptions (adoptions/{id}) and
+// Community Adoptions (communityAdoptions/{id}, CommunityPostAdoptionPage below),
+// newest first.
 class PostAdoption extends StatelessWidget {
   const PostAdoption({super.key});
 
@@ -2101,6 +2365,16 @@ class PostAdoption extends StatelessWidget {
       return _emptyState('Sign in to see your adopted pets.');
     }
 
+    return CommunityAdoptionsForAdopter(
+      builder: (context, community) => _shelterAndCommunity(context, uid, community),
+    );
+  }
+
+  Widget _shelterAndCommunity(
+      BuildContext context,
+      String uid,
+      List<CommunityAdoptionSummary> community,
+      ) {
     return StreamBuilder<QuerySnapshot>(
       stream: FirebaseFirestore.instance
           .collection('adoptions')
@@ -2162,18 +2436,33 @@ class PostAdoption extends StatelessWidget {
             return bDate.compareTo(aDate);
           });
 
-        if (docs.isEmpty) {
+        if (docs.isEmpty && community.isEmpty) {
           return _emptyState('No adopted pets yet.');
         }
+
+        // Shelter (index into docs) and community entries, newest first.
+        final entries = <({DateTime date, int? shelter, CommunityAdoptionSummary? community})>[
+          for (var i = 0; i < docs.length; i++)
+            (
+            date: extractAdoptionCompletedDate(docs[i].data() as Map<String, dynamic>) ??
+                DateTime(0),
+            shelter: i,
+            community: null,
+            ),
+          for (final c in community)
+            (date: c.adoptedAt ?? DateTime(0), shelter: null, community: c),
+        ]..sort((a, b) => b.date.compareTo(a.date));
 
         return ListView.separated(
           shrinkWrap: true,
           physics: const NeverScrollableScrollPhysics(),
           padding: const EdgeInsets.symmetric(horizontal: 16),
-          itemCount: docs.length,
+          itemCount: entries.length,
           separatorBuilder: (_, _) => const SizedBox(height: 10),
           itemBuilder: (context, i) {
-            final doc = docs[i];
+            final c = entries[i].community;
+            if (c != null) return _communityCard(context, c);
+            final doc = docs[entries[i].shelter!];
             final data = doc.data() as Map<String, dynamic>;
             final personal = (data['personal'] as Map?) ?? {};
             final animalName = personal['animalName'] as String? ?? 'Pet';
@@ -2241,6 +2530,73 @@ class PostAdoption extends StatelessWidget {
     );
   }
 
+  /// A Community Adoption on Home: opens its post-adoption page, where the
+  /// adopter shares updates for the first two weeks.
+  Widget _communityCard(BuildContext context, CommunityAdoptionSummary c) {
+    final windowOpen =
+        c.updateWindowEnd != null && DateTime.now().isBefore(c.updateWindowEnd!);
+    return GestureDetector(
+      onTap: () => Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => CommunityPostAdoptionPage(adoptionId: c.id),
+        ),
+      ),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        decoration: BoxDecoration(
+          color: AppColors.background,
+          borderRadius: BorderRadius.circular(14),
+          boxShadow: [
+            BoxShadow(
+              color: AppColors.slaterspwn,
+              blurRadius: 1,
+              offset: const Offset(0, 3),
+            ),
+          ],
+        ),
+        child: Row(
+          children: [
+            const Icon(Icons.diversity_1_outlined, color: AppColors.greenrspwn),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    c.name,
+                    style: GoogleFonts.tiltWarp(
+                      fontSize: 14,
+                      fontWeight: FontWeight.bold,
+                      color: AppColors.textPrimary,
+                    ),
+                  ),
+                  Text(
+                    [
+                      'Community Adoption',
+                      if (c.adoptedAt != null) 'adopted ${_formatDate(c.adoptedAt!)}',
+                    ].join(' · '),
+                    style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary),
+                  ),
+                  if (windowOpen)
+                    Text(
+                      'Share updates until ${_formatDate(c.updateWindowEnd!)}',
+                      style: GoogleFonts.zain(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        color: AppColors.textPrimary,
+                      ),
+                    ),
+                ],
+              ),
+            ),
+            const Icon(Icons.chevron_right, color: AppColors.textSecondary),
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _emptyState(String message) {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -2266,6 +2622,976 @@ class PostAdoption extends StatelessWidget {
       ),
     );
   }
+}
+
+// ---- Community Adoption post-adoption -------------------------------------
+//
+// The same screens as a shelter adoption's post-adoption monitoring (header
+// photo, Details, Post-Adoption Monitoring timeline, Send Update, the
+// follow-up form and its detail page), for a Community Adoption
+// (communityAdoptions/{id}). Opened by the adopter from Post Adoption on
+// Home, and read-only by the reporter who rehomed the animal (from the
+// adoption request) and by organization staff (Community adoptions).
+//
+// For the first two weeks after the adoption the adopter can send updates
+// (the same questions as a shelter follow-up) as often as they like. At two
+// weeks they are asked for the one check-in (scheduleCommunityAdoptionCheckIn
+// and sendCommunityAdoptionCheckIns in functions/index.js), answered with the
+// same form. Both are saved to communityAdoptionCheckIns/{id}/updates; the
+// check-in also marks the check-in doc submitted. The check-in doc shares
+// the adoption's id. firestore.rules lets the adopter, the reporter who
+// rehomed the animal (rehomedById) and the area's organization staff read
+// it and its updates; only the adopter writes.
+
+CollectionReference<Map<String, dynamic>> get communityAdoptionsRef =>
+    FirebaseFirestore.instance.collection('communityAdoptions');
+CollectionReference<Map<String, dynamic>> get communityCheckInsRef =>
+    FirebaseFirestore.instance.collection('communityAdoptionCheckIns');
+
+/// How long after a Community Adoption the adopter can send updates.
+/// Keep equal to COMMUNITY_CHECKIN_DAYS in functions/community_checkin_rules.js.
+const int kCommunityUpdateWindowDays = 14;
+
+DateTime? _tsDate(Object? v) => v is Timestamp ? v.toDate() : null;
+
+/// The end of the update window: the check-in's due date, else two weeks
+/// after the adoption.
+DateTime? communityUpdateWindowEnd(
+    Map<String, dynamic>? adoption,
+    Map<String, dynamic>? checkIn,
+    ) {
+  final due = _tsDate(checkIn?['dueAt']);
+  if (due != null) return due;
+  final adopted = _tsDate(adoption?['adoptedAt']) ?? _tsDate(adoption?['createdAt']);
+  return adopted?.add(const Duration(days: kCommunityUpdateWindowDays));
+}
+
+/// The animal's name as shown on post-adoption screens.
+String communityAnimalName(Map<String, dynamic>? a, {String fallback = 'Your pet'}) {
+  final name = (a?['name'] as String?)?.trim() ?? '';
+  if (name.isNotEmpty) return name;
+  final species = (a?['species'] as String?)?.trim() ?? '';
+  return species.isNotEmpty ? species : fallback;
+}
+
+/// One post-adoption update (communityAdoptionCheckIns/{id}/updates/{u}).
+/// [isCheckIn] marks the answer to the 2-week check-in. Updates sent before
+/// the form matched shelter follow-ups have only [photoUrl] and [note].
+class CommunityUpdate {
+  final String id;
+  final bool isCheckIn;
+  final String? howIsPetDoing;
+  final List<String> healthConcerns;
+  final String? healthConcernsOther;
+  final String? vaccinated;
+  final List<String> images;
+  final String notes;
+  final DateTime? createdAt;
+
+  const CommunityUpdate({
+    required this.id,
+    required this.isCheckIn,
+    this.howIsPetDoing,
+    this.healthConcerns = const [],
+    this.healthConcernsOther,
+    this.vaccinated,
+    this.images = const [],
+    this.notes = '',
+    this.createdAt,
+  });
+
+  factory CommunityUpdate.fromMap(String id, Map<String, dynamic> d) {
+    final images = List<String>.from(d['images'] ?? const []);
+    final legacyPhoto = d['photoUrl'] as String?;
+    if (images.isEmpty && legacyPhoto != null && legacyPhoto.isNotEmpty) {
+      images.add(legacyPhoto);
+    }
+    return CommunityUpdate(
+      id: id,
+      isCheckIn: d['kind'] == 'checkin',
+      howIsPetDoing: d['howIsPetDoing'] as String?,
+      healthConcerns: List<String>.from(d['healthConcerns'] ?? const []),
+      healthConcernsOther: d['healthConcernsOther'] as String?,
+      vaccinated: d['vaccinated'] as String?,
+      images: images,
+      notes: (d['notes'] as String?) ?? (d['note'] as String?) ?? '',
+      createdAt: _tsDate(d['createdAt']),
+    );
+  }
+
+  /// A check-in answered before answers were saved as an update: only the
+  /// photo and note on the check-in doc itself.
+  static CommunityUpdate? legacyCheckIn(Map<String, dynamic>? checkIn) {
+    if (checkIn == null || checkIn['status'] != 'submitted') return null;
+    return CommunityUpdate.fromMap('checkin', {
+      'kind': 'checkin',
+      'photoUrl': checkIn['photoUrl'],
+      'note': checkIn['note'],
+      'createdAt': checkIn['submittedAt'],
+    });
+  }
+}
+
+/// The signed-in adopter's Community Adoptions, for Post Adoption on Home.
+/// Calls [builder] with them, newest first, so the Home section can merge
+/// them with shelter adoptions.
+class CommunityAdoptionsForAdopter extends StatelessWidget {
+  final Widget Function(BuildContext context, List<CommunityAdoptionSummary> adoptions) builder;
+  const CommunityAdoptionsForAdopter({super.key, required this.builder});
+
+  @override
+  Widget build(BuildContext context) {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return builder(context, const []);
+    return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+      stream: communityAdoptionsRef.where('adopterId', isEqualTo: uid).snapshots(),
+      builder: (context, snap) {
+        final list = [
+          for (final d in snap.data?.docs ?? const <QueryDocumentSnapshot<Map<String, dynamic>>>[])
+            if ((d.data()['status'] as String? ?? 'adopted') == 'adopted')
+              CommunityAdoptionSummary.fromDoc(d.id, d.data()),
+        ]..sort((a, b) => (b.adoptedAt ?? DateTime(0)).compareTo(a.adoptedAt ?? DateTime(0)));
+        return builder(context, list);
+      },
+    );
+  }
+}
+
+class CommunityAdoptionSummary {
+  final String id;
+  final String name;
+  final DateTime? adoptedAt;
+  final DateTime? updateWindowEnd;
+
+  const CommunityAdoptionSummary({
+    required this.id,
+    required this.name,
+    required this.adoptedAt,
+    required this.updateWindowEnd,
+  });
+
+  factory CommunityAdoptionSummary.fromDoc(String id, Map<String, dynamic> d) {
+    return CommunityAdoptionSummary(
+      id: id,
+      name: communityAnimalName(d, fallback: 'Pet'),
+      adoptedAt: _tsDate(d['adoptedAt']) ?? _tsDate(d['createdAt']),
+      updateWindowEnd: communityUpdateWindowEnd(d, null),
+    );
+  }
+}
+
+
+class CommunityPostAdoptionPage extends StatelessWidget {
+  final String adoptionId;
+
+  const CommunityPostAdoptionPage({super.key, required this.adoptionId});
+
+  @override
+  Widget build(BuildContext context) {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    return Scaffold(
+      backgroundColor: AppColors.background,
+      body: SafeArea(
+        child: StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+          stream: communityAdoptionsRef.doc(adoptionId).snapshots(),
+          builder: (context, snap) {
+            if (!snap.hasData) {
+              return const Center(
+                child: CircularProgressIndicator(color: AppColors.greenrspwn),
+              );
+            }
+            final data = snap.data!.data();
+            if (data == null) {
+              return Column(
+                children: [
+                  _BackHeader(onTap: () => Navigator.pop(context)),
+                  const Expanded(
+                    child: Center(child: Text('Adoption record not found.')),
+                  ),
+                ],
+              );
+            }
+
+            final animalName = communityAnimalName(data);
+            final photos = List<String>.from(data['photoUrls'] ?? const []);
+            final adoptedDate = (data['adoptedAt'] as Timestamp?)?.toDate() ??
+                (data['createdAt'] as Timestamp?)?.toDate();
+            final rehomedBy = (data['rescuedBy'] as String?)?.trim();
+            final isAdopter = uid != null && uid == data['adopterId'];
+
+            return StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+              stream: communityCheckInsRef.doc(adoptionId).snapshots(),
+              builder: (context, checkInSnap) {
+                final checkIn = checkInSnap.data?.data();
+                return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+                  stream: communityCheckInsRef
+                      .doc(adoptionId)
+                      .collection('updates')
+                      .snapshots(),
+                  builder: (context, updatesSnap) {
+                    final all = [
+                      for (final d in updatesSnap.data?.docs ??
+                          const <QueryDocumentSnapshot<Map<String, dynamic>>>[])
+                        CommunityUpdate.fromMap(d.id, d.data()),
+                    ]..sort((a, b) => (a.createdAt ?? DateTime.now())
+                        .compareTo(b.createdAt ?? DateTime.now()));
+                    final updates = all.where((u) => !u.isCheckIn).toList();
+                    final checkInAnswer = all
+                        .where((u) => u.isCheckIn)
+                        .firstOrNull ??
+                        CommunityUpdate.legacyCheckIn(checkIn);
+
+                    final now = DateTime.now();
+                    final windowEnd = communityUpdateWindowEnd(data, checkIn);
+                    final windowOpen =
+                        windowEnd != null && now.isBefore(windowEnd);
+                    final checkInStatus =
+                        checkIn?['status'] as String? ?? 'scheduled';
+                    final checkInDone =
+                        checkInStatus == 'submitted' || checkInAnswer != null;
+                    final checkInDue = checkInStatus == 'requested' && !checkInDone;
+                    final dueDate =
+                        (checkIn?['dueAt'] as Timestamp?)?.toDate() ?? windowEnd;
+
+                    return SingleChildScrollView(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Stack(
+                            children: [
+                              _CommunityHeaderImage(photoUrls: photos),
+                              _BackHeader(onTap: () => Navigator.pop(context)),
+                            ],
+                          ),
+                          Padding(
+                            padding: const EdgeInsets.fromLTRB(20, 18, 20, 24),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  animalName,
+                                  style: GoogleFonts.tiltWarp(
+                                    fontSize: 22,
+                                    fontWeight: FontWeight.bold,
+                                    color: AppColors.textPrimary,
+                                  ),
+                                ),
+                                const SizedBox(height: 18),
+
+                                Text(
+                                  'Details',
+                                  style: GoogleFonts.tiltWarp(
+                                    fontSize: 15,
+                                    fontWeight: FontWeight.bold,
+                                    color: AppColors.textPrimary,
+                                  ),
+                                ),
+                                const SizedBox(height: 6),
+                                Text(
+                                  'Adopted ${adoptedDate != null ? _formatDate(adoptedDate) : '-'}',
+                                  style: GoogleFonts.zain(
+                                      fontSize: 14, color: AppColors.textPrimary),
+                                ),
+                                const SizedBox(height: 8),
+                                Text(
+                                  'From',
+                                  style: GoogleFonts.zain(
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w600,
+                                    color: AppColors.textSecondary,
+                                  ),
+                                ),
+                                Text(
+                                  rehomedBy != null && rehomedBy.isNotEmpty
+                                      ? 'Community Adoption · rehomed by $rehomedBy'
+                                      : 'Community Adoption',
+                                  style: GoogleFonts.zain(
+                                      fontSize: 14, color: AppColors.textPrimary),
+                                ),
+
+                                const SizedBox(height: 22),
+                                Text(
+                                  'Post-Adoption Monitoring',
+                                  style: GoogleFonts.tiltWarp(
+                                    fontSize: 15,
+                                    fontWeight: FontWeight.bold,
+                                    color: AppColors.textPrimary,
+                                  ),
+                                ),
+                                const SizedBox(height: 10),
+
+                                if (updates.isEmpty && windowOpen && isAdopter)
+                                  Padding(
+                                    padding: const EdgeInsets.only(bottom: 6),
+                                    child: Text(
+                                      'For the first two weeks, send updates on how $animalName is settling in.',
+                                      style: GoogleFonts.zain(
+                                          fontSize: 13,
+                                          color: AppColors.textSecondary),
+                                    ),
+                                  ),
+
+                                for (var i = 0; i < updates.length; i++)
+                                  _CommunityTimelineRow(
+                                    title: 'Update ${i + 1} - ${updates[i].createdAt != null ? _formatDate(updates[i].createdAt!) : '-'}',
+                                    done: true,
+                                    subtitle: 'Submitted',
+                                    onTap: () => _openDetail(
+                                      context,
+                                      animalName: animalName,
+                                      update: updates[i],
+                                      title: 'Update ${i + 1}',
+                                      dueDate: null,
+                                    ),
+                                  ),
+
+                                _CommunityTimelineRow(
+                                  title: '2-week check-in - ${dueDate != null ? _formatDate(dueDate) : '-'}',
+                                  done: checkInDone,
+                                  current: checkInDue,
+                                  subtitle: checkInDone
+                                      ? 'Submitted'
+                                      : (checkInDue ? 'Due now' : null),
+                                  onTap: checkInAnswer == null
+                                      ? null
+                                      : () => _openDetail(
+                                    context,
+                                    animalName: animalName,
+                                    update: checkInAnswer,
+                                    title: '2-week check-in',
+                                    dueDate: dueDate,
+                                  ),
+                                ),
+
+                                if (isAdopter) ...[
+                                  const SizedBox(height: 26),
+                                  _PrimaryBtn(
+                                    label: checkInDone
+                                        ? 'All check-ins complete'
+                                        : (checkInDue || windowOpen
+                                        ? 'Send Update'
+                                        : 'No check-in due yet'),
+                                    onTap: checkInDone || !(checkInDue || windowOpen)
+                                        ? null
+                                        : () => Navigator.push(
+                                      context,
+                                      MaterialPageRoute(
+                                        builder: (_) =>
+                                            CommunityPostAdoptionUpdateForm(
+                                              adoptionId: adoptionId,
+                                              animalName: animalName,
+                                              isCheckIn: checkInDue,
+                                              title: checkInDue
+                                                  ? '2-week check-in - ${dueDate != null ? _formatDate(dueDate) : ''}'
+                                                  : 'Update ${updates.length + 1} - ${_formatDate(now)}',
+                                            ),
+                                      ),
+                                    ),
+                                  ),
+                                  if (!checkInDone && (checkInDue || windowOpen)) ...[
+                                    const SizedBox(height: 6),
+                                    Text(
+                                      checkInDue
+                                          ? 'Your 2-week check-in is due — please send it as soon as possible.'
+                                          : 'You can send updates until ${_formatDate(windowEnd!)}.',
+                                      textAlign: TextAlign.center,
+                                      style: GoogleFonts.zain(
+                                        fontSize: 11,
+                                        color: AppColors.textSecondary,
+                                      ),
+                                    ),
+                                  ],
+                                ],
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    );
+                  },
+                );
+              },
+            );
+          },
+        ),
+      ),
+    );
+  }
+
+  void _openDetail(
+      BuildContext context, {
+        required String animalName,
+        required CommunityUpdate update,
+        required String title,
+        required DateTime? dueDate,
+      }) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => CommunityPostAdoptionUpdateDetailPage(
+          update: update,
+          title: title,
+          dueDate: dueDate,
+        ),
+      ),
+    );
+  }
+}
+
+/// The adopted animal's photo from the listing, in the same frame as a
+/// shelter adoption's Animal Record photo.
+class _CommunityHeaderImage extends StatelessWidget {
+  final List<String> photoUrls;
+  const _CommunityHeaderImage({required this.photoUrls});
+
+  static const double _height = 150;
+
+  Widget _placeholder() => Container(
+    height: _height,
+    width: double.infinity,
+    color: AppColors.tearspwn,
+    child: const Center(
+        child: Icon(Icons.pets, size: 56, color: AppColors.textPrimary)),
+  );
+
+  @override
+  Widget build(BuildContext context) {
+    if (photoUrls.isEmpty) return _placeholder();
+    return Image.network(
+      photoUrls.first,
+      height: _height,
+      width: double.infinity,
+      fit: BoxFit.cover,
+      errorBuilder: (context, _, _) => _placeholder(),
+      loadingBuilder: (context, child, progress) => progress == null
+          ? child
+          : Container(
+        height: _height,
+        width: double.infinity,
+        color: AppColors.tearspwn,
+        child: const Center(child: CircularProgressIndicator(strokeWidth: 2)),
+      ),
+    );
+  }
+}
+
+/// One row of the Post-Adoption Monitoring timeline, styled like a shelter
+/// follow-up row.
+class _CommunityTimelineRow extends StatelessWidget {
+  final String title;
+  final bool done;
+  final bool current;
+  final String? subtitle;
+  final VoidCallback? onTap;
+
+  const _CommunityTimelineRow({
+    required this.title,
+    required this.done,
+    this.current = false,
+    this.subtitle,
+    this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 4),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            Icon(
+              done ? Icons.check_circle : Icons.circle,
+              size: done ? 15 : 8,
+              color: done
+                  ? AppColors.greenrspwn
+                  : (current ? AppColors.textPrimary : AppColors.slaterspwn),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    style: GoogleFonts.zain(
+                      fontSize: 13,
+                      color: AppColors.textPrimary,
+                      fontWeight:
+                      current && !done ? FontWeight.w700 : FontWeight.normal,
+                    ),
+                  ),
+                  if (subtitle != null)
+                    Text(
+                      subtitle!,
+                      style: GoogleFonts.zain(
+                        fontSize: 11,
+                        color: AppColors.textSecondary,
+                      ),
+                    ),
+                ],
+              ),
+            ),
+            if (onTap != null)
+              const Icon(Icons.chevron_right,
+                  size: 18, color: AppColors.textSecondary),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// The Community Adoption update form: the same questions as a shelter
+/// follow-up (PostAdoptionCheckinForm). [isCheckIn] answers the 2-week
+/// check-in, which also marks the check-in doc submitted (with the first
+/// photo and the notes, for the Home banner and the staff list).
+class CommunityPostAdoptionUpdateForm extends StatefulWidget {
+  final String adoptionId;
+  final String animalName;
+  final bool isCheckIn;
+  final String title;
+
+  const CommunityPostAdoptionUpdateForm({
+    super.key,
+    required this.adoptionId,
+    required this.animalName,
+    required this.isCheckIn,
+    required this.title,
+  });
+
+  @override
+  State<CommunityPostAdoptionUpdateForm> createState() =>
+      _CommunityPostAdoptionUpdateFormState();
+}
+
+class _CommunityPostAdoptionUpdateFormState
+    extends State<CommunityPostAdoptionUpdateForm> {
+  String? _howIsPet;
+  final Set<String> _healthConcerns = {};
+  final _otherHealthCtrl = TextEditingController();
+  String? _vaccinated;
+  final List<File> _images = [];
+  final _notesCtrl = TextEditingController();
+  final _picker = ImagePicker();
+  bool _isSubmitting = false;
+
+  static const _healthOptions = [
+    'None',
+    'Illness',
+    'Injury',
+    'Appetite issues',
+    'Behavioral issues',
+    'Other',
+  ];
+
+  @override
+  void dispose() {
+    _otherHealthCtrl.dispose();
+    _notesCtrl.dispose();
+    super.dispose();
+  }
+
+  void _toggleHealth(String option) {
+    setState(() {
+      if (option == 'None') {
+        _healthConcerns
+          ..clear()
+          ..add('None');
+      } else {
+        _healthConcerns.remove('None');
+        if (_healthConcerns.contains(option)) {
+          _healthConcerns.remove(option);
+        } else {
+          _healthConcerns.add(option);
+        }
+      }
+    });
+  }
+
+  Future<void> _addImage() async {
+    if (_images.length >= 5) return;
+    final picked = await pickImageWithSource(context, _picker, maxWidth: 1280);
+    if (picked != null) setState(() => _images.add(File(picked.path)));
+  }
+
+  void _showSnack(String msg, {bool error = true}) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      appSnackBar(msg, kind: error ? AppMessageKind.error : AppMessageKind.success),
+    );
+  }
+
+  Future<void> _submit() async {
+    if (_howIsPet == null) {
+      _showSnack('Please tell us how the pet is doing.');
+      return;
+    }
+    if (_healthConcerns.isEmpty) {
+      _showSnack('Please select any health concerns (or None).');
+      return;
+    }
+    if (_vaccinated == null) {
+      _showSnack('Please answer the vaccinations question.');
+      return;
+    }
+    if (_images.isEmpty) {
+      _showSnack('Please upload at least 1 image.');
+      return;
+    }
+
+    setState(() => _isSubmitting = true);
+    try {
+      final uid = FirebaseAuth.instance.currentUser!.uid;
+      final stamp = DateTime.now().millisecondsSinceEpoch;
+      final urls = <String>[];
+      for (var i = 0; i < _images.length; i++) {
+        // storage.rules: communityAdoptions/{adoptionId}/{file}, adopter only.
+        final ref = FirebaseStorage.instance.ref(
+            'communityAdoptions/${widget.adoptionId}/update_${stamp}_$i.jpg');
+        await ref.putFile(_images[i]);
+        urls.add(await ref.getDownloadURL());
+      }
+      final notes = _notesCtrl.text.trim();
+      final checkInRef = communityCheckInsRef.doc(widget.adoptionId);
+
+      await checkInRef.collection('updates').add({
+        'authorId': uid,
+        'kind': widget.isCheckIn ? 'checkin' : 'update',
+        'howIsPetDoing': _howIsPet,
+        'healthConcerns': _healthConcerns.toList(),
+        'healthConcernsOther': _otherHealthCtrl.text.trim(),
+        'vaccinated': _vaccinated,
+        'images': urls,
+        'notes': notes,
+        'createdAt': FieldValue.serverTimestamp(),
+      });
+      if (widget.isCheckIn) {
+        await checkInRef.update({
+          'status': 'submitted',
+          'photoUrl': urls.first,
+          'note': notes.isNotEmpty ? notes : 'Doing $_howIsPet'.toLowerCase(),
+          'submittedAt': FieldValue.serverTimestamp(),
+        });
+      }
+
+      if (!mounted) return;
+      _showSnack(
+        widget.isCheckIn ? 'Check-in submitted. Thank you!' : 'Update sent. Thank you!',
+        error: false,
+      );
+      Navigator.pop(context);
+    } catch (e) {
+      _showSnack('Could not submit: $e');
+    } finally {
+      if (mounted) setState(() => _isSubmitting = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: AppColors.background,
+      body: SafeArea(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+              child: GestureDetector(
+                onTap: () => Navigator.pop(context),
+                child: const Icon(Icons.chevron_left,
+                    size: 30, color: AppColors.textPrimary),
+              ),
+            ),
+            Expanded(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.fromLTRB(24, 8, 24, 32),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Post-Adoption',
+                      style: GoogleFonts.zain(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                        color: AppColors.textSecondary,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      widget.title,
+                      style: GoogleFonts.tiltWarp(
+                        fontSize: 20,
+                        fontWeight: FontWeight.bold,
+                        color: AppColors.textPrimary,
+                      ),
+                    ),
+                    const SizedBox(height: 20),
+
+                    _RadioBlock(
+                      label: 'How is the pet doing?',
+                      value: _howIsPet,
+                      options: const ['Excellent', 'Good', 'Fair', 'Need Assistance'],
+                      onChanged: (v) => setState(() => _howIsPet = v),
+                    ),
+                    const SizedBox(height: 18),
+
+                    Text(
+                      'Health concerns?',
+                      style: GoogleFonts.zain(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                          color: AppColors.textPrimary),
+                    ),
+                    const SizedBox(height: 2),
+                    ..._healthOptions.map((o) {
+                      return InkWell(
+                        onTap: () => _toggleHealth(o),
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 2),
+                          child: Row(
+                            children: [
+                              Checkbox(
+                                value: _healthConcerns.contains(o),
+                                onChanged: (_) => _toggleHealth(o),
+                                activeColor: AppColors.greenrspwn,
+                                materialTapTargetSize:
+                                MaterialTapTargetSize.shrinkWrap,
+                              ),
+                              const SizedBox(width: 4),
+                              Text(
+                                o,
+                                style: GoogleFonts.zain(
+                                    fontSize: 14,
+                                    color: AppColors.textPrimary),
+                              ),
+                            ],
+                          ),
+                        ),
+                      );
+                    }),
+                    if (_healthConcerns.contains('Other')) ...[
+                      const SizedBox(height: 4),
+                      TextField(
+                        controller: _otherHealthCtrl,
+                        style: GoogleFonts.zain(fontSize: 14),
+                        decoration: InputDecoration(
+                          hintText: 'Please specify',
+                          hintStyle: GoogleFonts.zain(fontSize: 13),
+                          isDense: true,
+                          contentPadding: const EdgeInsets.symmetric(
+                              horizontal: 12, vertical: 10),
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(12),
+                            borderSide: const BorderSide(
+                                color: AppColors.slaterspwn),
+                          ),
+                        ),
+                      ),
+                    ],
+                    const SizedBox(height: 18),
+
+                    _RadioBlock(
+                      label: 'Vaccinations?',
+                      value: _vaccinated,
+                      options: const ['Yes', 'No', 'Scheduled'],
+                      onChanged: (v) => setState(() => _vaccinated = v),
+                    ),
+                    const SizedBox(height: 18),
+
+                    Text(
+                      'Image Upload (minimum 1, maximum 5)',
+                      style: GoogleFonts.zain(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                          color: AppColors.textPrimary),
+                    ),
+                    const SizedBox(height: 8),
+                    _ImageGrid(images: _images, onAdd: _addImage,
+                        onRemove: (i) => setState(() => _images.removeAt(i))),
+
+                    const SizedBox(height: 18),
+                    Text(
+                      'Notes',
+                      style: GoogleFonts.zain(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                          color: AppColors.textPrimary),
+                    ),
+                    const SizedBox(height: 6),
+                    TextField(
+                      controller: _notesCtrl,
+                      maxLines: 3,
+                      maxLength: 1000,
+                      style: GoogleFonts.zain(fontSize: 14),
+                      decoration: InputDecoration(
+                        counterText: '',
+                        hintText: 'Anything else you\'d like to share?',
+                        hintStyle: GoogleFonts.zain(fontSize: 13),
+                        contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 12, vertical: 10),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide:
+                          const BorderSide(color: AppColors.slaterspwn),
+                        ),
+                      ),
+                    ),
+
+                    const SizedBox(height: 28),
+                    _PrimaryBtn(
+                      label: _isSubmitting ? 'Submitting...' : 'Submit',
+                      onTap: _isSubmitting ? null : _submit,
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Read-only view of one Community Adoption update, like a shelter
+/// follow-up's detail page.
+class CommunityPostAdoptionUpdateDetailPage extends StatelessWidget {
+  final CommunityUpdate update;
+  final String title;
+  final DateTime? dueDate;
+
+  const CommunityPostAdoptionUpdateDetailPage({
+    super.key,
+    required this.update,
+    required this.title,
+    this.dueDate,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final u = update;
+    final concerns = [
+      ...u.healthConcerns.where((c) => c != 'Other'),
+      if (u.healthConcerns.contains('Other'))
+        (u.healthConcernsOther?.trim().isNotEmpty == true)
+            ? 'Other: ${u.healthConcernsOther!.trim()}'
+            : 'Other',
+    ];
+    return Scaffold(
+      backgroundColor: AppColors.background,
+      appBar: AppBar(
+        backgroundColor: AppColors.background,
+        elevation: 0,
+        iconTheme: const IconThemeData(color: AppColors.textPrimary),
+        title: Text(u.isCheckIn ? 'Check-in Details' : 'Update Details',
+            style: GoogleFonts.tiltWarp(fontSize: 17, color: AppColors.textPrimary)),
+      ),
+      body: SingleChildScrollView(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(title,
+                style: GoogleFonts.tiltWarp(
+                    fontSize: 20,
+                    fontWeight: FontWeight.bold,
+                    color: AppColors.textPrimary)),
+            const SizedBox(height: 4),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+              decoration: BoxDecoration(
+                color: AppColors.tearspwn.withValues(alpha: 0.6),
+                borderRadius: BorderRadius.circular(20),
+              ),
+              child: Text('Submitted',
+                  style: GoogleFonts.zain(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w700,
+                      color: AppColors.textPrimary)),
+            ),
+            const SizedBox(height: 16),
+            if (dueDate != null) _detail('Due date', _formatDate(dueDate!)),
+            if (u.createdAt != null) _detail('Submitted', _formatDate(u.createdAt!)),
+            const SizedBox(height: 12),
+            Text('Answers',
+                style: GoogleFonts.tiltWarp(fontSize: 15, color: AppColors.textPrimary)),
+            const SizedBox(height: 8),
+            if (u.howIsPetDoing != null) _qa('How is the pet doing?', u.howIsPetDoing),
+            if (concerns.isNotEmpty) _qa('Health concerns', concerns.join(', ')),
+            if (u.vaccinated != null) _qa('Vaccinations', u.vaccinated),
+            if (u.notes.trim().isNotEmpty) _qa('Notes', u.notes.trim()),
+            if (u.images.isNotEmpty) ...[
+              const SizedBox(height: 8),
+              Text('Photos',
+                  style: GoogleFonts.zain(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                      color: AppColors.textPrimary)),
+              const SizedBox(height: 6),
+              Wrap(
+                spacing: 10,
+                runSpacing: 10,
+                children: [
+                  for (final url in u.images)
+                    GestureDetector(
+                      onTap: () => showDialog<void>(
+                        context: context,
+                        builder: (_) => Dialog(
+                          child: InteractiveViewer(child: Image.network(url)),
+                        ),
+                      ),
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(12),
+                        child: Image.network(url,
+                            width: 84, height: 84, fit: BoxFit.cover),
+                      ),
+                    ),
+                ],
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _detail(String label, String value) => Padding(
+    padding: const EdgeInsets.only(bottom: 8),
+    child: Row(
+      children: [
+        SizedBox(
+          width: 90,
+          child: Text(label,
+              style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary)),
+        ),
+        Expanded(
+          child: Text(value,
+              style: GoogleFonts.zain(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                  color: AppColors.textPrimary)),
+        ),
+      ],
+    ),
+  );
+
+  Widget _qa(String label, String? value) => Padding(
+    padding: const EdgeInsets.only(bottom: 10),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(label,
+            style: GoogleFonts.zain(
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+                color: AppColors.textPrimary)),
+        Text(value ?? '-',
+            style: GoogleFonts.zain(fontSize: 14, color: AppColors.textPrimary)),
+      ],
+    ),
+  );
 }
 
 // Shared small widgets

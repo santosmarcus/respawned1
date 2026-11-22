@@ -16,12 +16,15 @@ import 'package:respawnd1/core/utils/currency.dart';
 import 'package:respawnd1/features/admin/animals/state/animal_records_providers.dart';
 import 'package:respawnd1/features/admin/rescue/expenses/add_edit_expense_sheet.dart';
 import 'package:respawnd1/features/admin/donation/donation_admin_create.dart';
+import 'package:respawnd1/features/admin/donation/donation_admin_info.dart';
+import 'package:respawnd1/features/admin/rescue/expenses/case_costs_card.dart';
 import 'package:respawnd1/features/admin/donation/donation_admin_providers.dart';
 import 'package:respawnd1/features/admin/rescue/expenses/expense_list_page.dart';
 import 'package:respawnd1/features/admin/rescue/intake_detail_page.dart';
 import 'package:respawnd1/features/admin/rescue/state/rescue_reports_providers.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/animal_action_selection_sheet.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/case_animal_selector.dart';
+import 'package:respawnd1/features/admin/rescue/widgets/case_page_kit.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/close_case_flow.dart';
 import 'package:respawnd1/core/widgets/app_dialogs.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/release_animal_sheet.dart';
@@ -556,8 +559,8 @@ class _TreatmentDetailPageState extends ConsumerState<TreatmentDetailPage> {
 
     final expensesAsync = ref.watch(expensesProvider(widget.caseId));
     final expenses = expensesAsync.asData?.value ?? const [];
-    final totalExpenses = expenses.fold<double>(0, (sum, e) => sum + e.amount);
-    final fundedAmount = expenses.fold<double>(0, (sum, e) => sum + e.fundedAmount);
+    final totalExpenses = expenses.fold<double>(0, (total, e) => total + e.amount);
+    final fundedAmount = expenses.fold<double>(0, (total, e) => total + e.fundedAmount);
     final outstandingBalance = totalExpenses - fundedAmount;
 
     final dateStr = c.dateAdmitted != null
@@ -579,13 +582,50 @@ class _TreatmentDetailPageState extends ConsumerState<TreatmentDetailPage> {
             color: AppColors.background,
           ),
         ),
+        // Release and Close Case (top right); Intake and Transfer stay in
+        // the bottom bar.
         actions: [
-          // The AppBar's "Animal Moved" one-tap shortcut is gone — that
-          // location update now only ever comes from an approved Community
-          // Report. Close Case (any reason, including animal-moved) is now
-          // the 4th Post-Treatment Action button below, not a menu item.
+          if (!c.isDeceased)
+            CaseOverflowMenu(
+              busy: _isActingOnNextStep,
+              actions: [
+                CaseAction(
+                  'Release',
+                  hasEligibleAnimal && !_isActingOnNextStep
+                      ? () => _startPostTreatmentAction(c, 'release', data, animalOptions)
+                      : null,
+                  icon: Icons.park_outlined,
+                ),
+                CaseAction('Close Case', _closingCase ? null : () => _closeCase(c),
+                    icon: Icons.block, destructive: true),
+              ],
+            ),
         ],
       ),
+      // Post-treatment actions (spec §2): Intake, Transfer, Release and
+      // Close Case are always offered; the first three only become active
+      // once at least one animal has a completed Discharge update. Close
+      // Case is never gated on discharge (spec §4: an animal that died
+      // during treatment).
+      bottomNavigationBar: c.isDeceased
+          ? CaseActionBar(primary: CaseAction('Close Case', () => _closeDeceasedCase(c, outstandingBalance)))
+          : CaseActionBar(
+              // Spinner while Intake/Transfer/Release saves the selection
+              // before moving on (it used to sit silently on this page).
+              busy: _isActingOnNextStep,
+              primary: CaseAction(
+                'Intake',
+                hasEligibleAnimal && !_isActingOnNextStep
+                    ? () => _startPostTreatmentAction(c, 'intake', data, animalOptions)
+                    : null,
+              ),
+              secondary: CaseAction(
+                'Transfer',
+                hasEligibleAnimal && !_isActingOnNextStep
+                    ? () => _startPostTreatmentAction(c, 'transfer', data, animalOptions)
+                    : null,
+              ),
+            ),
       body: SingleChildScrollView(
         key: PageStorageKey('treatment_detail_${widget.caseId}'),
         padding: const EdgeInsets.all(16),
@@ -593,68 +633,49 @@ class _TreatmentDetailPageState extends ConsumerState<TreatmentDetailPage> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             // Header — Case ID is the primary identifier, no status chip.
-            Text(
-              '#${c.shortCaseId}',
-              style: GoogleFonts.tiltWarp(
-                fontSize: 22,
-                color: AppColors.textPrimary,
-              ),
-            ),
-            const SizedBox(height: 2),
-            Text(
-              c.speciesSummary,
-              style: GoogleFonts.zain(
-                fontSize: 14,
-                fontWeight: FontWeight.w600,
-                color: AppColors.textPrimary,
-              ),
-            ),
-            if ((c.vetClinicName ?? '').isNotEmpty) ...[
-              const SizedBox(height: 2),
-              Text(
-                c.vetClinicName!,
-                style: GoogleFonts.zain(
-                  fontSize: 13,
-                  color: AppColors.textSecondary,
-                ),
-              ),
-            ],
-            const SizedBox(height: 2),
-            Text(
-              'Admitted $dateStr',
-              style: GoogleFonts.zain(
-                fontSize: 12,
-                color: AppColors.textSecondary,
-              ),
-            ),
-
-            const SizedBox(height: 16),
-
-            // Info grid
-            Row(
-              children: [
-                Expanded(
-                  child: _InfoItem('Days in Treatment', '${c.daysInTreatment}'),
-                ),
-                Expanded(
-                  child: _InfoItem('Number of Animals', '${c.animalCount}'),
-                ),
+            CaseHeaderCard(
+              title: c.speciesSummary,
+              caseId: c.shortCaseId,
+              reporterName: c.reporterName,
+              photoUrls: c.photoUrls,
+              badges: [
+                if ((c.vetClinicName ?? '').isNotEmpty)
+                  CaseBadge(label: c.vetClinicName!, icon: Icons.local_hospital_outlined),
+                CaseBadge(label: 'Admitted $dateStr', icon: Icons.event_outlined, color: AppColors.tearspwn),
               ],
             ),
-            Row(
-              children: [
-                Expanded(
-                  child: _InfoItem(
-                    'Latest Condition',
-                    c.isDeceased ? 'Deceased' : (c.currentCondition ?? '-'),
-                  ),
-                ),
-                Expanded(
-                  child: _InfoItem('Reported by', c.reporterName ?? '-'),
-                ),
+            const SizedBox(height: kCaseGap),
+            CaseInfoGrid(
+              items: [
+                CaseInfoItem('Days in treatment', '${c.daysInTreatment}'),
+                CaseInfoItem('Number of animals', '${c.animalCount}'),
+                CaseInfoItem('Latest condition', c.isDeceased ? 'Deceased' : (c.currentCondition ?? '-'),
+                    valueColor: c.isDeceased ? AppColors.error : null),
+                CaseInfoItem('Reported by', c.reporterName ?? '-'),
               ],
             ),
-
+            const SizedBox(height: kCaseGap),
+            // Where the case stands for the post-treatment actions below
+            // (the action bar): what unlocks them, or that it's ready.
+            if (c.isDeceased)
+              const CaseOutcomeBanner(
+                tone: CaseBannerTone.danger,
+                title: 'Animal deceased',
+                message: 'Close the case to record the outcome.',
+              )
+            else if (hasEligibleAnimal)
+              const CaseOutcomeBanner(
+                tone: CaseBannerTone.success,
+                title: 'Ready for the next step',
+                message: 'At least one animal has a Discharge update: send it to Intake, Transfer or Release.',
+              )
+            else
+              const CaseOutcomeBanner(
+                tone: CaseBannerTone.info,
+                icon: Icons.arrow_forward,
+                title: 'In treatment',
+                message: 'Intake, Transfer and Release unlock once at least one animal has a Discharge update.',
+              ),
             if (animalOptions.length > 1) ...[
               const SizedBox(height: 16),
               CaseAnimalSelectorBar(
@@ -735,10 +756,18 @@ class _TreatmentDetailPageState extends ConsumerState<TreatmentDetailPage> {
             ),
             const SizedBox(height: 8),
 
-            if (logsAsync.isLoading && logs.isEmpty)
+            // Spinner only before the first answer: Riverpod 3 also reports
+            // a retry after an error as loading, which used to spin forever
+            // on a case with no logs.
+            if (!logsAsync.hasValue && !logsAsync.hasError)
               const Padding(
                 padding: EdgeInsets.symmetric(vertical: 12),
                 child: Center(child: CircularProgressIndicator()),
+              )
+            else if (!logsAsync.hasValue)
+              Text(
+                'Could not load treatment logs. ${logsAsync.error}',
+                style: GoogleFonts.zain(fontSize: 13, color: AppColors.error),
               )
             else if (logs.isEmpty)
               Text(
@@ -827,116 +856,6 @@ class _TreatmentDetailPageState extends ConsumerState<TreatmentDetailPage> {
               animalOptions: animalOptions,
               selectedAnimalIndex: selectedAnimalIndex,
             ),
-
-            const SizedBox(height: 32),
-
-            if (c.isDeceased)
-              SizedBox(
-                width: double.infinity,
-                child: ElevatedButton(
-                  onPressed: () => _closeDeceasedCase(c, outstandingBalance),
-                  style: AppButtons.primary,
-                  child: Text(
-                    'Close Case',
-                    style: GoogleFonts.tiltWarp(
-                      fontSize: 16,
-                      color: AppColors.textPrimary,
-                    ),
-                  ),
-                ),
-              )
-            // Intake/Transfer/Release stay visible at all times (spec §2:
-            // never hidden entirely) — only their enabled state depends on
-            // at least one animal having a completed Discharge update,
-            // never the whole case "seeming" ready (spec §6's fixed bug).
-            else ...[
-              Text(
-                'Post-Treatment Actions',
-                style: GoogleFonts.tiltWarp(
-                  fontSize: 15,
-                  color: AppColors.textPrimary,
-                ),
-              ),
-              if (!hasEligibleAnimal) ...[
-                const SizedBox(height: 6),
-                Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.all(10),
-                  decoration: BoxDecoration(
-                    color: AppColors.slaterspwn.withValues(alpha: 0.3),
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  child: Text(
-                    'Available once at least one animal has a Discharge update.',
-                    style: GoogleFonts.zain(
-                      fontSize: 12,
-                      color: AppColors.textSecondary,
-                    ),
-                  ),
-                ),
-              ],
-              const SizedBox(height: 10),
-              // Three full-width vertical buttons, in this fixed order
-              // (spec §2/§3) — Transfer collapses what used to be three
-              // separate top-level buttons (Clinic/Organization/Volunteer)
-              // into one, which opens the existing shared bottom sheet for
-              // the admin to choose the destination type inside it.
-              SizedBox(
-                width: double.infinity,
-                child: _VerticalActionButton(
-                  label: 'Intake',
-                  enabled: hasEligibleAnimal && !_isActingOnNextStep,
-                  onTap: () => _startPostTreatmentAction(
-                    c,
-                    'intake',
-                    data,
-                    animalOptions,
-                  ),
-                ),
-              ),
-              const SizedBox(height: 10),
-              SizedBox(
-                width: double.infinity,
-                child: _VerticalActionButton(
-                  label: 'Transfer',
-                  enabled: hasEligibleAnimal && !_isActingOnNextStep,
-                  onTap: () => _startPostTreatmentAction(
-                    c,
-                    'transfer',
-                    data,
-                    animalOptions,
-                  ),
-                ),
-              ),
-              const SizedBox(height: 10),
-              SizedBox(
-                width: double.infinity,
-                child: _VerticalActionButton(
-                  label: 'Release',
-                  enabled: hasEligibleAnimal && !_isActingOnNextStep,
-                  onTap: () => _startPostTreatmentAction(
-                    c,
-                    'release',
-                    data,
-                    animalOptions,
-                  ),
-                ),
-              ),
-              const SizedBox(height: 10),
-              // Close Case — deliberately NOT gated on hasEligibleAnimal/
-              // discharge (spec §4: "Animal died during treatment may be
-              // valid without normal discharge"). Only guarded by the same
-              // _closingCase busy-flag every other action here already
-              // uses.
-              SizedBox(
-                width: double.infinity,
-                child: _VerticalActionButton(
-                  label: 'Close Case',
-                  enabled: !_closingCase,
-                  onTap: () => _closeCase(c),
-                ),
-              ),
-            ],
 
             const SizedBox(height: 32),
           ],
@@ -1374,38 +1293,6 @@ class _DischargedNotice extends StatelessWidget {
   }
 }
 
-/// One full-width vertical post-treatment action button (Intake, Transfer,
-/// Release, spec §2) — always rendered, [enabled] toggles
-/// interactivity/opacity rather than the button disappearing, so the admin
-/// always sees every path this case can eventually take.
-class _VerticalActionButton extends StatelessWidget {
-  final String label;
-  final bool enabled;
-  final VoidCallback onTap;
-  const _VerticalActionButton({
-    required this.label,
-    required this.enabled,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return OutlinedButton(
-      onPressed: enabled ? onTap : null,
-      style: OutlinedButton.styleFrom(
-        foregroundColor: AppColors.textPrimary,
-        disabledForegroundColor: AppColors.textSecondary,
-        side: BorderSide(
-          color: enabled ? AppColors.textPrimary : AppColors.slaterspwn,
-        ),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
-        padding: const EdgeInsets.symmetric(vertical: 14),
-      ),
-      child: Text(label, style: GoogleFonts.tiltWarp(fontSize: 15)),
-    );
-  }
-}
-
 class _CostTrackingSection extends ConsumerWidget {
   final String caseId;
   final RescueCase rescueCase;
@@ -1431,6 +1318,7 @@ class _CostTrackingSection extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     // Recording expenses is for financial administrators (firestore.rules).
     final canFinance = ref.watch(canManageFinancesProvider).asData?.value ?? false;
+    final fundraiserId = ref.watch(caseFundraiserIdProvider(caseId)).asData?.value;
     // Total/Funded/Outstanding always reflect the whole case (never
     // filtered by animal — Close Case's own financial summary and every
     // other reader of these totals expects the case-wide figure). The
@@ -1542,6 +1430,21 @@ class _CostTrackingSection extends ConsumerWidget {
                     ),
                   ),
                 ),
+              // Once a fundraiser exists for this case, open it instead of
+              // offering to create another.
+              if (fundraiserId != null)
+                OutlinedButton(
+                  onPressed: () => Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (_) => DonationAdminInfoPage(campaignId: fundraiserId)),
+                  ),
+                  style: AppButtons.outline,
+                  child: Text(
+                    'View Fundraiser',
+                    style: GoogleFonts.zain(fontSize: 12, fontWeight: FontWeight.w600),
+                  ),
+                )
+              else
               OutlinedButton(
                 onPressed: outstandingBalance <= 0
                     ? null
@@ -1598,39 +1501,6 @@ class _CostRow extends StatelessWidget {
               color: emphasize
                   ? AppColors.textPrimary
                   : AppColors.textSecondary,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _InfoItem extends StatelessWidget {
-  final String label;
-  final String value;
-  const _InfoItem(this.label, this.value);
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 12),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            label,
-            style: GoogleFonts.zain(
-              fontSize: 12,
-              color: AppColors.textSecondary,
-            ),
-          ),
-          Text(
-            value,
-            style: GoogleFonts.zain(
-              fontSize: 14,
-              fontWeight: FontWeight.w600,
-              color: AppColors.textPrimary,
             ),
           ),
         ],

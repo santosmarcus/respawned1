@@ -2,6 +2,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
 
 import 'package:respawnd1/core/utils/firestore_parsing.dart';
+import 'package:respawnd1/core/models/photo_captions.dart';
 
 /// Structured health fields (spec section 6) — every value defaults to
 /// "unknown"/absent rather than a guessed default; nothing here is ever
@@ -170,6 +171,9 @@ class AnimalRecord {
   final int? sourceAnimalIndex;
   final String rescuedBy;
   final List<String> photoUrls;
+  /// A description for each photo, keyed by its URL (see
+  /// core/models/photo_captions.dart). Photos without one are absent.
+  final Map<String, String> photoCaptions;
   final DateTime? createdAt;
   final DateTime? updatedAt;
   final String? currentCaseId;
@@ -179,6 +183,9 @@ class AnimalRecord {
   final bool publicProfileHidden;
   /// Printed/attached QR tag for this animal (P3-23). Null until assigned.
   final String? qrTagId;
+  /// Code written to this animal's NFC collar chip. Null until registered.
+  /// Both codes are registered in `animalTags` (animal_tag_codes.dart).
+  final String? nfcTagId;
   /// Day-to-day shelter status set by an admin; null until first set.
   final CareStatus? careStatus;
   final DateTime? deceasedAt;
@@ -233,12 +240,14 @@ class AnimalRecord {
     required this.sourceAnimalIndex,
     required this.rescuedBy,
     required this.photoUrls,
+    this.photoCaptions = const {},
     required this.createdAt,
     required this.updatedAt,
     required this.currentCaseId,
     required this.archived,
     this.publicProfileHidden = false,
     this.qrTagId,
+    this.nfcTagId,
     this.careStatus,
     required this.deceasedAt,
     required this.deceasedCause,
@@ -259,6 +268,17 @@ class AnimalRecord {
 
   bool get hasSourceCase => linkedCaseId.isNotEmpty;
   bool get isAdoptable => adoptionStatus == 'adoptable';
+
+  /// Has a QR or NFC collar tag code. firestore.rules only accepts a code
+  /// here that is registered to this animal; codes from before the registry
+  /// are registered on first use (AnimalRecordRepository.hasRegisteredCollarTag).
+  bool get hasCollarTag => (qrTagId ?? '').isNotEmpty || (nfcTagId ?? '').isNotEmpty;
+
+  /// "QR · NFC", "QR", "NFC" or "None": which collar tags are registered.
+  String get collarTagSummary {
+    final parts = [if ((qrTagId ?? '').isNotEmpty) 'QR', if ((nfcTagId ?? '').isNotEmpty) 'NFC'];
+    return parts.isEmpty ? 'None' : parts.join(' · ');
+  }
   bool get isReserved => adoptionStatus == 'reserved';
   bool get isAdopted => adoptionStatus == 'adopted';
   bool get isDeceased => adoptionStatus == 'deceased' || status == 'deceased';
@@ -399,6 +419,7 @@ class AnimalRecord {
       sourceAnimalIndex: parseOptionalInt(data['sourceAnimalIndex']),
       rescuedBy: parseRequiredString(data['rescuedBy']),
       photoUrls: _parsePhotoUrls(data),
+      photoCaptions: parsePhotoCaptions(data['photoCaptions']),
       createdAt: createdAtRaw is Timestamp
           ? createdAtRaw.toDate()
           : (intakeDateRaw is Timestamp ? intakeDateRaw.toDate() : null),
@@ -407,6 +428,7 @@ class AnimalRecord {
       archived: parseBool(data['archived']),
       publicProfileHidden: parseBool(data['publicProfileHidden']),
       qrTagId: parseOptionalString(data['qrTagId']),
+      nfcTagId: parseOptionalString(data['nfcTagId']),
       careStatus: CareStatus.fromFirestoreValue(parseOptionalString(data['careStatus'])),
       deceasedAt: deceasedAtRaw is Timestamp ? deceasedAtRaw.toDate() : null,
       deceasedCause: parseOptionalString(data['deceasedCause']),

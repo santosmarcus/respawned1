@@ -1,7 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:respawnd1/core/utils/org_list_scope.dart';
 import 'package:respawnd1/core/models/rescue/care_record.dart';
-import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:respawnd1/core/models/adoption/adoption_application.dart';
@@ -14,16 +14,18 @@ import 'package:respawnd1/core/models/rescue/rescue_status.dart';
 import 'package:respawnd1/core/models/rescue/transport_assignment.dart';
 import 'package:respawnd1/core/models/rescue/transporter_application.dart';
 import 'package:respawnd1/core/models/rescue/vaccination_record.dart';
-import 'package:respawnd1/core/models/volunteer/volunteer_application.dart';
+import 'package:respawnd1/core/models/organization/org_permission.dart';
 import 'package:respawnd1/core/models/volunteer/volunteer_event.dart';
 import 'package:respawnd1/core/repos/transporter_application_repository.dart';
-import 'package:respawnd1/core/repos/volunteer_application_repository.dart';
+import 'package:respawnd1/core/repos/organization_repository.dart';
 import 'package:respawnd1/features/admin/adoption/state/adoption_providers.dart';
 import 'package:respawnd1/features/admin/events/state/event_providers.dart';
 import 'package:respawnd1/features/admin/animals/state/animal_records_providers.dart';
 import 'package:respawnd1/features/admin/rescue/state/rescue_reports_providers.dart';
 import 'package:respawnd1/core/models/dashboard/dashboard_model.dart';
 import 'package:respawnd1/features/adminhome/dashboard/shelter_settings.dart';
+import 'package:respawnd1/core/models/rescue/medication.dart';
+import 'package:respawnd1/features/admin/animals/widgets/medication_section.dart';
 
 /// Shared, derived dashboard data. Everything here is computed from the
 /// SAME providers the module screens already stream, plus three
@@ -84,7 +86,9 @@ final dashboardRescueSnapshotProvider = Provider.autoDispose<AsyncValue<RescueSn
     if (p.hasError) return AsyncValue.error(p.error!, p.stackTrace ?? StackTrace.current);
   }
   if (parts.any((p) => !p.hasValue)) return const AsyncValue.loading();
-  final reviewCases = review.requireValue;
+  // Reporter-led neglect/abuse reports and surrenders are shown in Rescue
+  // Reports for awareness, but are not workload until staff take them on.
+  final reviewCases = review.requireValue.where((c) => c.countsAsOrgWorkload).toList();
   return AsyncValue.data(
     RescueSnapshot({
       RescueStage.review: reviewCases.where((c) => c.status == RescueStatus.pendingReview).toList(),
@@ -216,6 +220,16 @@ final shelterOccupancyProvider = Provider.autoDispose<AsyncValue<ShelterOccupanc
   );
 });
 
+// ─── Medication orders ───────────────────────────────────────────────────
+
+/// Every active medication order, grouped by animal id (own organization;
+/// platform staff: all). One collection-group listener, shared by Rescue
+/// readiness, Shelter care and Adoption. An animal with no entry has no
+/// medication running, so its course counts as complete.
+final activeMedicationPlansByAnimalProvider = StreamProvider.autoDispose<Map<String, List<MedicationPlan>>>((ref) {
+  return ref.watch(animalMedicationRepositoryProvider).watchActivePlansByAnimal();
+});
+
 // ─── Health records (vaccinations) ───────────────────────────────────────
 
 /// Every vaccination record, grouped by animal id. One collection-group
@@ -242,12 +256,12 @@ final careRecordsByAnimalProvider = StreamProvider.autoDispose<Map<String, List<
 /// Analytics gap 5: every illness entry of the organization's animals.
 final allIllnessesProvider = StreamProvider.autoDispose<List<IllnessEntry>>((ref) {
   return OrgListScope.watch(FirebaseFirestore.instance.collectionGroup('illnesses'), empty: const <IllnessEntry>[],
-      (snap) {
-    return [
-      for (final d in snap.docs)
-        if (d.reference.parent.parent case final animal?) ?IllnessEntry.fromFirestore(d, animal.id),
-    ];
-  });
+          (snap) {
+        return [
+        for (final d in snap.docs)
+          if (d.reference.parent.parent case final animal?) ?IllnessEntry.fromFirestore(d, animal.id),
+        ];
+      });
 });
 
 final vaccinationsByAnimalProvider = StreamProvider.autoDispose<Map<String, List<VaccinationRecord>>>((ref) {
@@ -330,8 +344,14 @@ final closedCasesProvider = Provider.autoDispose<AsyncValue<List<RescueCase>>>((
 
 // ─── People: volunteer and transporter applications ─────────────────────
 
-final pendingVolunteerApplicationsProvider = StreamProvider.autoDispose<List<VolunteerApplication>>((ref) {
-  return VolunteerApplicationRepository().watchByStatus(VolunteerApplicationStatus.pending);
+/// Rescue volunteer sign-ups (kind 'independent') waiting for review, for
+/// the people who can decide them: staff with the Volunteers permission
+/// (never a rescue volunteer's own team) and platform staff.
+final pendingVolunteerApplicationsProvider = StreamProvider.autoDispose<List<OrganizationReviewItem>>((ref) {
+  final canReview = (ref.watch(currentOrganizationCapabilitiesProvider).asData?.value.canManageVolunteers ?? false) ||
+      (ref.watch(isPlatformStaffProvider).asData?.value ?? false);
+  if (!canReview) return Stream.value(const <OrganizationReviewItem>[]);
+  return OrganizationRepository().streamForReview(OrgVerificationStatus.pending, kind: OrgKind.independent);
 });
 
 final pendingTransporterApplicationsProvider = StreamProvider.autoDispose<List<TransporterApplication>>((ref) {
@@ -350,7 +370,7 @@ final upcomingEventsProvider = Provider.autoDispose<AsyncValue<List<VolunteerEve
   if (id == null) return const AsyncValue.data([]);
   return ref.watch(organizationEventsProvider(id)).whenData(
         (list) => list.where((e) => !e.isCancelled && !e.isPast).toList()..sort((a, b) => a.startAt.compareTo(b.startAt)),
-      );
+  );
 });
 
 // ─── Post-adoption follow-ups (this organization only) ───────────────────
@@ -434,3 +454,136 @@ String? ageGroupOf(AnimalRecord a) {
 
 bool isLargeAdultDog(AnimalRecord a) =>
     a.species.toLowerCase() == 'dog' && a.size.toLowerCase().contains('large') && (ageInYears(a.age) ?? 0) >= 2;
+
+// ─── Continuing care ─────────────────────────────────────────────────────
+
+/// One reason an animal in care needs looking after beyond the daily
+/// rounds. Every reason comes from a recorded field or order.
+class CareNeed {
+  final String label;
+  final DashSeverity severity;
+  final IconData icon;
+  const CareNeed(this.label, this.severity, this.icon);
+}
+
+/// Why [a] needs continuing care, most urgent first. Empty when nothing is
+/// recorded. [plans] are the animal's active medication orders, [missedDoses]
+/// its missed doses over the past week, [vaccines] its vaccination status.
+List<CareNeed> continuingCareNeedsOf(
+    AnimalRecord a, {
+      List<MedicationPlan>? plans,
+      int missedDoses = 0,
+      HealthRecordStatus? vaccines,
+    }) {
+  String text(String? v) => (v ?? '').trim();
+  final meds = plans ?? const <MedicationPlan>[];
+  final needs = <CareNeed>[
+    if (hasOpenMedicalCase(a)) const CareNeed('In treatment', DashSeverity.critical, Icons.local_hospital),
+    if (missedDoses > 0)
+      CareNeed('${plural(missedDoses, 'missed dose')} this week', DashSeverity.critical, Icons.error_outline),
+    if (vaccines == HealthRecordStatus.overdue) const CareNeed('Vaccine overdue', DashSeverity.critical, Icons.vaccines),
+    if (meds.isNotEmpty)
+      CareNeed(
+        'Medication: ${meds.take(2).map((p) => p.drug).join(', ')}${meds.length > 2 ? ' +${meds.length - 2}' : ''}',
+        DashSeverity.warning,
+        Icons.medication,
+      )
+    else if (text(a.health.currentMedications).isNotEmpty)
+      CareNeed('Medication: ${text(a.health.currentMedications)}', DashSeverity.warning, Icons.medication),
+    if (a.careStatus == CareStatus.isolation) const CareNeed('Isolation', DashSeverity.warning, Icons.do_not_touch),
+    if (a.careStatus == CareStatus.recovering) const CareNeed('Recovering', DashSeverity.info, Icons.healing),
+    if (a.hasSpecialNeeds)
+      CareNeed(
+        a.specialNeedsTypes.isEmpty ? 'Special needs' : 'Special needs: ${a.specialNeedsTypes.take(2).join(', ')}',
+        DashSeverity.info,
+        Icons.accessible,
+      ),
+    if (text(a.health.chronicConditions).isNotEmpty)
+      CareNeed('Chronic: ${text(a.health.chronicConditions)}', DashSeverity.info, Icons.monitor_heart),
+  ];
+  return needs;
+}
+
+/// Every animal in care that needs continuing care, with its needs, most
+/// urgent first. Shared by Rescue readiness and Shelter care so both list
+/// the same animals.
+List<(AnimalRecord, List<CareNeed>)> animalsNeedingCare(
+    List<AnimalRecord> records, {
+      Map<String, List<MedicationPlan>>? plans,
+      Map<String, int>? missedDoses,
+      Map<String, List<VaccinationRecord>>? vaccinations,
+    }) {
+  return [
+    for (final a in records.where(isInCare))
+      (
+      a,
+      continuingCareNeedsOf(
+        a,
+        plans: plans?[a.id],
+        missedDoses: missedDoses?[a.id] ?? 0,
+        vaccines: vaccinations == null ? null : healthStatusOf(vaccinations[a.id]),
+      ),
+      ),
+  ].where((e) => e.$2.isNotEmpty).toList()
+    ..sort((x, y) => careNeedRank(x.$2).compareTo(careNeedRank(y.$2)));
+}
+
+/// Lower is more urgent: the worst need first, then the number of needs.
+int careNeedRank(List<CareNeed> needs) {
+  if (needs.isEmpty) return 1 << 20;
+  final worst = needs.map((n) => n.severity.index).reduce((a, b) => a < b ? a : b);
+  return worst * 100 - needs.length;
+}
+
+// ─── Adoption readiness (dashboard) ──────────────────────────────────────
+
+/// One of the four things that must be done before an animal is turned
+/// over for adoption. [done] null = not recorded (a gap, never a pass).
+class TurnoverCheck {
+  final String label;
+  final bool? done;
+  final String detail;
+  const TurnoverCheck(this.label, this.done, this.detail);
+}
+
+/// Vaccinations complete, spayed/neutered, medication course finished and
+/// behavior assessed. Behavior counts as assessed only when staff confirmed
+/// it on the adoption readiness checklist; recorded temperament alone is
+/// shown as not yet assessed.
+List<TurnoverCheck> turnoverChecksFor(
+    AnimalRecord a, {
+      required HealthRecordStatus? vaccines,
+      List<MedicationPlan>? plans,
+    }) {
+  final TurnoverCheck vax = switch (vaccines) {
+    HealthRecordStatus.completed || HealthRecordStatus.dueSoon =>
+    const TurnoverCheck('Vaccinations', true, 'Up to date'),
+    HealthRecordStatus.overdue => const TurnoverCheck('Vaccinations', false, 'A vaccine is overdue'),
+    _ => a.raw['vaccinated'] == true
+        ? const TurnoverCheck('Vaccinations', true, 'Marked vaccinated')
+        : const TurnoverCheck('Vaccinations', null, 'No vaccine records'),
+  };
+  final sterilized = a.health.sterilized;
+  final spay = TurnoverCheck(
+    'Spay/neuter',
+    sterilized,
+    sterilized == null ? 'Not recorded' : (sterilized ? 'Done' : 'Not done yet'),
+  );
+  final active = plans ?? const <MedicationPlan>[];
+  final medsText = (a.health.currentMedications ?? '').trim();
+  final meds = active.isNotEmpty
+      ? TurnoverCheck('Medication', false, 'Still on ${active.first.drug}')
+      : medsText.isNotEmpty
+      ? TurnoverCheck('Medication', false, 'Record says: $medsText')
+      : const TurnoverCheck('Medication', true, 'No course running');
+  final r = a.raw['adoptionReadiness'];
+  final checks = r is Map ? r['checks'] : null;
+  final behaviorEntry = checks is Map ? checks['behavior'] : null;
+  final behaviorOk = behaviorEntry is Map && behaviorEntry['confirmed'] == true;
+  final behavior = behaviorOk
+      ? const TurnoverCheck('Behavior', true, 'Assessed by staff')
+      : (a.keyCharacteristics.isNotEmpty
+      ? TurnoverCheck('Behavior', null, 'Temperament noted, not assessed: ${a.keyCharacteristics.take(2).join(', ')}')
+      : const TurnoverCheck('Behavior', null, 'Not assessed'));
+  return [vax, spay, meds, behavior];
+}

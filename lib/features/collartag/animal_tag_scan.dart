@@ -12,20 +12,13 @@ import 'package:respawnd1/features/admin/animals/animal_record_detail_page.dart'
 import 'package:respawnd1/features/adoption/adoption_page.dart';
 import 'package:respawnd1/features/adoption/animal_page.dart';
 import 'package:respawnd1/core/widgets/app_messages.dart';
+import 'package:respawnd1/core/utils/animal_tag_codes.dart';
 
-/// Prefix of the QR payload printed for animal records (Animal Management >
-/// Add QR Tag). Collar tags use their own links (AppLinks.tagIdFromScan).
-const String kAnimalTagPrefix = 'RESPAWND-ANIMAL:';
+// Moved to core/utils/animal_tag_codes.dart (shared with the NFC writer and
+// the Management tab); re-exported for existing imports.
+export 'package:respawnd1/core/utils/animal_tag_codes.dart' show kAnimalTagPrefix, animalTagFromScan;
 
-/// The tag code inside an animal QR payload, or null if [raw] isn't one.
-String? animalTagFromScan(String raw) {
-  final value = raw.trim();
-  if (!value.startsWith(kAnimalTagPrefix)) return null;
-  final tag = value.substring(kAnimalTagPrefix.length).trim().toUpperCase();
-  return RegExp(r'^[A-Z0-9]{6,16}$').hasMatch(tag) ? tag : null;
-}
-
-/// Opens the animal a scanned animal QR points at. Staff of the owning
+/// Opens the animal a scanned animal tag (QR code or NFC chip) points at. Staff of the owning
 /// organization get the full record; everyone else gets the public profile.
 /// Returns false when [raw] isn't an animal tag, so the caller can fall
 /// back to the collar-tag flow.
@@ -34,23 +27,56 @@ Future<bool> openScannedAnimalTag(BuildContext context, String raw) async {
   if (tag == null) return false;
 
   final messenger = ScaffoldMessenger.of(context);
+  final db = FirebaseFirestore.instance;
+
+  // The registry (animalTags/{code}) says which animal a QR or NFC code
+  // belongs to, and whether it is still active.
+  String? animalId;
+  try {
+    final reg = await db.collection('animalTags').doc(tag).get();
+    if (reg.exists) {
+      if (reg.data()?['active'] != true) {
+        if (context.mounted) {
+          messenger.showSnackBar(appSnackBar('This tag was removed from its animal and no longer opens a record.'));
+        }
+        return true;
+      }
+      animalId = reg.data()?['animalId'] as String?;
+    }
+  } on FirebaseException {
+    // Not signed in, or offline: fall back to the field lookups below.
+  }
+
   // Staff find their own organization's animals, hidden ones included;
   // everyone else (and staff scanning another organization's tag) finds
-  // the public profile.
-  QueryDocumentSnapshot<Map<String, dynamic>>? found;
+  // the public profile. Codes printed before the registry existed are only
+  // on the animal's qrTagId.
+  DocumentSnapshot<Map<String, dynamic>>? found;
   try {
-    final own = await AnimalRecordRepository().queryScoped((q) => q.where('qrTagId', isEqualTo: tag).limit(1));
-    if (own.isNotEmpty) found = own.first;
+    if (animalId != null) {
+      final own = await AnimalRecordRepository().queryScoped(
+        (q) => q.where(FieldPath.documentId, isEqualTo: animalId).limit(1),
+      );
+      if (own.isNotEmpty) found = own.first;
+    } else {
+      final own = await AnimalRecordRepository().queryScoped((q) => q.where('qrTagId', isEqualTo: tag).limit(1));
+      if (own.isNotEmpty) found = own.first;
+    }
   } on FirebaseException {
     // Not staff of any organization.
   }
-  final doc = found ??
-      (await FirebaseFirestore.instance.collection('publicAnimals').where('qrTagId', isEqualTo: tag).limit(1).get())
-          .docs
-          .firstOrNull;
+  if (found == null) {
+    if (animalId != null) {
+      final pub = await db.collection('publicAnimals').doc(animalId).get();
+      if (pub.exists) found = pub;
+    } else {
+      found = (await db.collection('publicAnimals').where('qrTagId', isEqualTo: tag).limit(1).get()).docs.firstOrNull;
+    }
+  }
+  final doc = found;
   if (!context.mounted) return true;
   if (doc == null) {
-    messenger.showSnackBar(appSnackBar('No animal record uses this QR tag.'));
+    messenger.showSnackBar(appSnackBar('No animal record uses this tag.'));
     return true;
   }
 
@@ -79,14 +105,14 @@ Future<bool> openScannedAnimalTag(BuildContext context, String raw) async {
 
   final record = AnimalRecord.fromFirestore(doc);
   final isStaff =
-      doc.reference.parent.id == 'animals' && await _isStaffOf(doc.data()['organizationId'] as String?);
+      doc.reference.parent.id == 'animals' && await isStaffOfOrganization(doc.data()?['organizationId'] as String?);
   if (!context.mounted) return true;
 
   Navigator.push(
     context,
     MaterialPageRoute(
       builder: (_) => isStaff
-          ? AnimalRecordDetailPage(animalId: doc.id, data: doc.data())
+          ? AnimalRecordDetailPage(animalId: doc.id, data: doc.data() ?? const {})
           : AnimalPage(animal: animalRecordToCard(record, 0), onFavoriteToggle: () {}),
     ),
   );
@@ -94,7 +120,7 @@ Future<bool> openScannedAnimalTag(BuildContext context, String raw) async {
 }
 
 /// Same split as firestore.rules isStaffOf: linked to the org, and not a carer.
-Future<bool> _isStaffOf(String? orgId) async {
+Future<bool> isStaffOfOrganization(String? orgId) async {
   final uid = FirebaseAuth.instance.currentUser?.uid;
   if (uid == null || orgId == null || orgId.isEmpty) return false;
   final db = FirebaseFirestore.instance;
@@ -107,6 +133,7 @@ Future<bool> _isStaffOf(String? orgId) async {
     uid: uid,
     ownerId: org.data()?['ownerId'] as String?,
     member: member.exists ? (member.data() ?? const {}) : null,
+    org: org.data(),
   );
   return caps.canManageRescues || caps.canManageRecords;
 }

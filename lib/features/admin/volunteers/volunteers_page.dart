@@ -1,3 +1,5 @@
+import 'package:respawnd1/features/admin/widgets/view_only.dart';
+import 'package:respawnd1/core/models/organization/org_permission.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -5,6 +7,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/core/models/rescue/pet_transporter.dart';
+import 'package:respawnd1/core/repos/organization_directory_repository.dart' show RescueVolunteerListing;
 import 'package:respawnd1/features/admin/rescue/state/rescue_reports_providers.dart';
 import 'package:respawnd1/features/admin/volunteers/transporter_applications_page.dart';
 import 'package:respawnd1/features/admin/volunteers/transporter_detail_page.dart';
@@ -35,9 +38,9 @@ enum VolunteerSortOption {
       };
 }
 
-/// Also serves the drawer's Transporters entry: `pet_transporter` and
-/// `rescue_volunteer` accounts share the [PetTransporter] shape, so one
-/// directory with a [transporters] switch beats a near-identical copy.
+/// Rescue Volunteers: approved rescue volunteers (organizations with kind
+/// 'independent'). Also serves the drawer's Transporters entry
+/// ([transporters]): `pet_transporter` accounts, with their verification.
 class VolunteersPage extends ConsumerStatefulWidget {
   final bool transporters;
   const VolunteersPage({super.key, this.transporters = false});
@@ -129,13 +132,11 @@ class _VolunteersPageState extends ConsumerState<VolunteersPage> {
     if (picked != null) setState(() => _sort = picked);
   }
 
-  String get _title => widget.transporters ? 'Transporters' : 'Volunteers';
-  String get _noun => widget.transporters ? 'transporters' : 'volunteers';
+  String get _title => widget.transporters ? 'Transporters' : 'Rescue Volunteers';
+  String get _noun => widget.transporters ? 'transporters' : 'rescue volunteers';
 
   @override
   Widget build(BuildContext context) {
-    final volunteersAsync = ref.watch(widget.transporters ? petTransportersProvider : rescueVolunteersProvider);
-
     return Scaffold(
       backgroundColor: AppColors.background,
       drawer: AdminDrawer(active: widget.transporters ? AdminModule.transporters : AdminModule.volunteers),
@@ -157,6 +158,7 @@ class _VolunteersPageState extends ConsumerState<VolunteersPage> {
       ),
       body: Column(
         children: [
+          const ViewOnlyBanner(perms: [OrgPermission.volunteers]),
           AdminSearchBar(
             controller: _searchController,
             hintText: 'Search $_noun…',
@@ -175,7 +177,9 @@ class _VolunteersPageState extends ConsumerState<VolunteersPage> {
           ),
           const SizedBox(height: 8),
           Expanded(
-            child: volunteersAsync.when(
+            child: !widget.transporters
+                ? _rescueVolunteers()
+                : ref.watch(petTransportersProvider).when(
               loading: () => const Center(child: CircularProgressIndicator()),
               error: (err, _) => Center(
                 child: Text('Could not load $_noun.',
@@ -211,6 +215,119 @@ class _VolunteersPageState extends ConsumerState<VolunteersPage> {
               },
             ),
           ),
+        ],
+      ),
+    );
+  }
+
+  /// Approved rescue volunteers (organizations with kind 'independent').
+  /// Availability = taking cases: not paused and under their limits.
+  Widget _rescueVolunteers() {
+    return ref.watch(approvedRescueVolunteersProvider).when(
+          loading: () => const Center(child: CircularProgressIndicator()),
+          error: (err, _) => Center(
+            child: Text('Could not load rescue volunteers.',
+                style: GoogleFonts.zain(fontSize: 14, color: AppColors.textSecondary)),
+          ),
+          data: (all) {
+            final list = all.where((v) => v.matches(_searchText)).toList();
+            int byName(RescueVolunteerListing a, RescueVolunteerListing b) =>
+                a.name.toLowerCase().compareTo(b.name.toLowerCase());
+            switch (_sort) {
+              case VolunteerSortOption.availability:
+                list.sort((a, b) => a.isAvailable != b.isAvailable ? (a.isAvailable ? -1 : 1) : byName(a, b));
+              case VolunteerSortOption.nameAZ:
+                list.sort(byName);
+              case VolunteerSortOption.nameZA:
+                list.sort((a, b) => byName(b, a));
+            }
+            if (list.isEmpty) {
+              return Center(
+                child: Text(
+                  all.isEmpty ? 'No approved rescue volunteers yet.' : 'No rescue volunteers match your search.',
+                  style: GoogleFonts.zain(fontSize: 14, color: AppColors.textSecondary),
+                ),
+              );
+            }
+            return ListView.separated(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+              itemCount: list.length,
+              separatorBuilder: (_, _) => const SizedBox(height: 10),
+              itemBuilder: (context, i) => _RescueVolunteerCard(volunteer: list[i]),
+            );
+          },
+        );
+  }
+}
+
+class _RescueVolunteerCard extends StatelessWidget {
+  const _RescueVolunteerCard({required this.volunteer});
+
+  final RescueVolunteerListing volunteer;
+
+  Future<void> _call() async {
+    if (volunteer.phone.isEmpty) return;
+    final uri = Uri(scheme: 'tel', path: volunteer.phone);
+    if (await canLaunchUrl(uri)) await launchUrl(uri);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final v = volunteer;
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(14),
+        boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 6)],
+      ),
+      child: Row(
+        children: [
+          CircleAvatar(
+            radius: 24,
+            backgroundColor: AppColors.tearspwn,
+            backgroundImage: v.avatarUrl != null ? NetworkImage(v.avatarUrl!) : null,
+            child: v.avatarUrl == null ? const Icon(Icons.volunteer_activism_outlined, color: AppColors.textSecondary) : null,
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(v.name,
+                    style: GoogleFonts.tiltWarp(fontSize: 14, color: AppColors.textPrimary),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis),
+                const SizedBox(height: 2),
+                Text(
+                  [
+                    if (v.area.isNotEmpty) v.area,
+                    v.memberCount > 1 ? 'Team of ${v.memberCount}' : 'Solo',
+                  ].join(' · '),
+                  style: GoogleFonts.zain(fontSize: 11, color: AppColors.textSecondary),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                const SizedBox(height: 4),
+                Wrap(
+                  spacing: 6,
+                  runSpacing: 4,
+                  children: [
+                    v.isAvailable
+                        ? _pill('Taking cases', AppColors.greenrspwn)
+                        : _pill(v.unavailableReason!, AppColors.slaterspwn),
+                    _pill('${v.activeCases}/${v.maxActiveCases} cases', AppColors.textSecondary),
+                    _pill('${v.animalsInCare}/${v.maxAnimalsInCare} animals', AppColors.textSecondary),
+                  ],
+                ),
+              ],
+            ),
+          ),
+          if (v.phone.isNotEmpty)
+            IconButton(
+              icon: const Icon(Icons.call_outlined, color: AppColors.textPrimary),
+              onPressed: _call,
+            ),
         ],
       ),
     );
@@ -303,13 +420,13 @@ Widget _pill(String text, Color color) => Container(
       child: Text(text, style: GoogleFonts.zain(fontSize: 10, fontWeight: FontWeight.w700, color: Colors.white)),
     );
 
-/// Verified / Under review / Not approved / Not submitted, from the
+/// Verified / Under review / Rejected / Not submitted, from the
 /// transporter's users doc.
 Widget transporterVerificationPill(PetTransporter t) {
   if (t.isVerified || t.verificationStatus == 'approved') return _pill('Verified', AppColors.greenrspwn);
   return switch (t.verificationStatus) {
     'pending' => _pill('Under review', const Color(0xFFE0A800)),
-    'rejected' => _pill('Not approved', AppColors.error),
+    'rejected' => _pill('Rejected', AppColors.error),
     _ => _pill('Not submitted', AppColors.slaterspwn),
   };
 }

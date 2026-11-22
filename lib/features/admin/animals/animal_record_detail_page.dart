@@ -10,7 +10,6 @@ import 'package:respawnd1/core/widgets/animal_image_gallery.dart';
 import 'package:respawnd1/core/widgets/animal_record_card.dart' show genderIconFor;
 import 'package:respawnd1/features/admin/animals/create_animal_record_page.dart';
 import 'package:respawnd1/features/admin/animals/state/animal_records_providers.dart';
-import 'package:respawnd1/features/admin/animals/widgets/animal_logs_section.dart';
 import 'package:respawnd1/features/admin/animals/widgets/animal_management_tab.dart';
 import 'package:respawnd1/features/admin/animals/widgets/animal_medical_tab.dart';
 import 'package:respawnd1/features/admin/animals/widgets/animal_profile_tab.dart';
@@ -62,10 +61,6 @@ class _AnimalRecordDetailPageState extends ConsumerState<AnimalRecordDetailPage>
     SharePlus.instance.share(ShareParams(text: lines.join('\n')));
   }
 
-  void _viewLogs(String animalId) {
-    showAnimalLogsSheet(context, animalId: animalId);
-  }
-
   @override
   Widget build(BuildContext context) {
     final liveAnimal = ref.watch(animalRecordProvider(widget.animalId)).asData?.value;
@@ -82,10 +77,6 @@ class _AnimalRecordDetailPageState extends ConsumerState<AnimalRecordDetailPage>
         title: Text(animal.name.isNotEmpty ? animal.name : (animal.species.isNotEmpty ? animal.species : 'Animal Record'),
             style: GoogleFonts.tiltWarp(fontSize: 18, color: AppColors.background)),
         actions: [
-          IconButton(
-            icon: const Icon(Icons.search, color: AppColors.background),
-            onPressed: null,
-          ),
           PopupMenuButton<String>(
             icon: const Icon(Icons.more_vert, color: AppColors.background),
             onSelected: (value) {
@@ -96,9 +87,6 @@ class _AnimalRecordDetailPageState extends ConsumerState<AnimalRecordDetailPage>
                 case 'share':
                   _share(animal);
                   break;
-                case 'logs':
-                  _viewLogs(animal.id);
-                  break;
               }
             },
             // Archived records are read-only by default — editing is only
@@ -106,7 +94,6 @@ class _AnimalRecordDetailPageState extends ConsumerState<AnimalRecordDetailPage>
             itemBuilder: (context) => [
               if (!animal.archived) const PopupMenuItem(value: 'edit', child: Text('Edit Profile')),
               const PopupMenuItem(value: 'share', child: Text('Share')),
-              const PopupMenuItem(value: 'logs', child: Text('View Logs')),
             ],
           ),
         ],
@@ -155,7 +142,7 @@ class _AnimalRecordHeader extends StatelessWidget {
         // species/paw badge that used to sit bottom-right on top of the
         // gallery has been removed — it added nothing the gallery itself
         // (paging, tap-to-fullscreen, placeholder) doesn't already convey.
-        AnimalImageGallery(photoUrls: animal.photoUrls, height: 220),
+        AnimalImageGallery(photoUrls: animal.photoUrls, captions: animal.photoCaptions, height: 220),
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
           child: Column(

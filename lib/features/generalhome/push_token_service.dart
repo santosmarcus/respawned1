@@ -15,8 +15,15 @@ class PushTokenService {
 
     try {
       final messaging = FirebaseMessaging.instance;
+      // Android 13+ reports "denied" (not "notDetermined") until the user
+      // has been asked, so ask whenever pushes aren't allowed yet. The
+      // system shows its prompt only while it still may; otherwise this
+      // returns at once.
       final settings = await messaging.getNotificationSettings();
-      if (settings.authorizationStatus == AuthorizationStatus.notDetermined) {
+      final allowed =
+          settings.authorizationStatus == AuthorizationStatus.authorized ||
+              settings.authorizationStatus == AuthorizationStatus.provisional;
+      if (!allowed) {
         await messaging.requestPermission(alert: true, badge: true, sound: true);
       }
       final token = await messaging.getToken();

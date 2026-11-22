@@ -76,6 +76,24 @@ class VolunteerEventRepository {
     );
   }
 
+  /// The events the signed-in user saved (hearted), soonest first, with
+  /// their joined/favorited markers set. Saved events that were since
+  /// removed are skipped.
+  Future<List<VolunteerEvent>> loadMyFavoriteEvents() async {
+    final uid = _auth.currentUser?.uid;
+    if (uid == null) return const [];
+    final mine = await loadMyEventIds();
+    final docs = await Future.wait([for (final id in mine.favorites) _eventDoc(id).get()]);
+    final events = [
+      for (final d in docs)
+        if (d.exists)
+          VolunteerEvent.fromFirestore(d)
+            ..favorited = true
+            ..joined = mine.joined.contains(d.id),
+    ]..sort((a, b) => a.startAt.compareTo(b.startAt));
+    return events;
+  }
+
   Future<Map<String, dynamic>?> getMyRegistration(String eventId) async {
     final uid = _auth.currentUser?.uid;
     if (uid == null) return null;

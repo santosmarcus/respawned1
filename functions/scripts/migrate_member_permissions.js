@@ -11,8 +11,8 @@
 //                       accounts linked to --org that have no members doc.
 //
 //   --step=permissions  Gives every Staff members doc an explicit
-//                       `permissions` list: 'carer' → Staff + Animal care;
-//                       'staff' without a list → Full staff (+ Facebook
+//                       `permissions` list: 'carer' → Staff with the default set;
+//                       'staff' without a list → the default set (+ Facebook
 //                       posting if facebookPublisher was set). Removes the
 //                       old facebookPublisher fields, converts pending
 //                       'carer' invitations, and writes one audit entry per
@@ -173,7 +173,7 @@ async function stepPermissions(orgRef) {
   console.log(`Pending 'carer' invitations to convert: ${carerInvites.length}`);
   if (APPLY) {
     for (const i of carerInvites) {
-      await i.ref.update({role: 'staff', permissions: [...PRESETS.animalCare], preset: 'animalCare'});
+      await i.ref.update({role: 'staff', permissions: [...PRESETS.staff], preset: 'staff'});
     }
   }
   return changed;

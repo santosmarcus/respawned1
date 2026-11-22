@@ -4,6 +4,7 @@ import 'package:google_fonts/google_fonts.dart';
 
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/core/models/rescue/animal_record.dart';
+import 'package:respawnd1/features/admin/widgets/admin_search_bar.dart';
 import 'package:respawnd1/features/admin/widgets/donation_admin.dart';
 import 'package:respawnd1/features/donation/models.dart';
 
@@ -18,6 +19,13 @@ const kOpenSponsorshipStatuses = {'draft', 'active', 'paused'};
 /// Why [a] can't get a new sponsorship listing, or null when it is ready to
 /// be sponsored. Mirrors sponsorshipBlocker() in functions/campaigns.js,
 /// which makes the real decision.
+///
+/// Every animal admitted through intake (it has an animal record) can be
+/// sponsored while it is in the organization's care, whatever its adoption
+/// status: adoptable, in treatment, awaiting medical clearance or not
+/// ready. Adoption readiness and collar tags never matter here. Only
+/// animals that have left care (adopted, deceased, being transferred) or
+/// archived records are excluded.
 String? sponsorshipReadiness(AnimalRecord a) {
   if (a.isMalformed) return 'Record could not be read';
   if (a.archived) return 'Archived';
@@ -97,6 +105,13 @@ class SponsorAnimalPickerPage extends ConsumerStatefulWidget {
 class _SponsorAnimalPickerPageState extends ConsumerState<SponsorAnimalPickerPage> {
   String _query = '';
   String _species = 'All';
+  final _searchController = TextEditingController();
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
 
   bool _matches(AnimalRecord a) {
     if (_species != 'All' && a.species.toLowerCase() != _species.toLowerCase()) return false;
@@ -120,26 +135,19 @@ class _SponsorAnimalPickerPageState extends ConsumerState<SponsorAnimalPickerPag
         children: [
           const DonationAdminHeader(
             title: 'Sponsor an Animal',
-            helpText: 'Only animals that are ready to be sponsored are listed: not archived, deceased, adopted or '
-                'being transferred, and without an open sponsorship. Choose one and the sponsorship form opens '
+            helpText: 'Every animal admitted through intake can be sponsored while in your care, whatever its '
+                'adoption status (in treatment, awaiting clearance, not ready or adoptable). Only archived, deceased, '
+                'adopted or transferring animals, and animals that already have an open sponsorship, are left out. '
+                'A sponsorship shows as Fully Funded while its balance covers its monthly amount, and reopens on its '
+                'own when spending brings it under. Choose an animal and the sponsorship form opens '
                 'filled in from its animal record — photo, name, species, description and suggested use of funds. '
                 'Review it, set the monthly amount and publish.',
           ),
-          Padding(
+          AdminSearchBar(
+            controller: _searchController,
+            hintText: 'Search by name or breed',
+            onChanged: (v) => setState(() => _query = v.trim().toLowerCase()),
             padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
-            child: TextField(
-              onChanged: (v) => setState(() => _query = v.trim().toLowerCase()),
-              style: GoogleFonts.zain(fontSize: 15, color: AppColors.textPrimary),
-              decoration: InputDecoration(
-                hintText: 'Search by name or breed',
-                hintStyle: GoogleFonts.zain(fontSize: 15, color: AppColors.textSecondary),
-                prefixIcon: const Icon(Icons.search, color: AppColors.textPrimary),
-                filled: true,
-                fillColor: const Color(0xFFFFF1C7),
-                contentPadding: const EdgeInsets.symmetric(vertical: 10),
-                border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide.none),
-              ),
-            ),
           ),
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
@@ -209,7 +217,7 @@ class _SponsorAnimalPickerPageState extends ConsumerState<SponsorAnimalPickerPag
                         SponsorAnimalTile(
                           animal: a,
                           dimmed: true,
-                          trailing: StatusChip(open[a.id]!.status),
+                          trailing: CampaignStatusChip(open[a.id]!.status),
                           onTap: () => Navigator.push(context,
                               MaterialPageRoute(builder: (_) => DonationAdminInfoPage(campaignId: open[a.id]!.id))),
                         ),

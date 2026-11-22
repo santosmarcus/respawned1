@@ -1,4 +1,6 @@
-import 'dart:typed_data';
+import 'dart:async';
+
+import 'package:flutter/foundation.dart';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:pdf/pdf.dart';
@@ -193,6 +195,9 @@ class AdoptionAgreementService {
   }
 
   /// Opens the OS print/preview sheet, from which staff print or share it.
+  /// Returns once the PDF is built and the sheet is opening: on Android
+  /// the print sheet's future can stay pending after it is closed without
+  /// printing, and callers awaiting it left their buttons disabled.
   Future<void> preview({
     required AdoptionApplication app,
     required AnimalRecord? animal,
@@ -204,6 +209,9 @@ class AdoptionAgreementService {
       organizationName: await _organizationName(app),
       adoptionDate: adoptionDate,
     );
-    await Printing.layoutPdf(onLayout: (_) async => bytes, name: 'adoption_agreement_${app.id}.pdf');
+    unawaited(
+      Printing.layoutPdf(onLayout: (_) async => bytes, name: 'adoption_agreement_${app.id}.pdf')
+          .then((_) {}, onError: (Object e) => debugPrint('Adoption agreement print sheet failed: $e')),
+    );
   }
 }

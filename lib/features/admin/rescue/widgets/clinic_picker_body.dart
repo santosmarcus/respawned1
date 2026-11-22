@@ -81,6 +81,13 @@ class ClinicPickerBody extends StatefulWidget {
   State<ClinicPickerBody> createState() => _ClinicPickerBodyState();
 }
 
+/// Nearby Places results per rounded location (~100 m), kept for the app
+/// session so reopening the picker for the same case is instant.
+final Map<String, List<ClinicSearchResult>> _nearbyCache = {};
+
+/// Last known saved clinics per user, shown at once while they refresh.
+final Map<String, List<SavedClinic>> _savedCache = {};
+
 class _ClinicPickerBodyState extends State<ClinicPickerBody> {
   final _searchController = TextEditingController();
   GoogleMapController? _mapController;
@@ -103,14 +110,20 @@ class _ClinicPickerBodyState extends State<ClinicPickerBody> {
   void initState() {
     super.initState();
     _selected = widget.initialClinic;
+    _savedClinics = _savedCache[widget.actorUid] ?? const [];
     _loadNearby();
     _loadSavedClinics();
   }
 
+  String? get _nearbyKey => (widget.centerLat == null || widget.centerLng == null)
+      ? null
+      : '${widget.centerLat!.toStringAsFixed(3)},${widget.centerLng!.toStringAsFixed(3)}';
+
   Future<void> _loadSavedClinics() async {
     try {
       final saved = await widget.savedClinicsRepository.fetchSavedClinics(widget.actorUid);
-      if (mounted) setState(() => _savedClinics = saved);
+      _savedCache[widget.actorUid] = saved;
+      if (mounted && _pendingBookmarkToggles.isEmpty) setState(() => _savedClinics = saved);
     } catch (_) {
       // Bookmarks are a nice-to-have on top of search — a failure to load
       // them shouldn't block clinic search/selection at all.
@@ -132,7 +145,10 @@ class _ClinicPickerBodyState extends State<ClinicPickerBody> {
       }
     });
 
+    _savedCache[widget.actorUid] = _savedClinics;
     try {
+      // The icon already flipped above; this only confirms it with the
+      // server (and rolls back below if that fails).
       if (wasSaved) {
         await widget.savedClinicsRepository.unsaveClinic(widget.actorUid, clinic.placeId);
       } else {
@@ -147,6 +163,7 @@ class _ClinicPickerBodyState extends State<ClinicPickerBody> {
             _savedClinics = _savedClinics.where((s) => s.placeId != clinic.placeId).toList();
           }
         });
+        _savedCache[widget.actorUid] = _savedClinics;
         ScaffoldMessenger.of(context).showSnackBar(
           appSnackBar('Could not update bookmark: $e', kind: AppMessageKind.error),
         );
@@ -197,9 +214,7 @@ class _ClinicPickerBodyState extends State<ClinicPickerBody> {
     return list;
   }
 
-  List<Widget> _buildSectionedList() {
-    final saved = _savedSection;
-    final nearby = _nearbySection;
+  List<Widget> _buildSectionedList(List<ClinicSearchResult> saved, List<ClinicSearchResult> nearby) {
     final widgets = <Widget>[];
 
     final selected = _selected;
@@ -259,7 +274,6 @@ class _ClinicPickerBodyState extends State<ClinicPickerBody> {
   Widget _clinicTile(ClinicSearchResult clinic) {
     final isSelected = clinic.placeId == _selected?.placeId;
     final isSaved = _isSaved(clinic.placeId);
-    final isBookmarkPending = _pendingBookmarkToggles.contains(clinic.placeId);
     final distanceKm = _distanceKmTo(clinic);
     final isExcluded = _isExcluded(clinic);
 
@@ -271,11 +285,15 @@ class _ClinicPickerBodyState extends State<ClinicPickerBody> {
         isSelected ? Icons.check_circle : Icons.local_hospital_outlined,
         color: isSelected ? AppColors.greenrspwn : (isExcluded ? AppColors.textSecondary : AppColors.textPrimary),
       ),
-      title: Text(clinic.name, style: GoogleFonts.zain(fontSize: 14, fontWeight: FontWeight.w600)),
+      title: Text(clinic.name,
+          maxLines: 2, overflow: TextOverflow.ellipsis, style: GoogleFonts.zain(fontSize: 14, fontWeight: FontWeight.w600)),
       subtitle: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(clinic.address, style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary)),
+          Text(clinic.address,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary)),
           Wrap(
             spacing: 8,
             children: [
@@ -313,15 +331,18 @@ class _ClinicPickerBodyState extends State<ClinicPickerBody> {
             // routed through _selectResult/onTap. Disabled (not hidden, so
             // the row stays a consistent width) when Places returned no
             // phone number for this clinic — never launches an empty tel:.
+            // Two 44px buttons fit the 88px slot (default 48px ones overflowed).
             IconButton(
+              constraints: const BoxConstraints.tightFor(width: 44, height: 44),
+              padding: EdgeInsets.zero,
               icon: const Icon(Icons.call_outlined),
               color: (clinic.phone?.trim().isNotEmpty ?? false) ? AppColors.textPrimary : AppColors.slaterspwn,
               tooltip: (clinic.phone?.trim().isNotEmpty ?? false) ? 'Call ${clinic.name}' : 'Phone number unavailable',
               onPressed: (clinic.phone?.trim().isNotEmpty ?? false) ? () => _callClinic(context, clinic.phone!) : null,
             ),
-            isBookmarkPending
-                ? const Padding(padding: EdgeInsets.all(14), child: CircularProgressIndicator(strokeWidth: 2))
-                : IconButton(
+            IconButton(
+                    constraints: const BoxConstraints.tightFor(width: 44, height: 44),
+                    padding: EdgeInsets.zero,
                     icon: Icon(
                       isSaved ? Icons.bookmark : Icons.bookmark_border,
                       color: isSaved ? AppColors.yellowrspwn : AppColors.textSecondary,
@@ -366,12 +387,24 @@ class _ClinicPickerBodyState extends State<ClinicPickerBody> {
       });
       return;
     }
+    final cached = _nearbyCache[_nearbyKey];
+    if (cached != null) {
+      setState(() {
+        _results = cached;
+        _loading = false;
+        _loadError = null;
+      });
+      _fitCameraToResults();
+      return;
+    }
     setState(() {
       _loading = true;
       _loadError = null;
     });
     try {
       final results = await widget.repository.nearbySearch(lat: widget.centerLat!, lng: widget.centerLng!);
+      final key = _nearbyKey;
+      if (key != null) _nearbyCache[key] = results;
       if (!mounted) return;
       setState(() {
         _results = results;
@@ -502,9 +535,20 @@ class _ClinicPickerBodyState extends State<ClinicPickerBody> {
     }
   }
 
-  @override
-  Widget build(BuildContext context) {
-    final markers = <Marker>{
+  Set<Marker>? _markers;
+  Object? _markersKey;
+
+  /// Rebuilt only when the results or the selection change, not on every
+  /// setState (bookmarking, typing).
+  Set<Marker> get _markerSet {
+    final key = Object.hash(identityHashCode(_results), _selected?.placeId);
+    if (_markers != null && key == _markersKey) return _markers!;
+    _markersKey = key;
+    return _markers = _buildMarkers();
+  }
+
+  Set<Marker> _buildMarkers() {
+    return <Marker>{
       if (widget.centerLat != null && widget.centerLng != null)
         Marker(
           markerId: const MarkerId('rescue_location'),
@@ -522,7 +566,13 @@ class _ClinicPickerBodyState extends State<ClinicPickerBody> {
           onTap: () => _selectResult(c),
         ),
     };
+  }
 
+  @override
+  Widget build(BuildContext context) {
+    final markers = _markerSet;
+    final saved = _savedSection;
+    final nearby = _nearbySection;
     final keyboardOpen = MediaQuery.of(context).viewInsets.bottom > 0;
 
     return DraggableScrollableSheet(
@@ -623,12 +673,23 @@ class _ClinicPickerBodyState extends State<ClinicPickerBody> {
                     ),
                   ),
                   const SizedBox(height: 10),
-                  if (_loading)
-                    const Padding(
-                      padding: EdgeInsets.symmetric(vertical: 32),
-                      child: Center(child: CircularProgressIndicator()),
-                    )
-                  else if (_loadError != null)
+                  if (_loading) ...[
+                    // Saved clinics don't depend on the Places search, so
+                    // they're pickable straight away.
+                    ..._buildSectionedList(saved, const []),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 16),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)),
+                          const SizedBox(width: 10),
+                          Text('Finding nearby clinics…',
+                              style: GoogleFonts.zain(fontSize: 13, color: AppColors.textSecondary)),
+                        ],
+                      ),
+                    ),
+                  ] else if (_loadError != null)
                     Padding(
                       padding: const EdgeInsets.all(16),
                       child: Column(
@@ -644,7 +705,7 @@ class _ClinicPickerBodyState extends State<ClinicPickerBody> {
                         ],
                       ),
                     )
-                  else if (_savedSection.isEmpty && _nearbySection.isEmpty && _selected == null)
+                  else if (saved.isEmpty && nearby.isEmpty && _selected == null)
                     Padding(
                       padding: const EdgeInsets.symmetric(vertical: 24),
                       child: Center(
@@ -653,7 +714,7 @@ class _ClinicPickerBodyState extends State<ClinicPickerBody> {
                       ),
                     )
                   else
-                    ..._buildSectionedList(),
+                    ..._buildSectionedList(saved, nearby),
                 ],
               ),
             ),

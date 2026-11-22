@@ -7,10 +7,9 @@ import 'package:respawnd1/core/models/rescue/animal_characteristics.dart';
 import 'package:respawnd1/core/models/rescue/animal_record.dart';
 import 'package:respawnd1/core/widgets/animal_record_card.dart';
 import 'package:respawnd1/features/admin/animals/state/animal_records_providers.dart';
-import 'package:respawnd1/features/generalhome/notifications_screen.dart';
-import 'package:respawnd1/features/generalhome/user_profile.dart';
 import 'package:respawnd1/app_theme.dart';
 import 'animal_page.dart';
+import 'community_adoption_list.dart';
 
 //Data Model
 enum AnimalGender { male, female }
@@ -43,6 +42,12 @@ class Animal {
   final String? publicStatus;
   final String? photoUrl;
   final List<String> photoUrls;
+  /// Description per photo, keyed by URL.
+  final Map<String, String> photoCaptions;
+
+  /// Set when an independent rescuer (not a shelter) cares for the animal:
+  /// their name, shown as "Independent rescuer · name".
+  final String? independentRescuerName;
 
   Animal({
     required this.id,
@@ -67,6 +72,8 @@ class Animal {
     this.publicStatus,
     this.photoUrl,
     this.photoUrls = const [],
+    this.photoCaptions = const {},
+    this.independentRescuerName,
   });
 }
 
@@ -147,6 +154,8 @@ Animal animalRecordToCard(AnimalRecord r, int index) {
     publicStatus: _publicStatusLabel(r),
     photoUrl: r.photoUrls.isNotEmpty ? r.photoUrls.first : null,
     photoUrls: r.photoUrls,
+    photoCaptions: r.photoCaptions,
+    independentRescuerName: r.raw['ownerKind'] == 'independent' ? (r.raw['ownerName'] as String? ?? '') : null,
   );
 }
 
@@ -258,6 +267,8 @@ class AdoptionPage extends ConsumerStatefulWidget {
 
 class _AdoptionPageState extends ConsumerState<AdoptionPage> {
   int _filterIndex = 0;
+  // 0: shelter animals (Animal Records); 1: Community Adoption listings.
+  int _section = 0;
   final TextEditingController _searchController = TextEditingController();
   String _searchQuery = '';
 
@@ -384,43 +395,6 @@ class _AdoptionPageState extends ConsumerState<AdoptionPage> {
           ),
         ),
       ),
-      bottomNavigationBar: BottomNavigationBar(
-        currentIndex: 0,
-        items: const [
-          BottomNavigationBarItem(
-            icon: Icon(Icons.home_outlined),
-            activeIcon: Icon(Icons.home),
-            label: 'Home',
-          ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.notifications_outlined),
-            activeIcon: Icon(Icons.notifications),
-            label: 'Notifications',
-          ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.person_outline),
-            activeIcon: Icon(Icons.person),
-            label: 'My Profile',
-          ),
-        ],
-        onTap: (index) {
-          if (index == 0) {
-            Navigator.popUntil(context, (route) => route.isFirst);
-          }
-          else if (index == 1) {
-            Navigator.push(
-              context,
-              MaterialPageRoute(builder: (context) => const NotificationsScreen()),
-            );
-          }
-          else if (index == 2) {
-            Navigator.push(
-              context,
-              MaterialPageRoute(builder: (context) => const UserProfile()),
-            );
-          }
-        },
-      ),
       body: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -514,6 +488,42 @@ class _AdoptionPageState extends ConsumerState<AdoptionPage> {
             ),
           ),
 
+          const SizedBox(height: 12),
+
+          // Shelter animals or Community Adoption listings.
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: Row(
+              children: [
+                for (final (i, label) in [(0, 'Shelter Animals'), (1, 'Community Adoption')]) ...[
+                  if (i > 0) const SizedBox(width: 8),
+                  Expanded(
+                    child: GestureDetector(
+                      onTap: () => setState(() => _section = i),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(vertical: 10),
+                        alignment: Alignment.center,
+                        decoration: BoxDecoration(
+                          color: _section == i ? AppColors.textPrimary : Colors.white,
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: AppColors.textPrimary),
+                        ),
+                        child: Text(
+                          label,
+                          style: GoogleFonts.zain(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w700,
+                            color: _section == i ? Colors.white : AppColors.textPrimary,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+
           const SizedBox(height: 14),
 
           // Filter tabs
@@ -545,7 +555,16 @@ class _AdoptionPageState extends ConsumerState<AdoptionPage> {
           const SizedBox(height: 16),
 
           Expanded(
-            child: recordsAsync.when(
+            child: _section == 1
+                ? CommunityAdoptionList(
+              speciesFilter: switch (_filterIndex) {
+                1 => 'Dog',
+                2 => 'Cat',
+                _ => null,
+              },
+              searchQuery: _searchQuery,
+            )
+                : recordsAsync.when(
               loading: () => const _LoadingState(),
               error: (error, _) => _ErrorState(
                 onRetry: () => ref.invalidate(publicAnimalRecordsProvider),

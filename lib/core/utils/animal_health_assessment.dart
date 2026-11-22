@@ -9,12 +9,17 @@
 /// parsing layer.
 library;
 
+/// Added to every single-select health field, so a reporter who couldn't
+/// get close enough can say so instead of guessing a "normal" answer.
+const String kNotAssessedOption = 'Not sure / Not assessed';
+
 /// Single-select.
 const List<String> kBodyConditionOptions = [
   'Overweight',
   'Normal',
   'Underweight',
   'Extremely Underweight (prominent rib bones)',
+  kNotAssessedOption,
 ];
 
 /// Single-select.
@@ -22,6 +27,7 @@ const List<String> kMobilityOptions = [
   'Walks and runs normally',
   'Minor limp/stiffness',
   'Cannot walk/crawling only',
+  kNotAssessedOption,
 ];
 
 /// Single-select.
@@ -29,6 +35,7 @@ const List<String> kAlertnessOptions = [
   'Alert/responsive',
   'Lethargic/timid',
   'Unresponsive/collapsed/disoriented',
+  kNotAssessedOption,
 ];
 
 /// Multi-select. Kept as two genuinely separate options — a prior revision
@@ -62,11 +69,39 @@ const Map<String, Set<String>> kBehaviorConflicts = {
   'Distress/Anxious': {'Calm'},
 };
 
+/// Behavior of an owned pet, as its owner knows it — asked on the lost-pet
+/// owner form instead of [kBehaviorOptions] (which describes a stray as
+/// seen on the street). Tells a finder how to approach and identify the pet.
+const List<String> kOwnedPetBehaviorOptions = [
+  'Friendly with strangers',
+  'Shy or wary of strangers',
+  'Comes when called',
+  'Answers to its name',
+  'May run if approached',
+  'Scared of loud noises',
+  'Comes for food or treats',
+  'Good with other animals',
+  'Not good with other animals',
+  'Good with children',
+  'May bite or scratch when scared',
+];
+
+/// Same idea as [kBehaviorConflicts], for [kOwnedPetBehaviorOptions].
+const Map<String, Set<String>> kOwnedPetBehaviorConflicts = {
+  'Friendly with strangers': {'Shy or wary of strangers'},
+  'Shy or wary of strangers': {'Friendly with strangers'},
+  'Comes when called': {'May run if approached'},
+  'May run if approached': {'Comes when called'},
+  'Good with other animals': {'Not good with other animals'},
+  'Not good with other animals': {'Good with other animals'},
+};
+
 /// Single-select.
 const List<String> kEyesNoseMouthOptions = [
   'Clear and no discharge',
   'Small amount of discharge',
   'Thick and excessive discharge',
+  kNotAssessedOption,
 ];
 
 /// Single-select.
@@ -74,7 +109,37 @@ const List<String> kSkinAndCoatOptions = [
   'Clean; no visible skin disease (fleas/ticks, mange)',
   'Minor hairloss; presence of irritation/skin disease (fleas/ticks, mange)',
   'Large open wounds; severe skin disease (fleas/ticks, mange)',
+  kNotAssessedOption,
 ];
+
+/// Everyday wording shown on the report form for the stored values above
+/// (and the risk levels in rescue_risk.dart). The stored strings stay as
+/// they are: saved reports, staff screens and risk checks compare them.
+const Map<String, String> kPlainOptionLabels = {
+  'Extremely Underweight (prominent rib bones)': 'Very thin (ribs clearly showing)',
+  'Walks and runs normally': 'Walks and runs normally',
+  'Minor limp/stiffness': 'Limping a little or stiff',
+  'Cannot walk/crawling only': "Can't walk, only crawls",
+  'Alert/responsive': 'Alert and reacts to you',
+  'Lethargic/timid': 'Weak, sleepy or very quiet',
+  'Unresponsive/collapsed/disoriented': 'Not responding, collapsed or confused',
+  'Clear and no discharge': 'Clean, nothing coming out',
+  'Small amount of discharge': 'A little discharge (wet or crusty)',
+  'Thick and excessive discharge': 'A lot of thick discharge (pus or mucus)',
+  'Clean; no visible skin disease (fleas/ticks, mange)': 'Clean skin and fur',
+  'Minor hairloss; presence of irritation/skin disease (fleas/ticks, mange)':
+      'Some bald spots, itching, fleas or ticks',
+  'Large open wounds; severe skin disease (fleas/ticks, mange)': 'Big open wounds or very bad skin',
+  'Eating/drinking normally': 'Eating and drinking normally',
+  'Refuses food/water; Obvious hunger/dehydration': "Won't eat or drink, or looks starved or dried out",
+  'Uncertain': 'Not sure',
+  'Has attempted to bite': 'Has tried to bite',
+  'Actively fleeing': 'Running away',
+  'Unable to contain': "Can't be held or kept in one place",
+};
+
+/// The form's label for a stored option value.
+String plainOptionLabel(String value) => kPlainOptionLabels[value] ?? value;
 
 /// Single-select.
 const List<String> kAppetiteHydrationOptions = [
@@ -91,3 +156,88 @@ const List<String> kEnvironmentSafetyOptions = [
   'Around busy roads',
   'In dirty cages',
 ];
+
+/// Single-select. The reporter's own description of the worst visible
+/// injury — the urgency assessment (core/utils/urgency_assessment.dart)
+/// weighs it together with every other answer, never on its own.
+const String kInjuryNone = 'No visible injury';
+const String kInjuryMinor = 'Minor (small cut, scratch or scab)';
+const String kInjuryModerate = 'Moderate (open wound, swelling, injured limb)';
+const String kInjurySevere = 'Severe (deep wound, exposed bone, suspected fracture)';
+const String kInjuryLifeThreatening = 'Life-threatening (heavy or uncontrolled bleeding)';
+
+const List<String> kInjuryOptions = [
+  kInjuryNone,
+  kInjuryMinor,
+  kInjuryModerate,
+  kInjurySevere,
+  kInjuryLifeThreatening,
+  kNotAssessedOption,
+];
+
+/// Single-select, asked only when an injury is reported. The app does not
+/// analyze photos itself: this records what the reporter says the photos
+/// show, so staff know whether they can check the injury from them.
+const List<String> kInjuryPhotoOptions = [
+  'Yes, the injury is visible in my photos',
+  'No, the photos do not show it',
+];
+
+/// Female-only, single-select. Reporter observations, never a diagnosis:
+/// only a veterinarian can confirm a pregnancy (see
+/// PregnancyStatus / `vetConfirmedPregnancy` on the animal record side).
+const List<String> kLitterOptions = ['Yes', 'No', 'Not sure'];
+const List<String> kSuspectedPregnancyOptions = ['Yes, suspected', 'No', 'Not sure'];
+
+/// Clears answers that only apply to a female animal. Call whenever the
+/// sex changes away from Female, so a report never carries a litter or
+/// pregnancy answer for a male or unsexed animal.
+bool sexAllowsPregnancyQuestions(String? sex) => sex == 'Female';
+
+// ---- Litter (female dog that has a litter) ---------------------------------
+// Asked only for a female Dog whose "has a litter?" answer is Yes
+// (FoundAnimalEntry.asksLitterDetails). Separate from the suspected
+// pregnancy question: a pregnancy is not an existing litter.
+
+const String kLitterTogether = 'All puppies are together in one place';
+const String kLitterScattered = 'Puppies are scattered in different places';
+const String kLitterSomeSeparated = 'Some are together, others are separated';
+const String kLitterLocationUnsure = 'Not sure';
+
+const List<String> kLitterLocationOptions = [
+  kLitterTogether,
+  kLitterScattered,
+  kLitterSomeSeparated,
+  kLitterLocationUnsure,
+];
+
+/// Locations that ask where each known group of puppies is.
+bool litterLocationIsSplit(String? location) =>
+    location == kLitterScattered || location == kLitterSomeSeparated;
+
+const String kLitterAllHealthy = 'All appear healthy';
+const String kLitterSomeSick = 'Some appear sick or injured';
+const String kLitterAllSick = 'All appear sick or injured';
+const String kLitterSomeWeak = 'Some are weak or appear malnourished';
+const String kLitterConditionUnknown = 'Unknown or unable to assess';
+
+const List<String> kLitterConditionOptions = [
+  kLitterAllHealthy,
+  kLitterSomeSick,
+  kLitterAllSick,
+  kLitterSomeWeak,
+  kLitterConditionUnknown,
+];
+
+/// Conditions where some puppies may need their own rescue report.
+bool litterConditionNeedsAttention(String? condition) =>
+    condition == kLitterSomeSick || condition == kLitterAllSick || condition == kLitterSomeWeak;
+
+/// Most puppies accepted in one litter (a sanity limit for typing errors).
+const int kMaxLitterSize = 20;
+
+/// Most known locations a reporter can list for a split litter.
+const int kMaxLitterGroups = 6;
+
+/// Most litter photos per animal.
+const int kMaxLitterPhotos = 3;

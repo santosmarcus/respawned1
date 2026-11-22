@@ -1,3 +1,5 @@
+import 'package:respawnd1/features/admin/widgets/view_only.dart';
+import 'package:respawnd1/core/models/organization/org_permission.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -12,7 +14,8 @@ import 'package:respawnd1/features/admin/widgets/admin_search_bar.dart';
 import 'package:respawnd1/features/admin/widgets/admin_drawer.dart';
 import 'package:respawnd1/features/adoption/adoption_page.dart' show kAgeGroupOptions, matchesAgeGroup;
 import 'animal_record_detail_page.dart';
-import 'create_animal_record_page.dart';
+import 'facebook_share_page.dart';
+import 'widgets/link_intake_case_sheet.dart';
 
 // 'Recently Updated' removed — it overlapped with 'Newest Intake' (both
 // ultimately read createdAt for most records, since updatedAt is only set
@@ -54,6 +57,9 @@ class AnimalRecordsPage extends ConsumerStatefulWidget {
 }
 
 class _AnimalRecordsPageState extends ConsumerState<AnimalRecordsPage> {
+  /// Unfolds the adopted/transferred/deceased group at the bottom.
+  bool _showNotInShelter = false;
+
   String _speciesFilter = 'All';
   String _statusFilter = 'All';
   String _searchQuery = '';
@@ -84,8 +90,7 @@ class _AnimalRecordsPageState extends ConsumerState<AnimalRecordsPage> {
 
   // Long-press multi-select — keyed by the real AnimalRecord doc id, never
   // a list index, so a selection stays valid even if filtering/sorting
-  // changes what's visible. No bulk actions wired up yet; this just makes
-  // the selection system itself ready for them.
+  // changes what's visible. Bulk action: Share to Facebook.
   final Set<String> _selectedIds = {};
   bool get _selecting => _selectedIds.isNotEmpty;
 
@@ -110,6 +115,14 @@ class _AnimalRecordsPageState extends ConsumerState<AnimalRecordsPage> {
   }
 
   void _clearSelection() => setState(_selectedIds.clear);
+
+  Future<void> _shareSelected() async {
+    final all = ref.read(allAnimalRecordsProvider).asData?.value ?? const <AnimalRecord>[];
+    // In the order they appear in the full list, not the order tapped.
+    final picked = all.where((a) => _selectedIds.contains(a.id)).toList();
+    final shared = await openFacebookShare(context, picked);
+    if (shared && mounted) _clearSelection();
+  }
 
   // 'Closed' dropped — it never corresponded to any real AnimalRecord field
   // value (adoptionStatus is only not_ready/adoptable/reserved/adopted/
@@ -505,6 +518,12 @@ class _AnimalRecordsPageState extends ConsumerState<AnimalRecordsPage> {
         showLeading: !_selecting,
         actions: [
           if (_selecting)
+            IconButton(
+              tooltip: 'Share to Facebook',
+              icon: const Icon(Icons.facebook, color: AppColors.background),
+              onPressed: _shareSelected,
+            ),
+          if (_selecting)
             // Visible text label, not just a close icon — an icon alone
             // reads ambiguous (could look like "close the page").
             TextButton(
@@ -516,6 +535,7 @@ class _AnimalRecordsPageState extends ConsumerState<AnimalRecordsPage> {
       ),
       body: Column(
         children: [
+          const ViewOnlyBanner(perms: [OrgPermission.animals, OrgPermission.care]),
           AdminSearchBar(
             controller: _searchController,
             hintText: 'Search name, species, breed, tag, case ID…',
@@ -583,56 +603,76 @@ class _AnimalRecordsPageState extends ConsumerState<AnimalRecordsPage> {
                   );
                 }
 
-                if (_isGrid) {
-                  return GridView.builder(
-                    key: const PageStorageKey('animal_records_grid'),
-                    padding: const EdgeInsets.symmetric(horizontal: 16),
-                    // Max-extent delegate: 2 columns at normal phone
-                    // widths, more only once there's enough width for them
-                    // (tablets/landscape) — no hardcoded column count.
-                    gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-                      maxCrossAxisExtent: 190,
-                      mainAxisSpacing: 12,
-                      crossAxisSpacing: 12,
-                      childAspectRatio: 0.72,
-                    ),
-                    itemCount: sorted.length,
-                    itemBuilder: (context, index) {
-                      final a = sorted[index];
-                      return AnimalRecordGridTile(
-                        animal: a,
-                        selected: _selectedIds.contains(a.id),
-                        onTap: _selecting ? () => _toggleSelect(a.id) : () => _openRecord(context, a),
-                        onLongPress: () => _toggleSelect(a.id),
-                      );
-                    },
-                  );
-                }
+                // Animals no longer in the shelter (adopted, transferred,
+                // deceased) go to the bottom, folded under "Show N not in
+                // shelter" so the working list stays short. A search or a
+                // status filter shows everything flat, since then the user
+                // is looking for those animals on purpose.
+                final collapse = _searchQuery.isEmpty && _statusFilter == 'All' && _recordStatus != 'Archived';
+                final here = collapse ? sorted.where(isInShelter).toList() : sorted;
+                final away = collapse ? sorted.where((a) => !isInShelter(a)).toList() : const <AnimalRecord>[];
+                final showAway = _showNotInShelter || here.isEmpty;
 
-                return ListView.separated(
-                  key: const PageStorageKey('animal_records_list'),
-                  padding: const EdgeInsets.symmetric(horizontal: 16),
-                  itemCount: sorted.length,
-                  separatorBuilder: (context, index) =>
-                  const SizedBox(height: 12),
-                  itemBuilder: (context, index) {
-                    final a = sorted[index];
-                    final isSelected = _selectedIds.contains(a.id);
-                    // Compact admin card (spec §6): no description, no
-                    // health/attention chips — just image, name+gender,
-                    // species/breed, age. The user-facing adoption list
-                    // keeps its own chips untouched.
-                    return AnimalRecordCard(
+                Widget card(AnimalRecord a) => AnimalRecordCard(
                       animal: a,
                       compact: true,
-                      selected: isSelected,
+                      selected: _selectedIds.contains(a.id),
                       // Tapping while selecting toggles instead of
                       // navigating; long-press always enters/adds to
                       // selection, keyed by the real doc id, never index.
                       onTap: _selecting ? () => _toggleSelect(a.id) : () => _openRecord(context, a),
                       onLongPress: () => _toggleSelect(a.id),
                     );
-                  },
+                Widget tile(AnimalRecord a) => AnimalRecordGridTile(
+                      animal: a,
+                      selected: _selectedIds.contains(a.id),
+                      onTap: _selecting ? () => _toggleSelect(a.id) : () => _openRecord(context, a),
+                      onLongPress: () => _toggleSelect(a.id),
+                    );
+                // Max-extent delegate: 2 columns at normal phone widths,
+                // more only once there's enough width (tablets/landscape).
+                const gridDelegate = SliverGridDelegateWithMaxCrossAxisExtent(
+                  maxCrossAxisExtent: 190,
+                  mainAxisSpacing: 12,
+                  crossAxisSpacing: 12,
+                  childAspectRatio: 0.72,
+                );
+                Widget section(List<AnimalRecord> list) => SliverPadding(
+                      padding: const EdgeInsets.symmetric(horizontal: 16),
+                      sliver: _isGrid
+                          ? SliverGrid.builder(
+                              gridDelegate: gridDelegate,
+                              itemCount: list.length,
+                              itemBuilder: (_, i) => tile(list[i]),
+                            )
+                          : SliverList.separated(
+                              itemCount: list.length,
+                              separatorBuilder: (_, _) => const SizedBox(height: 12),
+                              itemBuilder: (_, i) => card(list[i]),
+                            ),
+                    );
+
+                return CustomScrollView(
+                  key: PageStorageKey(_isGrid ? 'animal_records_grid' : 'animal_records_list'),
+                  physics: const AlwaysScrollableScrollPhysics(),
+                  slivers: [
+                    section(here),
+                    if (away.isNotEmpty) ...[
+                      SliverToBoxAdapter(
+                        child: Padding(
+                          padding: EdgeInsets.fromLTRB(16, here.isEmpty ? 0 : 12, 16, 12),
+                          child: _NotInShelterToggle(
+                            count: away.length,
+                            adopted: away.where((a) => a.isAdopted).length,
+                            expanded: showAway,
+                            onTap: here.isEmpty ? null : () => setState(() => _showNotInShelter = !_showNotInShelter),
+                          ),
+                        ),
+                      ),
+                      if (showAway) section(away),
+                    ],
+                    const SliverToBoxAdapter(child: SizedBox(height: 16)),
+                  ],
                 );
               },
               ),
@@ -645,11 +685,9 @@ class _AnimalRecordsPageState extends ConsumerState<AnimalRecordsPage> {
           Padding(
             padding: const EdgeInsets.all(16),
             child: ElevatedButton(
-              onPressed: () => Navigator.push(
-                context,
-                MaterialPageRoute(
-                    builder: (_) => const CreateAnimalRecordPage()),
-              ),
+              // Offers intaked rescue animals that still need a record
+              // (linked to their case) before a blank record.
+              onPressed: () => openAddAnimalRecord(context),
               style: ElevatedButton.styleFrom(
                 backgroundColor: AppColors.yellowrspwn,
                 foregroundColor: AppColors.textPrimary,
@@ -670,3 +708,39 @@ class _AnimalRecordsPageState extends ConsumerState<AnimalRecordsPage> {
   }
 }
 
+/// "Show 6 not in shelter · 4 adopted" — folds the animals that have left
+/// the shelter under the working list.
+class _NotInShelterToggle extends StatelessWidget {
+  final int count;
+  final int adopted;
+  final bool expanded;
+  final VoidCallback? onTap;
+  const _NotInShelterToggle({required this.count, required this.adopted, required this.expanded, this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final style = GoogleFonts.zain(fontSize: 13, fontWeight: FontWeight.w700, color: AppColors.textSecondary);
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(10),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 8),
+        child: Row(
+          children: [
+            const Expanded(child: Divider()),
+            const SizedBox(width: 8),
+            Text(
+              '${expanded ? 'Not in shelter' : 'Show $count not in shelter'}'
+              '${adopted > 0 ? ' · $adopted adopted' : ''}',
+              style: style,
+            ),
+            if (onTap != null)
+              Icon(expanded ? Icons.expand_less : Icons.expand_more, size: 18, color: AppColors.textSecondary),
+            const SizedBox(width: 8),
+            const Expanded(child: Divider()),
+          ],
+        ),
+      ),
+    );
+  }
+}

@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 import 'package:respawnd1/app_theme.dart';
+import 'package:respawnd1/core/utils/animal_health_assessment.dart' show plainOptionLabel;
 import 'package:respawnd1/features/rescue/rescue_form_options.dart';
 
 // Small, stateless form building blocks shared by the Report a Stray form's
@@ -65,6 +66,9 @@ class SpeciesDropdown extends StatelessWidget {
       key: ValueKey(value),
       initialValue: value,
       isDense: true,
+      // Fit the column it's in (its widest option otherwise sets its
+      // width and overflows half-width rows on small phones).
+      isExpanded: true,
       decoration: InputDecoration(
         isDense: true,
         hintText: 'Select species',
@@ -115,6 +119,9 @@ class BreedDropdown extends StatelessWidget {
           key: ValueKey(validValue),
           initialValue: validValue,
           isDense: true,
+          // Fit the column it's in (its widest option otherwise sets its
+          // width and overflows half-width rows on small phones).
+          isExpanded: true,
           decoration: InputDecoration(
             isDense: true,
             hintText: species == null ? 'Select species first' : 'Select breed',
@@ -129,20 +136,20 @@ class BreedDropdown extends StatelessWidget {
           items: species == null
               ? const []
               : options
-                    .map(
-                      (b) => DropdownMenuItem(
-                        value: b,
-                        child: Text(
-                          b,
-                          overflow: TextOverflow.ellipsis,
-                          style: GoogleFonts.zain(
-                            fontSize: 13,
-                            color: AppColors.textPrimary,
-                          ),
-                        ),
-                      ),
-                    )
-                    .toList(),
+              .map(
+                (b) => DropdownMenuItem(
+              value: b,
+              child: Text(
+                b,
+                overflow: TextOverflow.ellipsis,
+                style: GoogleFonts.zain(
+                  fontSize: 13,
+                  color: AppColors.textPrimary,
+                ),
+              ),
+            ),
+          )
+              .toList(),
           onChanged: species == null ? null : onChanged,
         ),
         if (validValue == kOthersBreedLabel) ...[
@@ -154,57 +161,159 @@ class BreedDropdown extends StatelessWidget {
   }
 }
 
-/// Single-choice option rendered as a square checkbox + label.
+/// One answer of a single-choice question: a bordered tile with a radio
+/// mark, so mutually exclusive answers look and behave like radio buttons
+/// (they used to be square checkboxes, which read as "pick any").
+/// [value] is what gets stored; it defaults to [label].
 class RescueRadioOption extends StatelessWidget {
   const RescueRadioOption(
-    this.label,
-    this.selected,
-    this.onSelect, {
-    super.key,
-  });
+      this.label,
+      this.selected,
+      this.onSelect, {
+        super.key,
+        this.value,
+      });
 
   final String label;
   final String? selected;
   final ValueChanged<String> onSelect;
+  final String? value;
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: () => onSelect(label),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 4),
-        child: Row(
-          children: [
-            SizedBox(
-              width: 20,
-              height: 20,
-              child: Checkbox(
-                value: selected == label,
-                onChanged: (_) => onSelect(label),
-                activeColor: AppColors.textPrimary,
-                side: const BorderSide(
-                  color: AppColors.textPrimary,
-                  width: 1.5,
-                ),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(2),
-                ),
-                materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+    final v = value ?? label;
+    final isSelected = selected == v;
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Semantics(
+        inMutuallyExclusiveGroup: true,
+        checked: isSelected,
+        button: true,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(12),
+          onTap: () => onSelect(v),
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 120),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            decoration: BoxDecoration(
+              color: isSelected ? kRescueSelectedFill : Colors.white,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(
+                color: isSelected ? AppColors.textPrimary : kRescueFieldBorder,
+                width: isSelected ? 1.5 : 1,
               ),
             ),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Text(
-                label,
-                style: GoogleFonts.zain(
-                  fontSize: 14,
-                  color: AppColors.textPrimary,
+            child: Row(
+              children: [
+                Icon(
+                  isSelected ? Icons.radio_button_checked : Icons.radio_button_unchecked,
+                  size: 20,
+                  color: isSelected ? AppColors.textPrimary : AppColors.textSecondary,
                 ),
-              ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    label,
+                    style: GoogleFonts.zain(
+                      fontSize: 14,
+                      fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
+                      color: AppColors.textPrimary,
+                    ),
+                  ),
+                ),
+              ],
             ),
-          ],
+          ),
         ),
       ),
+    );
+  }
+}
+
+/// Pale yellow fill for a selected chip/option, with a dark olive border.
+const Color kRescueSelectedFill = Color(0xFFFFF4CC);
+
+/// Subtle gray border for unselected chips/options and form cards.
+const Color kRescueFieldBorder = Color(0xFFDAD7CC);
+
+/// A titled card grouping one part of the form ("1 · Location", ...), so
+/// the long form reads as a few clear steps.
+class RescueFormSection extends StatelessWidget {
+  const RescueFormSection({
+    super.key,
+    required this.step,
+    required this.title,
+    this.subtitle,
+    required this.child,
+  });
+
+  final int step;
+  final String title;
+  final String? subtitle;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.symmetric(horizontal: 16),
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 18),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: kRescueFieldBorder),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 24,
+                height: 24,
+                alignment: Alignment.center,
+                decoration: const BoxDecoration(color: AppColors.yellowrspwn, shape: BoxShape.circle),
+                child: Text('$step',
+                    style: GoogleFonts.zain(fontSize: 13, fontWeight: FontWeight.w800, color: AppColors.textPrimary)),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(title, style: GoogleFonts.tiltWarp(fontSize: 16, color: AppColors.textPrimary)),
+              ),
+            ],
+          ),
+          if (subtitle != null) ...[
+            const SizedBox(height: 4),
+            Padding(
+              padding: const EdgeInsets.only(left: 34),
+              child: Text(subtitle!, style: GoogleFonts.zain(fontSize: 13, color: AppColors.textSecondary)),
+            ),
+          ],
+          const SizedBox(height: 14),
+          child,
+        ],
+      ),
+    );
+  }
+}
+
+/// Small section heading inside an animal card ("Health assessment").
+class RescueSubsectionHeader extends StatelessWidget {
+  const RescueSubsectionHeader(this.title, {super.key, this.subtitle});
+
+  final String title;
+  final String? subtitle;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(title,
+            style: GoogleFonts.zain(fontSize: 15, fontWeight: FontWeight.w800, color: AppColors.textPrimary)),
+        if (subtitle != null)
+          Text(subtitle!, style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary)),
+      ],
     );
   }
 }
@@ -257,12 +366,12 @@ class RescuePickerField extends StatelessWidget {
 /// Underlined single-line text field used throughout the form.
 class RescueTextField extends StatelessWidget {
   const RescueTextField(
-    this.controller,
-    this.hint, {
-    super.key,
-    this.keyboardType,
-    this.inputFormatters,
-  });
+      this.controller,
+      this.hint, {
+        super.key,
+        this.keyboardType,
+        this.inputFormatters,
+      });
 
   final TextEditingController controller;
   final String hint;
@@ -317,10 +426,12 @@ class AssessmentDropdown extends StatelessWidget {
       initialValue: value,
       isDense: true,
       isExpanded: true,
+      // A floating label, so the question stays visible after an answer
+      // is picked (a hint disappeared and left only the answer).
       decoration: InputDecoration(
         isDense: true,
-        hintText: hintText,
-        hintStyle: GoogleFonts.zain(
+        labelText: hintText,
+        labelStyle: GoogleFonts.zain(
           fontSize: 13,
           color: AppColors.textSecondary,
         ),
@@ -333,7 +444,7 @@ class AssessmentDropdown extends StatelessWidget {
           DropdownMenuItem(
             value: o,
             child: Text(
-              o,
+              plainOptionLabel(o),
               overflow: TextOverflow.ellipsis,
               style: GoogleFonts.zain(fontSize: 13),
             ),
@@ -362,21 +473,37 @@ class RescueToggleChip extends StatelessWidget {
     return GestureDetector(
       onTap: onTap,
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+        // At least the old fixed height; a label too long for the row wraps
+        // onto a second line instead of overflowing on small phones.
+        constraints: const BoxConstraints(minHeight: 34),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
         decoration: BoxDecoration(
-          color: selected ? AppColors.yellowrspwn : Colors.white,
+          color: selected ? kRescueSelectedFill : Colors.white,
           borderRadius: BorderRadius.circular(20),
           border: Border.all(
-            color: selected ? AppColors.yellowrspwn : AppColors.slaterspwn,
+            color: selected ? AppColors.textPrimary : kRescueFieldBorder,
+            width: selected ? 1.5 : 1,
           ),
         ),
-        child: Text(
-          label,
-          style: GoogleFonts.zain(
-            fontSize: 12,
-            fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
-            color: AppColors.textPrimary,
-          ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (selected) ...[
+              const Icon(Icons.check, size: 14, color: AppColors.textPrimary),
+              const SizedBox(width: 4),
+            ],
+            Flexible(
+              child: Text(
+                label,
+                style: GoogleFonts.zain(
+                  fontSize: 13,
+                  height: 1.15,
+                  fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+                  color: AppColors.textPrimary,
+                ),
+              ),
+            ),
+          ],
         ),
       ),
     );
@@ -426,7 +553,7 @@ class RiskDropdown extends StatelessWidget {
           initialValue: value,
           isDense: true,
           isExpanded:
-              true, // lets the selected-value Text shrink to fit instead of overflowing
+          true, // lets the selected-value Text shrink to fit instead of overflowing
           decoration: InputDecoration(
             isDense: true,
             hintText: hintText,
@@ -438,7 +565,7 @@ class RiskDropdown extends StatelessWidget {
             for (final level in options)
               DropdownMenuItem(
                 value: level,
-                child: Text(level, overflow: TextOverflow.ellipsis),
+                child: Text(plainOptionLabel(level), overflow: TextOverflow.ellipsis),
               ),
           ],
           selectedItemBuilder: (context) => [
@@ -446,7 +573,7 @@ class RiskDropdown extends StatelessWidget {
               Align(
                 alignment: Alignment.centerLeft,
                 child: Text(
-                  value ?? '',
+                  value == null ? '' : plainOptionLabel(value!),
                   overflow: TextOverflow.ellipsis,
                   maxLines: 1,
                 ),

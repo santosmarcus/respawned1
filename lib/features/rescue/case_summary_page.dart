@@ -4,6 +4,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:video_player/video_player.dart';
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/features/generalhome/home_screen.dart';
+import 'package:respawnd1/features/rescue/case_completed_page.dart';
 
 class CaseSummaryPage extends StatelessWidget {
   final String caseId;
@@ -18,15 +19,6 @@ class CaseSummaryPage extends StatelessWidget {
   });
 
 
-  bool get _isClosed {
-    final s = (caseData['status'] as String? ?? '').toLowerCase();
-    return s == 'closed' || s.contains('ended');
-  }
-
-  bool get _isRejected {
-    final s = (caseData['status'] as String? ?? '').toLowerCase();
-    return s == 'rejected';
-  }
 
 
   Future<void> _close(BuildContext context) async {
@@ -263,7 +255,7 @@ class CaseSummaryPage extends StatelessWidget {
           onPressed: () => _close(context),
         ),
         title: Text(
-            _isRejected ? 'Report Reviewed' : (_isClosed ? 'Case Closed' : 'Case Completed'),
+            finishedCaseTitle(caseData),
             style: Theme.of(context).textTheme.displaySmall),
         centerTitle: true,
       ),
@@ -404,7 +396,8 @@ class CaseSummaryPage extends StatelessWidget {
             _DetailRow('Type of Rescue', caseData['rescueType']),
             _DetailRow('Description', caseData['condition']),
             _AnimalGroupSection(caseId: caseId, data: caseData),
-            _DetailRow('Urgency', caseData['urgency']),
+            // Surrender reports carry no urgency.
+            if (caseData['urgency'] != null) _DetailRow('Urgency', caseData['urgency']),
             _DetailRow('Containment Status', caseData['containmentStatus']),
             if ((caseData['strayTemperament'] as String?)?.isNotEmpty ?? false)
               _DetailRow('Approachability / Bite Risk',

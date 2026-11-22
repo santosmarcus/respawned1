@@ -1,5 +1,6 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:respawnd1/features/adminhome/dashboard/monthly_report_page.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 
@@ -10,6 +11,7 @@ import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/core/repos/auth_service.dart';
 import 'package:respawnd1/features/admin/adoption/adoption_application_review_page.dart';
 import 'package:respawnd1/features/admin/animals/animal_record_page.dart';
+import 'package:respawnd1/features/admin/animals/promote_adoptions_page.dart';
 import 'package:respawnd1/features/admin/audit/audit_page.dart';
 import 'package:respawnd1/features/admin/collarTags/admin_collar_screen.dart';
 import 'package:respawnd1/features/admin/donation/donation_admin_home.dart';
@@ -19,7 +21,10 @@ import 'package:respawnd1/features/admin/rescue/rescue_reports_page.dart';
 import 'package:respawnd1/features/admin/rescue/state/rescue_reports_providers.dart';
 import 'package:respawnd1/features/admin/volunteers/volunteers_page.dart';
 import 'package:respawnd1/features/organization/organization_profile_edit_page.dart';
+import 'package:respawnd1/features/organization/staff_members_page.dart';
 import 'package:respawnd1/core/widgets/app_messages.dart';
+import 'package:respawnd1/features/account/account_page.dart';
+import 'package:respawnd1/features/carer/carer_home_screen.dart';
 
 /// The full set of admin root modules the drawer can open, in the required
 /// order — the single source of truth for labels/ordering/highlighting so
@@ -27,7 +32,7 @@ import 'package:respawnd1/core/widgets/app_messages.dart';
 /// `shelterResources` removed — it was a permanent no-op placeholder with
 /// no destination page at all; shelter-capacity now lives in Organization
 /// Profile. `audit` added for the new Audit module.
-enum AdminModule { dashboard, rescue, adoptions, donations, records, events, volunteers, transporters, collarTags, audit, organizationReview }
+enum AdminModule { dashboard, rescue, adoptions, donations, records, careTasks, events, volunteers, transporters, collarTags, audit, organizationReview, members }
 
 /// Pops back to AdminHomeScreen (the app's first/root route) before pushing
 /// the requested module — every drawer module item uses this so switching
@@ -111,9 +116,14 @@ class _AdminDrawerState extends ConsumerState<AdminDrawer> {
     final messenger = ScaffoldMessenger.of(context);
     try {
       final uid = FirebaseAuth.instance.currentUser?.uid;
-      final organizationId = uid == null
-          ? null
-          : await ref.read(orgMembershipServiceProvider).resolveOrganizationId(uid);
+      // The header above already resolved the id (it watches
+      // currentOrganizationIdProvider); look it up only if it hasn't.
+      final known = ref.read(currentOrganizationIdProvider).asData;
+      final organizationId = known != null
+          ? known.value
+          : uid == null
+              ? null
+              : await ref.read(orgMembershipServiceProvider).resolveOrganizationId(uid);
 
       if (!mounted) return;
       Navigator.pop(context); // close the drawer only once the destination is ready
@@ -185,26 +195,33 @@ class _AdminDrawerState extends ConsumerState<AdminDrawer> {
   @override
   Widget build(BuildContext context) {
     final header = ref.watch(currentOrganizationHeaderProvider).asData?.value;
+    final orgId = ref.watch(currentOrganizationIdProvider).asData?.value;
     final orgName = header?.name ?? 'Organization';
     final avatarUrl = header?.avatarUrl;
-    // Modules follow the member's permissions. Platform staff with no
-    // organization of their own keep the operational modules (never money).
+    // Every module shows for every member of the admin shell (care-only
+    // Staff get the care-tasks screen instead); a module they lack the
+    // permission for is view only (view_only.dart, firestore.rules
+    // readKeys()). Money stays with View donations & funds.
     final caps = ref.watch(currentOrganizationCapabilitiesProvider).asData?.value ?? OrganizationCapabilities.none;
     final platform = ref.watch(isPlatformStaffProvider).asData?.value ?? false;
-    bool show(bool allowed) => allowed || (platform && !caps.isActive);
+    // Platform staff with no organization of their own keep the operational
+    // modules (never money).
+    bool can(bool allowed) => allowed || (platform && !caps.isActive);
     final roleLine = !caps.isActive
         ? (platform ? 'Platform staff' : 'Staff')
         : caps.isAdmin
             ? 'Admin'
-            : 'Staff · ${(caps.preset ?? OrgPreset.custom).label}';
+            : staffTitle(caps.preset);
     return Drawer(
       backgroundColor: AppColors.textPrimary,
       child: SafeArea(
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Profile header
-            Padding(
+            // Organization header — opens the Organization Profile.
+            InkWell(
+              onTap: _openingOrgProfile ? null : _handleOpenOrganizationProfile,
+              child: Padding(
               padding: const EdgeInsets.all(20),
               child: Row(
                 children: [
@@ -230,125 +247,178 @@ class _AdminDrawerState extends ConsumerState<AdminDrawer> {
                       ],
                     ),
                   ),
+                  const SizedBox(width: 8),
+                  _openingOrgProfile
+                      ? const SizedBox(
+                          width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white70))
+                      : const Icon(Icons.chevron_right, color: Colors.white38, size: 18),
                 ],
+              ),
               ),
             ),
 
             const Divider(color: Colors.white24),
 
             // Menu items — order matches the project's required admin menu
-            // order: Dashboard, Rescue, Adoptions, Donations, Records,
-            // Events, Volunteers, Transporters, Collar Tags, Audit.
-            // Volunteers opens VolunteersPage (role == 'rescue_volunteer'
-            // directory), Transporters opens the same page over
+            // order: Dashboard, Rescue, Adoptions, Donations, Records, Care
+            // Tasks, Events, Collar Tags, Audit, then Rescue Volunteers and
+            // Transporters. Care Tasks is the care-tasks screen (carers were
+            // merged into Staff). Events covers event volunteers (people who
+            // sign up for an event); Rescue Volunteers opens VolunteersPage,
+            // the external rescue volunteers (role == 'rescue_volunteer'
+            // accounts). Transporters opens the same page over
             // 'pet_transporter' accounts, Events opens AdminEventsPage.
             // Shelter Resources was removed entirely — it
             // was a permanent no-op with no destination page; shelter
             // capacity is edited from Organization Profile.
-            _DrawerItem(
-              label: 'Dashboard',
-              selected: widget.active == AdminModule.dashboard,
-              onTap: () {
-                final rootNavigator = Navigator.of(context, rootNavigator: true);
-                Navigator.pop(context); // close the drawer
-                // Pops every pushed admin route back to AdminHomeScreen
-                // (the app's first/root route) — previously this only
-                // closed the drawer and did nothing else, so "Dashboard"
-                // appeared broken from any page other than the dashboard
-                // itself.
-                rootNavigator.popUntil((route) => route.isFirst);
-              },
-            ),
-            if (show(caps.canManageRescues)) _DrawerItem(
-              label: 'Rescue',
-              selected: widget.active == AdminModule.rescue,
-              onTap: () => _openModule(context, (_) => const RescueReportsPage()),
-            ),
-            if (show(caps.canManageAdoptions)) _DrawerItem(
-              label: 'Adoptions',
-              selected: widget.active == AdminModule.adoptions,
-              // Straight to the tabbed Adoption Applications page — the
-              // separate admin adoption dashboard is no longer the
-              // landing page for Adoptions.
-              onTap: () => _openModule(context, (_) => const AdoptionApplicationReviewPage()),
-            ),
-            if (caps.canViewFinances || caps.canRunCampaigns) _DrawerItem(
-              label: 'Donations',
-              selected: widget.active == AdminModule.donations,
-              onTap: () => _openModule(context, (_) => const DonationAdminHomeScreen()),
-            ),
-            if (show(caps.canManageRecords || caps.canGiveCare || caps.canManageAdoptions)) _DrawerItem(
-              label: 'Records',
-              selected: widget.active == AdminModule.records,
-              onTap: () => _openModule(context, (_) => const AnimalRecordsPage()),
-            ),
-            if (show(caps.canManageVolunteers)) _DrawerItem(
-              label: 'Events',
-              selected: widget.active == AdminModule.events,
-              onTap: () => _openModule(context, (_) => const AdminEventsPage()),
-            ),
-            if (show(caps.canManageVolunteers)) _DrawerItem(
-              label: 'Volunteers',
-              selected: widget.active == AdminModule.volunteers,
-              onTap: () => _openModule(context, (_) => const VolunteersPage()),
-            ),
-            if (show(caps.canManageVolunteers)) _DrawerItem(
-              label: 'Transporters',
-              selected: widget.active == AdminModule.transporters,
-              onTap: () => _openModule(context, (_) => const VolunteersPage(transporters: true)),
-            ),
-            if (show(caps.canManageRescues)) _DrawerItem(
-              label: 'Collar Tags',
-              selected: widget.active == AdminModule.collarTags,
-              onTap: () => _openModule(context, (_) => const AdminCollarTagScreen()),
-            ),
-            if (show(caps.canViewAudits)) _DrawerItem(
-              label: 'Audit',
-              selected: widget.active == AdminModule.audit,
-              onTap: () => _openModule(context, (_) => const AuditPage()),
-            ),
-            // Platform staff only: organizations waiting for approval. With
-            // one organization, sign-ups are approved from the system admin
-            // console instead (FeatureFlags.multiOrganizationEnabled).
-            if (FeatureFlags.multiOrganizationEnabled && (ref.watch(isPlatformStaffProvider).asData?.value ?? false))
-              _DrawerItem(
-                label: 'Organization approvals',
-                count: ref.watch(pendingOrganizationReviewCountProvider).asData?.value,
-                selected: widget.active == AdminModule.organizationReview,
-                onTap: () => _openModule(context, (_) => const OrganizationReviewPage()),
+            Expanded(
+              child: ListView(
+                padding: EdgeInsets.zero,
+                children: [
+                  _DrawerItem(
+                    label: 'Dashboard',
+                    selected: widget.active == AdminModule.dashboard,
+                    onTap: () {
+                      final rootNavigator = Navigator.of(context, rootNavigator: true);
+                      Navigator.pop(context); // close the drawer
+                      // Back to AdminHomeScreen, the app's first route.
+                      rootNavigator.popUntil((route) => route.isFirst);
+                    },
+                  ),
+                  _DrawerItem(
+                    label: 'Rescue',
+                    viewOnly: !can(caps.canManageRescues),
+                    selected: widget.active == AdminModule.rescue,
+                    onTap: () => _openModule(context, (_) => const RescueReportsPage()),
+                  ),
+                  _DrawerItem(
+                    label: 'Adoptions',
+                    viewOnly: !can(caps.canManageAdoptions),
+                    selected: widget.active == AdminModule.adoptions,
+                    onTap: () => _openModule(context, (_) => const AdoptionApplicationReviewPage()),
+                  ),
+                  _DrawerItem(
+                    label: 'Donations',
+                    viewOnly: !(caps.canRunCampaigns || caps.canManageFinances),
+                    selected: widget.active == AdminModule.donations,
+                    onTap: () => _openModule(context, (_) => const DonationAdminHomeScreen()),
+                  ),
+                  // Finance staff only. The screen opens through
+                  // openMonthlyReport, so it can also be linked from the
+                  // dashboard with one call.
+                  if (caps.canViewFinances)
+                    _DrawerItem(
+                      label: 'Monthly Report',
+                      onTap: () => _openModule(context, (_) => const MonthlyReportPage()),
+                    ),
+                  _DrawerItem(
+                    label: 'Records',
+                    viewOnly: !can(caps.canManageRecords || caps.canGiveCare),
+                    selected: widget.active == AdminModule.records,
+                    onTap: () => _openModule(context, (_) => const AnimalRecordsPage()),
+                  ),
+                  // Every member sees the adoption post schedule (they all get
+                  // its reminders); members allowed to share to Facebook post.
+                  if (caps.isActive)
+                    _DrawerItem(
+                      label: 'Promote Adoptions',
+                      onTap: () => _openModule(context, (_) => const PromoteAdoptionsPage()),
+                    ),
+                  if (caps.canOpenCareTasks && orgId != null)
+                    _DrawerItem(
+                      label: 'Care Tasks',
+                      selected: widget.active == AdminModule.careTasks,
+                      onTap: () => _openModule(
+                        context,
+                        (_) => CarerHomeScreen(organizationId: orgId, fromAdminShell: true),
+                      ),
+                    ),
+                  _DrawerItem(
+                    label: 'Events',
+                    viewOnly: !can(caps.canManageVolunteers),
+                    selected: widget.active == AdminModule.events,
+                    onTap: () => _openModule(context, (_) => const AdminEventsPage()),
+                  ),
+                  _DrawerItem(
+                    label: 'Collar Tags',
+                    viewOnly: !can(caps.canManageRescues),
+                    selected: widget.active == AdminModule.collarTags,
+                    onTap: () => _openModule(context, (_) => const AdminCollarTagScreen()),
+                  ),
+                  _DrawerItem(
+                    label: 'Audit',
+                    selected: widget.active == AdminModule.audit,
+                    onTap: () => _openModule(context, (_) => const AuditPage()),
+                  ),
+                  // Platform staff only: organizations waiting for approval.
+                  // With one organization, sign-ups are approved from the
+                  // system admin console (FeatureFlags.multiOrganizationEnabled).
+                  if (FeatureFlags.multiOrganizationEnabled && platform)
+                    _DrawerItem(
+                      label: 'Organization approvals',
+                      count: ref.watch(pendingOrganizationReviewCountProvider).asData?.value,
+                      selected: widget.active == AdminModule.organizationReview,
+                      onTap: () => _openModule(context, (_) => const OrganizationReviewPage()),
+                    ),
+                  // After the divider: Staff Members (invite, access, remove; Admins only),
+                  // and the volunteers and transporters the organization works with.
+                  const Divider(color: Colors.white24),
+                  if (caps.canManageTeam && orgId != null)
+                    _DrawerItem(
+                      label: 'Staff Members',
+                      selected: widget.active == AdminModule.members,
+                      onTap: () => _openModule(context, (_) => StaffMembersPage(organizationId: orgId)),
+                    ),
+                  _DrawerItem(
+                    label: 'Rescue Volunteers',
+                    viewOnly: !can(caps.canManageVolunteers),
+                    selected: widget.active == AdminModule.volunteers,
+                    onTap: () => _openModule(context, (_) => const VolunteersPage()),
+                  ),
+                  _DrawerItem(
+                    label: 'Transporters',
+                    viewOnly: !can(caps.canManageVolunteers),
+                    selected: widget.active == AdminModule.transporters,
+                    onTap: () => _openModule(context, (_) => const VolunteersPage(transporters: true)),
+                  ),
+                ],
               ),
-            const Divider(color: Colors.white24),
-            _DrawerItem(
-              label: 'Organization Profile',
-              loading: _openingOrgProfile,
-              onTap: _openingOrgProfile ? null : _handleOpenOrganizationProfile,
             ),
-
-            const Spacer(),
-
-            // Log out
+            const Divider(color: Colors.white24, height: 1),
+            // Account (details, switch account, delete account) and Log out.
             Padding(
-              padding: const EdgeInsets.all(20),
-              child: GestureDetector(
-                onTap: _signingOut ? null : _logOut,
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text('Log out',
+              padding: const EdgeInsets.fromLTRB(8, 6, 12, 10),
+              child: Row(
+                children: [
+                  TextButton.icon(
+                    onPressed: _signingOut
+                        ? null
+                        : () {
+                            final rootNavigator = Navigator.of(context, rootNavigator: true);
+                            Navigator.pop(context); // close the drawer
+                            rootNavigator.push(MaterialPageRoute(builder: (_) => const AccountPage()));
+                          },
+                    icon: const Icon(Icons.account_circle_outlined, color: AppColors.background, size: 20),
+                    label: Text('Account',
+                        style: GoogleFonts.zain(fontSize: 14, color: AppColors.background, fontWeight: FontWeight.w600)),
+                  ),
+                  const Spacer(),
+                  TextButton.icon(
+                    onPressed: _signingOut ? null : _logOut,
+                    icon: _signingOut
+                        ? const SizedBox(
+                            width: 14,
+                            height: 14,
+                            child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.error),
+                          )
+                        : const Icon(Icons.logout, color: AppColors.error, size: 20),
+                    label: Text('Log out',
                         style: GoogleFonts.zain(
                             fontSize: 14,
                             color: _signingOut ? AppColors.error.withValues(alpha: 0.5) : AppColors.error,
                             fontWeight: FontWeight.w600)),
-                    if (_signingOut) ...[
-                      const SizedBox(width: 10),
-                      const SizedBox(
-                        width: 14,
-                        height: 14,
-                        child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.error),
-                      ),
-                    ],
-                  ],
-                ),
+                  ),
+                ],
               ),
             ),
           ],
@@ -362,15 +432,12 @@ class _DrawerItem extends StatelessWidget {
   final String label;
   final VoidCallback? onTap;
   final bool selected;
-  // Shows a spinner instead of the chevron and disables taps — used by
-  // Organization Profile while its async membership lookup resolves, so a
-  // slow lookup reads as "in progress" instead of "nothing happened",
-  // and can't be re-triggered by an impatient repeated tap.
-  final bool loading;
   // Items waiting for action (organizations to review); hidden when 0.
   final int? count;
+  // The member can look but not change anything in this module.
+  final bool viewOnly;
 
-  const _DrawerItem({required this.label, required this.onTap, this.selected = false, this.loading = false, this.count});
+  const _DrawerItem({required this.label, required this.onTap, this.selected = false, this.count, this.viewOnly = false});
 
   @override
   Widget build(BuildContext context) {
@@ -384,21 +451,25 @@ class _DrawerItem extends StatelessWidget {
                 fontSize: 15,
                 color: AppColors.background,
                 fontWeight: selected ? FontWeight.w800 : FontWeight.w500)),
-        trailing: loading
-            ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white70))
-            : Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  if ((count ?? 0) > 0)
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 1),
-                      decoration: BoxDecoration(color: AppColors.yellowrspwn, borderRadius: BorderRadius.circular(10)),
-                      child: Text('$count',
-                          style: GoogleFonts.zain(fontSize: 12, fontWeight: FontWeight.w800, color: AppColors.textPrimary)),
-                    ),
-                  const Icon(Icons.chevron_right, color: Colors.white38, size: 18),
-                ],
+        trailing: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (viewOnly)
+              Padding(
+                padding: const EdgeInsets.only(right: 6),
+                child: Text('View only',
+                    style: GoogleFonts.zain(fontSize: 11, color: AppColors.background.withValues(alpha: 0.55))),
               ),
+            if ((count ?? 0) > 0)
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 1),
+                decoration: BoxDecoration(color: AppColors.yellowrspwn, borderRadius: BorderRadius.circular(10)),
+                child: Text('$count',
+                    style: GoogleFonts.zain(fontSize: 12, fontWeight: FontWeight.w800, color: AppColors.textPrimary)),
+              ),
+            const Icon(Icons.chevron_right, color: Colors.white38, size: 18),
+          ],
+        ),
         dense: true,
       ),
     );

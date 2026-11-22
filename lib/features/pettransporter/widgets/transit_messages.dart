@@ -30,7 +30,7 @@ class TransitMessagesList extends StatelessWidget {
           itemCount: docs.length,
           itemBuilder: (context, i) {
             final msg =
-                docs[docs.length - 1 - i].data() as Map<String, dynamic>;
+            docs[docs.length - 1 - i].data() as Map<String, dynamic>;
             final ts = msg['timestamp'] as Timestamp?;
             final timeStr = ts != null
                 ? '${ts.toDate().hour}:${ts.toDate().minute.toString().padLeft(2, '0')}'
