@@ -9,8 +9,8 @@ import 'package:respawnd1/features/adminhome/dashboard/dashboard_cache.dart';
 
 /// Shared building blocks for the operational dashboard. Styled from the
 /// existing ResPawnd tokens (AppColors, TiltWarp headings, Zain body) and
-/// the same white-card/soft-shadow treatment as the rest of the admin app,
-/// so the dashboard reads as part of the same app.
+/// the same white-card/soft-shadow treatment admin_dashboard_home_widgets.dart
+/// already uses, so the dashboard reads as part of the same app.
 
 const double kDashMinTouch = 44;
 

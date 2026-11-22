@@ -114,7 +114,7 @@ final pendingOrganizationReviewCountProvider = StreamProvider.autoDispose<int>((
 
 /// Which organization the signed-in account is linked to — reuses
 /// [OrgMembershipService.resolveOrganizationId] (the same "just which org"
-/// lookup other admin screens call directly) so
+/// lookup admin_dashboard_home_widgets.dart already calls directly) so
 /// call sites that only need the id (e.g. gating Facebook publishing on
 /// Animal Records) don't each re-derive it separately.
 final currentOrganizationIdProvider = FutureProvider.autoDispose<String?>((ref) async {

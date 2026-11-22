@@ -18,8 +18,8 @@ final auditLogRepositoryProvider = Provider<AuditLogRepository>((ref) => AuditLo
 // opens) still never reuses a stale listener for the wrong org, but the
 // provider itself now stays alive for the app session once created,
 // matching the identical fix already applied to
-// admin_dashboard_home_widgets.dart's staleTransportOffersProvider for the
-// same class of dashboard-flicker bug.
+// admin_dashboard_home_widgets.dart's staleTransportOffersProvider/
+// overdueFollowUpsProvider for the same class of dashboard-flicker bug.
 final auditCategoryLogsProvider =
     StreamProvider.family<List<AuditLogEntry>, ({AuditCategory category, String? organizationId})>(
   (ref, key) => ref.watch(auditLogRepositoryProvider).streamCategory(key.category, organizationId: key.organizationId),

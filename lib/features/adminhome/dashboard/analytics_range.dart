@@ -11,13 +11,14 @@ class Period {
   bool has(DateTime? t) => t != null && !t.isBefore(from) && t.isBefore(to);
 }
 
-enum AnalyticsRangeKind { lastDays, month, quarter, custom }
+enum AnalyticsRangeKind { lastDays, day, week, month, quarter, year, custom }
 
 const _monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
 /// Analytics gap 2: what the admin picked in the Analytics period menu.
-/// A rolling window (30 / 90 / 365 days), a calendar month, a calendar
-/// quarter, or a custom date range (whole days, end day included).
+/// A rolling window (7 / 30 / 90 / 365 days), a calendar day, week
+/// (Monday to Sunday), month, quarter or year, or a custom date range
+/// (whole days, end day included).
 class AnalyticsRange {
   final AnalyticsRangeKind kind;
   final int days;
@@ -29,6 +30,31 @@ class AnalyticsRange {
   const AnalyticsRange.lastDays(this.days)
       : kind = AnalyticsRangeKind.lastDays,
         year = 0,
+        index = 0,
+        start = null,
+        end = null;
+
+  /// One calendar day.
+  AnalyticsRange.day(DateTime d)
+      : kind = AnalyticsRangeKind.day,
+        days = 0,
+        year = 0,
+        index = 0,
+        start = DateTime(d.year, d.month, d.day),
+        end = DateTime(d.year, d.month, d.day);
+
+  /// The calendar week (Monday to Sunday) containing [d].
+  AnalyticsRange.week(DateTime d)
+      : kind = AnalyticsRangeKind.week,
+        days = 0,
+        year = 0,
+        index = 0,
+        start = DateTime(d.year, d.month, d.day - (d.weekday - 1)),
+        end = DateTime(d.year, d.month, d.day - (d.weekday - 1) + 6);
+
+  const AnalyticsRange.year(this.year)
+      : kind = AnalyticsRangeKind.year,
+        days = 0,
         index = 0,
         start = null,
         end = null;
@@ -59,6 +85,17 @@ class AnalyticsRange {
     switch (kind) {
       case AnalyticsRangeKind.lastDays:
         return Period(now.subtract(Duration(days: days)), now);
+      case AnalyticsRangeKind.day:
+        final to = DateTime(start!.year, start!.month, start!.day + 1);
+        return Period(start!, _cap(to, now),
+            previous: Period(DateTime(start!.year, start!.month, start!.day - 1), start!));
+      case AnalyticsRangeKind.week:
+        final to = DateTime(start!.year, start!.month, start!.day + 7);
+        return Period(start!, _cap(to, now),
+            previous: Period(DateTime(start!.year, start!.month, start!.day - 7), start!));
+      case AnalyticsRangeKind.year:
+        final from = DateTime(year);
+        return Period(from, _cap(DateTime(year + 1), now), previous: Period(DateTime(year - 1), from));
       case AnalyticsRangeKind.month:
         final from = DateTime(year, index);
         final to = DateTime(year, index + 1);
@@ -77,6 +114,9 @@ class AnalyticsRange {
 
   String get label => switch (kind) {
         AnalyticsRangeKind.lastDays => days == 365 ? 'Last 12 months' : 'Last $days days',
+        AnalyticsRangeKind.day => '${_monthNames[start!.month - 1]} ${start!.day}, ${start!.year}',
+        AnalyticsRangeKind.week => 'Week of ${_monthNames[start!.month - 1]} ${start!.day}, ${start!.year}',
+        AnalyticsRangeKind.year => '$year',
         AnalyticsRangeKind.month => '${_monthNames[index - 1]} $year',
         AnalyticsRangeKind.quarter => 'Q$index $year',
         AnalyticsRangeKind.custom => start!.year == end!.year
@@ -90,12 +130,18 @@ class AnalyticsRange {
         AnalyticsRangeKind.month =>
           index == 1 ? '${_monthNames[11]} ${year - 1}' : '${_monthNames[index - 2]} $year',
         AnalyticsRangeKind.quarter => index == 1 ? 'Q4 ${year - 1}' : 'Q${index - 1} $year',
+        AnalyticsRangeKind.day => 'the day before',
+        AnalyticsRangeKind.week => 'the week before',
+        AnalyticsRangeKind.year => '${year - 1}',
         _ => 'previous period',
       };
 
   /// A short slug for file names.
   String get fileSlug => switch (kind) {
         AnalyticsRangeKind.lastDays => 'last_${days}d',
+        AnalyticsRangeKind.day => start!.toIso8601String().substring(0, 10),
+        AnalyticsRangeKind.week => 'week_${start!.toIso8601String().substring(0, 10)}',
+        AnalyticsRangeKind.year => '$year',
         AnalyticsRangeKind.month => '$year-${index.toString().padLeft(2, '0')}',
         AnalyticsRangeKind.quarter => '$year-Q$index',
         AnalyticsRangeKind.custom =>
