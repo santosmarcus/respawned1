@@ -4,7 +4,7 @@ import 'package:respawnd1/core/models/rescue/animal_record.dart';
 import 'package:respawnd1/core/repos/animal_record_repository.dart';
 
 /// The ONE canonical "is this animal currently housed" classifier — shared
-/// by the dashboard Capacity card (admin_dashboard_home_widgets.dart) and
+/// by the dashboard occupancy figures (dashboard_data.dart) and
 /// the Organization Profile "Shelter Capacity" over-capacity warning, so
 /// the two can never quietly disagree about what counts as current
 /// occupancy. Traced from the real AnimalRecord fields this codebase

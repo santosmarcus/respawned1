@@ -9,6 +9,8 @@ import 'package:respawnd1/core/repos/rescue_case_repository.dart';
 import 'package:respawnd1/core/widgets/app_dialogs.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/organization_picker_list.dart';
 import 'package:respawnd1/core/widgets/app_messages.dart';
+import 'package:respawnd1/core/models/rescue/referral_type.dart';
+import 'package:respawnd1/features/admin/rescue/widgets/referral_reason_field.dart';
 
 /// Refer to Another Organization modal: search organizations by name, see
 /// distance/accepted species/service area/intake availability, add a note,
@@ -61,6 +63,7 @@ class _ReferToOrganizationSheetBody extends StatefulWidget {
 class _ReferToOrganizationSheetBodyState extends State<_ReferToOrganizationSheetBody> {
   final _noteController = TextEditingController();
   OrgReferralCandidate? _selected;
+  OrgReferralReason? _reason;
   bool _sending = false;
 
   @override
@@ -70,7 +73,7 @@ class _ReferToOrganizationSheetBodyState extends State<_ReferToOrganizationSheet
   }
 
   Future<void> _send() async {
-    if (_selected == null) return;
+    if (_selected == null || _reason == null) return;
     final confirmed = await showConfirmActionDialog(
       context,
       title: 'Refer to ${_selected!.name}?',
@@ -87,6 +90,7 @@ class _ReferToOrganizationSheetBodyState extends State<_ReferToOrganizationSheet
         targetOrgId: _selected!.id,
         targetOrgName: _selected!.name,
         note: _noteController.text.trim().isEmpty ? null : _noteController.text.trim(),
+        reason: _reason,
         actorUid: widget.actorUid,
         actorName: widget.actorName,
       );
@@ -145,6 +149,8 @@ class _ReferToOrganizationSheetBodyState extends State<_ReferToOrganizationSheet
               ),
             ),
             const SizedBox(height: 10),
+            ReferralReasonField(value: _reason, onChanged: (v) => setState(() => _reason = v)),
+            const SizedBox(height: 6),
             TextField(
               controller: _noteController,
               maxLines: 2,
@@ -166,7 +172,7 @@ class _ReferToOrganizationSheetBodyState extends State<_ReferToOrganizationSheet
             SizedBox(
               width: double.infinity,
               child: ElevatedButton(
-                onPressed: (_selected == null || _sending) ? null : _send,
+                onPressed: (_selected == null || _reason == null || _sending) ? null : _send,
                 style: AppButtons.primary,
                 child: _sending
                     ? const SizedBox(

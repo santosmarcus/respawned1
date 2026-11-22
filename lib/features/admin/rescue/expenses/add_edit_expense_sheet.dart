@@ -104,6 +104,9 @@ class _AddEditExpenseSheetBodyState extends ConsumerState<_AddEditExpenseSheetBo
 
   static String _plainAmount(double v) => v == v.roundToDouble() ? v.toStringAsFixed(0) : v.toStringAsFixed(2);
   late DateTime _incurredAt = widget.existing?.incurredAt ?? DateTime.now();
+  // A running bill is owed but not paid yet; analytics count it apart from
+  // money spent until it is marked paid.
+  late bool _runningBill = widget.existing?.isRunningBill ?? false;
   late Set<int> _animalIndexes =
       (widget.existing?.animalIndexes?.toSet()) ?? widget.initialAnimalIndexes.toSet();
 
@@ -348,6 +351,10 @@ class _AddEditExpenseSheetBodyState extends ConsumerState<_AddEditExpenseSheetBo
       approvedByName: approvedCovers ? prev.approvedByName : null,
       approvedAt: approvedCovers ? prev.approvedAt : null,
       approvedAmount: approvedCovers ? prev.approvedAmount : null,
+      isRunningBill: _runningBill,
+      paidAt: _runningBill
+          ? null
+          : (widget.existing?.isRunningBill == true ? DateTime.now() : widget.existing?.paidAt),
     );
 
     try {
@@ -647,6 +654,32 @@ class _AddEditExpenseSheetBodyState extends ConsumerState<_AddEditExpenseSheetBo
                 ),
               ),
             ),
+            const SizedBox(height: 14),
+
+            _Label('Payment', required: true),
+            RadioGroup<bool>(
+              groupValue: _runningBill,
+              onChanged: (v) => setState(() => _runningBill = v ?? false),
+              child: Column(
+                children: [
+                  for (final (running, label) in const [
+                    (false, 'Paid'),
+                    (true, 'Not paid yet (running bill)'),
+                  ])
+                    RadioListTile<bool>(
+                      value: running,
+                      dense: true,
+                      contentPadding: EdgeInsets.zero,
+                      visualDensity: VisualDensity.compact,
+                      activeColor: AppColors.textPrimary,
+                      title: Text(label, style: GoogleFonts.zain(fontSize: 14, color: AppColors.textPrimary)),
+                    ),
+                ],
+              ),
+            ),
+            if (_runningBill)
+              Text('Counted as owed, not spent, until you edit it to Paid.',
+                  style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary)),
             const SizedBox(height: 14),
 
             _Label('Receipt'),

@@ -76,6 +76,9 @@ class CaseStatusRepository {
           // advances it. See rescue_status.dart's firestoreValue doc comment.
           'status': RescueStatus.accepted.firestoreValue,
           'openForTransfer': openForTransfer,
+          // When review ended, for response-time analytics (the activity
+          // log keeps the same moment with who did it).
+          'acceptedAt': FieldValue.serverTimestamp(),
         },
         action: 'accepted',
         actorUid: actorUid,
@@ -99,6 +102,7 @@ class CaseStatusRepository {
       fields: {
         'status': RescueStatus.rejected.firestoreValue,
         'rejectionReason': reason.name,
+        'rejectedAt': FieldValue.serverTimestamp(),
         if (reason == RejectionReason.other && otherText != null)
           'rejectionReasonOther': otherText,
       },

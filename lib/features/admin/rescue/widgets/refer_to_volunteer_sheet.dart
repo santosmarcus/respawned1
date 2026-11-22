@@ -7,6 +7,8 @@ import 'package:respawnd1/core/repos/organization_directory_repository.dart';
 import 'package:respawnd1/core/repos/rescue_case_repository.dart';
 import 'package:respawnd1/core/widgets/app_dialogs.dart';
 import 'package:respawnd1/core/widgets/app_messages.dart';
+import 'package:respawnd1/core/models/rescue/referral_type.dart';
+import 'package:respawnd1/features/admin/rescue/widgets/referral_reason_field.dart';
 
 /// Refer to Rescue Volunteer: the independent rescuers whose area covers the
 /// case, nearest first, with how much room each has. The referral works like
@@ -61,6 +63,7 @@ class _ReferToVolunteerBodyState extends State<_ReferToVolunteerBody> {
   final _note = TextEditingController();
   late final Future<List<IndependentCandidate>> _candidates = _load();
   IndependentCandidate? _selected;
+  OrgReferralReason? _reason;
   bool _sending = false;
 
   Future<List<IndependentCandidate>> _load() {
@@ -77,7 +80,7 @@ class _ReferToVolunteerBodyState extends State<_ReferToVolunteerBody> {
 
   Future<void> _send() async {
     final target = _selected;
-    if (target == null) return;
+    if (target == null || _reason == null) return;
     final ok = await showConfirmActionDialog(
       context,
       title: 'Refer to ${target.name}?',
@@ -92,6 +95,7 @@ class _ReferToVolunteerBodyState extends State<_ReferToVolunteerBody> {
         targetOrgId: target.id,
         targetOrgName: target.name,
         note: _note.text.trim().isEmpty ? null : _note.text.trim(),
+        reason: _reason,
         actorUid: widget.actorUid,
         actorName: widget.actorName,
       );
@@ -220,6 +224,8 @@ class _ReferToVolunteerBodyState extends State<_ReferToVolunteerBody> {
               ),
             ),
             const SizedBox(height: 10),
+            ReferralReasonField(value: _reason, onChanged: (v) => setState(() => _reason = v)),
+            const SizedBox(height: 6),
             TextField(
               controller: _note,
               maxLines: 2,
@@ -234,7 +240,7 @@ class _ReferToVolunteerBodyState extends State<_ReferToVolunteerBody> {
             SizedBox(
               width: double.infinity,
               child: ElevatedButton(
-                onPressed: (_selected == null || _sending) ? null : _send,
+                onPressed: (_selected == null || _reason == null || _sending) ? null : _send,
                 style: AppButtons.primary,
                 child: _sending
                     ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(strokeWidth: 2))

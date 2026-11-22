@@ -385,6 +385,13 @@ service cloud.firestore {
       allow write: if false;
     }
 
+    // Daily counts for the treatment-load and occupancy trends, written only
+    // by snapshotDailyAnalytics (dashboard_ops.js). Staff only, never public.
+    match /organizations/{orgId}/analyticsSnapshots/{day} {
+      allow read: if isPlatformStaff() || staffWith(orgId, readKeys());
+      allow write: if false;
+    }
+
     // organizations/{orgId}/members/{uid}
     //   - Only the owner or an active admin adds, edits, or removes members.
     //   - An invited person may create only their own doc, with the role,
@@ -502,7 +509,7 @@ service cloud.firestore {
     // activityLogs, ...) keeps its current open access.
     match /organizations/{orgId}/{sub}/{document=**} {
       allow read, write: if signedIn() && !(sub in ['members', 'integrations', 'settings', 'stock', 'stockMovements', 'cashOuts',
-        'careRounds', 'alertClaims', 'analyticsSummaries']);
+        'careRounds', 'alertClaims', 'analyticsSummaries', 'analyticsSnapshots']);
     }
 
     // ---- Organization invitations ------------------------------------------

@@ -44,6 +44,7 @@ class CaseReferralRepository {
     required String actorUid,
     required String actorName,
     ReferralType type = ReferralType.anotherOrganization,
+    OrgReferralReason? reason,
   }) async {
     final caseSnap = await _store.caseDoc(caseId).get();
     final caseData = caseSnap.data() ?? const <String, dynamic>{};
@@ -73,6 +74,7 @@ class CaseReferralRepository {
       'targetOrgName': targetOrgName,
       'fromOrgId': fromOrgId,
       'fromOrgName': fromOrgName,
+      'referralReason': ?reason?.name,
     });
     _store.recordActionInBatch(
       batch,
@@ -91,6 +93,8 @@ class CaseReferralRepository {
           'referredByUid': actorUid,
           'referredByName': actorName,
           'note': note,
+          'type': type.name,
+          'referralReason': ?reason?.name,
           'previousStatus': caseData['status'],
         },
         if (caseOrgId.isEmpty && fromOrgId.isNotEmpty) 'organizationId': fromOrgId,
@@ -367,11 +371,13 @@ class CaseReferralRepository {
     String? note,
     required String actorUid,
     required String actorName,
+    OrgReferralReason? reason,
   }) => referToOrganization(
         caseId: caseId,
         targetOrgId: targetOrgId,
         targetOrgName: targetOrgName,
         note: note,
+        reason: reason,
         actorUid: actorUid,
         actorName: actorName,
         type: ReferralType.rescueVolunteer,

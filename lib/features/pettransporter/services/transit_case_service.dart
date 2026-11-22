@@ -131,6 +131,8 @@ class TransitCaseService {
     return _record('transit_picked_up', 'Animal rescued. On the way to treatment.', {
       'status': 'treatment',
       'pickupVerificationUrls': urls,
+      // Response-time analytics: when the animal was picked up.
+      'pickedUpAt': Timestamp.now(),
     });
   }
 
@@ -157,7 +159,9 @@ class TransitCaseService {
       'status': next.status,
       'clinicVerificationUrls': clinicUrls,
       if (next.completesTransit) ..._transitCompletedStamp else ..._shelterFields(shelter),
-      if (next.completesTransit) 'treatmentAcceptedAt': now,
+      // When the clinic took the animal in, on every path (analytics:
+      // pickup to clinic, and treatment duration).
+      'treatmentAcceptedAt': now,
     });
     // The transporter is free again: their offer is completed.
     if (next.completesTransit) await _closeOwnAssignment(data, status: 'completed', at: now);

@@ -26,6 +26,7 @@ import 'package:respawnd1/features/adminhome/dashboard/dashboard_data.dart';
 import 'package:respawnd1/core/models/dashboard/dashboard_model.dart';
 import 'package:respawnd1/features/adminhome/dashboard/dashboard_nav.dart';
 import 'package:respawnd1/features/adminhome/dashboard/dashboard_ui.dart';
+import 'package:respawnd1/features/adminhome/dashboard/module_analytics.dart';
 import 'package:respawnd1/features/adminhome/dashboard/shelter_settings.dart';
 
 /// The "Analytics" tab. Its sections answer plain questions, and together
@@ -220,6 +221,10 @@ class AnalyticsView extends ConsumerWidget {
         const SizedBox(height: 14),
         _MonthlyTrendCard(records: records, cases: cases),
         const SizedBox(height: 14),
+        // Module analytics (module_analytics.dart), in the same column.
+        RescueModuleCards(period: period, cases: cases),
+        AdoptionModuleCards(period: period, adopted: cur.adopted, intake: cur.intake),
+        FundsModuleCards(period: period, cases: cases),
         const AreaReportsCard(),
       ],
     );

@@ -31,6 +31,29 @@ enum ReferralStatus {
       .firstWhere((e) => e.name == value, orElse: () => ReferralStatus.referredPending);
 }
 
+/// Why a case is referred to another organization or a rescue volunteer
+/// (`referralReason` on the referral and the case's `referral` summary).
+/// Analytics counts [shelterAtCapacity] as a capacity referral, together
+/// with LGU [LguReferralReason.shelterAtCapacity] and the rejection reason
+/// noShelterSpace.
+enum OrgReferralReason {
+  shelterAtCapacity('Shelter at capacity'),
+  outsideServiceArea('Outside our service area'),
+  specializedCare('Needs care we can\'t provide'),
+  closerResponder('Another responder is closer'),
+  other('Other');
+
+  const OrgReferralReason(this.label);
+  final String label;
+
+  static OrgReferralReason? fromName(Object? value) {
+    for (final r in values) {
+      if (r.name == value) return r;
+    }
+    return null;
+  }
+}
+
 /// Reason dropdown for LGU/barangay referrals.
 enum LguReferralReason {
   outsideServiceArea,

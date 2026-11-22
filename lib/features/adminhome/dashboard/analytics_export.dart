@@ -21,6 +21,10 @@ import 'package:respawnd1/features/admin/donation/donation_admin_providers.dart'
 import 'package:respawnd1/features/adminhome/dashboard/analytics_view.dart';
 import 'package:respawnd1/features/adminhome/dashboard/dashboard_data.dart';
 import 'package:respawnd1/features/adminhome/dashboard/shelter_settings.dart';
+import 'package:respawnd1/core/models/rescue/expense.dart';
+import 'package:respawnd1/features/adminhome/dashboard/metrics/finance_metrics.dart';
+import 'package:respawnd1/features/adminhome/dashboard/metrics/metric_rows.dart';
+import 'package:respawnd1/features/adminhome/dashboard/module_analytics.dart';
 
 /// Analytics gap 1: what leaves the app.
 ///
@@ -81,7 +85,11 @@ class _Data {
   final List<RescueCase> cases;
   final List<AdoptionApplication> apps;
   final List<DonationHistoryRecord>? donations; // null: not a financial admin
-  const _Data(this.records, this.cases, this.apps, this.donations);
+  final List<Map<String, dynamic>> offers;
+  final List<Map<String, dynamic>> followUps;
+  final List<Expense>? expenses; // null with donations
+  const _Data(this.records, this.cases, this.apps, this.donations,
+      {this.offers = const [], this.followUps = const [], this.expenses});
 }
 
 bool _isMoney(DonationHistoryRecord d) =>
@@ -228,7 +236,16 @@ Future<_Data> _load(ProviderContainer c, {required bool withDonations}) async {
     if (casesAsync.hasError) throw casesAsync.error!;
     if (!casesAsync.hasValue) throw StateError('Rescue cases are still loading. Try again in a moment.');
     final donations = withDonations ? await _first(c, allDonationsProvider.future) : null;
-    return _Data(records, casesAsync.requireValue, apps, donations);
+    final offers = await _first(c, orgTransportOffersProvider.future);
+    final followUps = await _first(c, orgFollowUpsProvider.future);
+    List<Expense>? expenses;
+    if (withDonations) {
+      // General expenses are readable only by people who manage money.
+      final general = await _first(c, myGeneralExpensesProvider.future).catchError((_) => const <Expense>[]);
+      expenses = [...await _first(c, allCaseExpensesProvider.future), ...general];
+    }
+    return _Data(records, casesAsync.requireValue, apps, donations,
+        offers: offers, followUps: followUps, expenses: expenses);
   } finally {
     sub.close();
   }
@@ -295,14 +312,28 @@ Future<void> _shareCsv(_Data data, AnalyticsRange range) async {
             [a.id, a.animalName, a.createdAt, a.status.firestoreValue, a.approvedAt, a.rejectedAt],
       ],
     ),
+    'module_metrics': toCsv(
+      kMetricRowsHeader,
+      moduleMetricRows(
+        p,
+        cases: [for (final c in data.cases) {...c.raw, 'id': c.id}],
+        offers: data.offers,
+        adoptions: [for (final a in data.apps) {...a.raw, 'id': a.id}],
+        followUps: data.followUps,
+        now: DateTime.now(),
+        donations: data.donations?.map((d) => DonationRow(
+              amount: d.amountValue, type: d.type, status: d.status, source: d.source, method: d.method,
+              at: d.when, category: d.category, quantity: d.quantityReceived)).toList(),
+        expenses: data.expenses,
+      ),
+    ),
     if (data.donations != null)
       'donations': toCsv(
-        ['donation_id', 'date', 'type', 'amount', 'method', 'campaign', 'status', 'donor'],
+        ['donation_id', 'date', 'type', 'amount', 'method', 'source', 'campaign', 'status'],
         [
           for (final d in data.donations!)
             if (p.has(d.createdAt))
-              [d.id, d.createdAt, d.type, d.amountValue, d.method, d.campaignName, d.status,
-               d.isAnonymous ? 'Anonymous' : d.donorName],
+              [d.id, d.createdAt, d.type, d.amountValue, d.method, d.source, d.campaignName, d.status],
         ],
       ),
   };

@@ -1,5 +1,6 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 
+import 'package:respawnd1/core/models/rescue/referral_type.dart';
 import 'package:respawnd1/core/models/rescue/activity_log_entry.dart';
 import 'package:respawnd1/core/models/rescue/closure_reason.dart';
 import 'package:respawnd1/core/models/rescue/community_report.dart';
@@ -412,11 +413,13 @@ class RescueCaseRepository {
     String? note,
     required String actorUid,
     required String actorName,
+    OrgReferralReason? reason,
   }) => referrals.referToOrganization(
     caseId: caseId,
     targetOrgId: targetOrgId,
     targetOrgName: targetOrgName,
     note: note,
+    reason: reason,
     actorUid: actorUid,
     actorName: actorName,
   );
@@ -460,11 +463,13 @@ class RescueCaseRepository {
     String? note,
     required String actorUid,
     required String actorName,
+    OrgReferralReason? reason,
   }) => referrals.referToVolunteer(
     caseId: caseId,
     targetOrgId: targetOrgId,
     targetOrgName: targetOrgName,
     note: note,
+    reason: reason,
     actorUid: actorUid,
     actorName: actorName,
   );

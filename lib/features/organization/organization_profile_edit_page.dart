@@ -572,7 +572,7 @@ class _OrganizationProfileEditPageState extends State<OrganizationProfileEditPag
     try {
       // The organization's shelter settings are the single source both this
       // field and the dashboard Capacity card read/write — updating it here
-      // reflects live on the dashboard via shelterMaxCapacityProvider.
+      // reflects live on the dashboard via shelterSettingsProvider.
       // updatedBy/updatedAt is the only audit trail available. A brand-new
       // organization has no id yet; its capacity is set after it exists.
       Future<void> saveCapacity() async {
