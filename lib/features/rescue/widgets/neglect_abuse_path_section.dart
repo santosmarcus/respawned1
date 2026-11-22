@@ -123,10 +123,12 @@ class NeglectAbuseCoverageSection extends StatelessWidget {
       );
     }
 
-    final orgs = form.abuseCoveringOrgs;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        // The same "Please read before you continue" notice as before.
+        const NeglectAbuseGuidanceBox(),
+        const SizedBox(height: 12),
         Container(
           width: double.infinity,
           padding: const EdgeInsets.all(12),
@@ -144,9 +146,7 @@ class NeglectAbuseCoverageSection extends StatelessWidget {
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
-                      orgs.isEmpty
-                          ? 'A partner organization covers this location'
-                          : 'Covered by ${orgs.length == 1 ? orgs.first : '${orgs.first} and ${orgs.length - 1} more'}',
+                      'You can ask a partner organization for help',
                       style: body(FontWeight.w700, 14),
                     ),
                   ),
