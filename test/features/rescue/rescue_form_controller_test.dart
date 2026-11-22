@@ -219,10 +219,7 @@ void main() {
   test('neglect or abuse requires its follow-up answers', () {
     final form = _form()
       ..selectedRescueType = 'Neglect or Abuse'
-      ..abuseReportPath = kAbusePathOrgAssistance
-      ..onSiteChoice = 'No, I am reporting remotely'
-      ..coordinateChoice = 'yes'
-      ..adoptionChoice = 'no';
+      ..abuseReportPath = kAbusePathOrgAssistance;
     form.conditionController.text = 'Chained, thin';
     form.foundAnimals.first.species = kDogSpecies;
     expect(form.validateRescueReport(), 'Please fill in all required fields.');
@@ -237,9 +234,8 @@ void main() {
     form.neglectObserved.add('Constantly chained or caged');
     expect(form.validateRescueReport(), isNull);
 
+    // "Other" is described in the report's own description.
     form.neglectObserved.add(kNeglectObservedOther);
-    expect(form.validateRescueReport(), 'Please describe what you are seeing.');
-    form.neglectObservedOtherController.text = 'Ears cropped';
     expect(form.validateRescueReport(), isNull);
   });
 
@@ -448,7 +444,6 @@ void main() {
     RescueFormController abuseReady() {
       final form = _form()
         ..selectedRescueType = kNeglectAbuseType
-        ..onSiteChoice = 'No, I am reporting remotely'
         ..neglectHappeningNow = 'No'
         ..neglectOwnerKnown = 'Yes'
         ..neglectFrequency = 'Ongoing for weeks or longer'
@@ -460,23 +455,21 @@ void main() {
       return form;
     }
 
-    test('the reporter must choose a path', () {
-      expect(abuseReady().validateRescueReport(), 'Please choose how you want to handle this report.');
+    test('waits for the coverage check before it can be submitted', () {
+      expect(abuseReady().validateRescueReport(), contains('Still checking'));
     });
 
-    test('organization assistance keeps the coordination questions', () {
-      final form = abuseReady()..abuseReportPath = kAbusePathOrgAssistance;
+    test('inside coverage asks the organization; no stray-rescue questions', () {
+      final form = abuseReady()..applyAbuseCoverage(true, ['Paws Org']);
+      expect(form.abuseReportPath, kAbusePathOrgAssistance);
       expect(form.orgInvolvement, OrgInvolvement.orgAssist);
-      expect(form.asksOrgCoordination, isTrue);
-      expect(form.validateRescueReport(), 'Please fill in all required fields.');
-      form
-        ..coordinateChoice = 'yes'
-        ..adoptionChoice = 'no';
+      expect(form.asksOrgCoordination, isFalse);
+      expect(form.asksOnSite, isFalse);
       expect(form.validateRescueReport(), isNull);
     });
 
-    test('independent path skips coordination and still rates urgency', () {
-      final form = abuseReady()..abuseReportPath = kAbusePathIndependent;
+    test('outside coverage is reporter-led and still rates urgency', () {
+      final form = abuseReady()..applyAbuseCoverage(false);
       expect(form.orgInvolvement, OrgInvolvement.independentReport);
       expect(form.isIndependentAbuseReport, isTrue);
       expect(form.asksOrgCoordination, isFalse);

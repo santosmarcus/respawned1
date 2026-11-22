@@ -61,8 +61,8 @@ abstract class _NeglectSection extends StatelessWidget {
   }
 }
 
-/// Top of the Neglect or Abuse form, before Describe Condition: the
-/// guidance note, then "What are you seeing?".
+/// Top of the Neglect or Abuse questions: "What are you seeing?". The
+/// guidance note is shown by NeglectAbuseCoverageSection, above it.
 ///
 /// The guidance follows PAWS (Philippine Animal Welfare Society): cruelty
 /// is a crime under RA 8485 as amended by RA 10631, it must be reported to
@@ -83,12 +83,9 @@ class NeglectAbuseIntro extends _NeglectSection {
       crossAxisAlignment: CrossAxisAlignment.start,
       mainAxisSize: MainAxisSize.min,
       children: [
-        const _GuidanceBox(),
-        const SizedBox(height: 20),
-
         RescueFieldLabel('What are you seeing?', required: true),
         const SizedBox(height: 4),
-        _hint('Select all that apply.'),
+        _hint('Select all that apply. Describe it in your own words below.'),
         const SizedBox(height: 8),
         Wrap(
           spacing: 8,
@@ -104,13 +101,6 @@ class NeglectAbuseIntro extends _NeglectSection {
               ),
           ],
         ),
-        if (observed.contains(kNeglectObservedOther)) ...[
-          const SizedBox(height: 6),
-          RescueTextField(
-            form.neglectObservedOtherController,
-            'Please describe what you are seeing',
-          ),
-        ],
       ],
     );
   }
@@ -271,8 +261,8 @@ class _UrgentBanner extends StatelessWidget {
 
 /// What to do, what evidence to gather, and what the organization can and
 /// cannot do. Based on PAWS's published guidance on reporting cruelty.
-class _GuidanceBox extends StatelessWidget {
-  const _GuidanceBox();
+class NeglectAbuseGuidanceBox extends StatelessWidget {
+  const NeglectAbuseGuidanceBox({super.key});
 
   @override
   Widget build(BuildContext context) {

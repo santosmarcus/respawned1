@@ -13,7 +13,7 @@ import 'package:respawnd1/features/rescue/widgets/rescue_form_fields.dart';
 import 'package:respawnd1/core/utils/validators.dart';
 
 /// Details for every rescue type other than Pet Surrender and Lost Pet:
-/// the Neglect or Abuse path choice, condition, animals with the live
+/// Neglect or Abuse's coverage-based guidance, condition, animals with the live
 /// urgency assessment, on-site/access, and (when the organization is asked
 /// to act) shelter coordination, witnesses and adoption interest, then
 /// anonymity.
@@ -22,10 +22,15 @@ class StrayReportFields extends StatelessWidget {
     super.key,
     required this.form,
     required this.onChanged,
+    this.hasPin = true,
   });
 
   final RescueFormController form;
   final VoidCallback onChanged;
+
+  /// Whether the location step has a resolved pin (Neglect or Abuse checks
+  /// partner coverage there).
+  final bool hasPin;
 
   /// Applies [fn] to the shared form state, then asks the page to rebuild —
   /// the same effect as the page's own `setState(fn)` before extraction.
@@ -45,14 +50,16 @@ class StrayReportFields extends StatelessWidget {
         // between asking the organization for help and reporting it
         // yourself with the guide.
         if (form.isNeglectAbuseType) ...[
-          NeglectAbuseIntro(form: form, onChanged: onChanged),
+          // Where the animal is decides the path: the guidelines first when
+          // no partner organization covers it, the rescue form when one does.
+          NeglectAbuseCoverageSection(form: form, hasPin: hasPin),
           const SizedBox(height: 20),
-          NeglectAbusePathSection(form: form, onChanged: onChanged),
+          NeglectAbuseIntro(form: form, onChanged: onChanged),
           const SizedBox(height: 20),
         ],
 
         // Describe Condition
-        RescueFieldLabel('Describe Condition', required: true),
+        RescueFieldLabel(form.isNeglectAbuseType ? 'Describe what you saw' : 'Describe Condition', required: true),
         const SizedBox(height: 6),
         TextField(
           controller: form.conditionController,
@@ -108,7 +115,8 @@ class StrayReportFields extends StatelessWidget {
           const SizedBox(height: 20),
         ],
 
-        // On-site presence
+        // On-site presence (Neglect or Abuse asks "happening right now?").
+        if (form.asksOnSite) ...[
         RescueFieldLabel(
           'Are you currently on-site with the animal?',
           required: true,
@@ -126,6 +134,7 @@ class StrayReportFields extends StatelessWidget {
         ),
 
         const SizedBox(height: 20),
+        ],
 
         // Access instructions
         RescueFieldLabel('Access instructions', required: false),
