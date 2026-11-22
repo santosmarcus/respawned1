@@ -23,19 +23,21 @@ VehicleCategory classifyVehicle(String? vehicleType) {
   return VehicleCategory.unknown;
 }
 
-/// What this case needs from a transporting vehicle: room for its
-/// passengers, i.e. how many animals ride (the case's `animals[]`). Size and
-/// bite/escape risk no longer change the ranking or add an "enclosed
-/// vehicle" requirement; the high-risk banner still warns about them.
+/// What this specific case's animals need from a transporting vehicle —
+/// derived from the case's own `animals[]` (size) and bite/escape risk
+/// fields, never invented.
 class AnimalTransportProfile {
+  final bool hasLargeAnimal;
   final int animalCount;
+  final bool needsSpecialHandling;
 
-  const AnimalTransportProfile({required this.animalCount});
+  const AnimalTransportProfile({
+    required this.hasLargeAnimal,
+    required this.animalCount,
+    required this.needsSpecialHandling,
+  });
 
-  /// More than one passenger needs more room than a motorcycle.
-  bool get needsBiggerVehicle => animalCount > 1;
-
-  String get passengersLabel => animalCount == 1 ? '1 passenger' : '$animalCount passengers';
+  bool get needsBiggerVehicle => hasLargeAnimal || animalCount > 1 || needsSpecialHandling;
 }
 
 /// Higher is a better match. Used as the primary sort key within the
@@ -51,12 +53,13 @@ int vehicleCompatibilityScore(VehicleCategory category, AnimalTransportProfile p
       VehicleCategory.truck => 2,
       VehicleCategory.car => 1,
       VehicleCategory.unknown => 0,
-      // Not assumed to carry several animals — demoted, never hidden.
+      // Not assumed safe for a large animal, multiple animals, or an
+      // animal needing special handling — demoted, never hidden.
       VehicleCategory.motorcycle => -2,
     };
   }
-  // A single passenger — a motorcycle is a perfectly fine (often
-  // faster/more available) match.
+  // A single small/medium animal with no special handling need — a
+  // motorcycle is a perfectly fine (often faster/more available) match.
   return switch (category) {
     VehicleCategory.motorcycle => 2,
     VehicleCategory.car => 1,
@@ -74,10 +77,13 @@ String vehicleCategoryLabel(VehicleCategory category) => switch (category) {
       VehicleCategory.unknown => 'Vehicle',
     };
 
-/// Short line shown on each transporter card, e.g. "Van — fits 2
-/// passengers"; just the vehicle for a single passenger.
+/// Short human-readable reason shown on the "Preferred" chip, e.g. "Van —
+/// suitable for 2 large animals".
 String compatibilityReason(VehicleCategory category, AnimalTransportProfile profile) {
   final label = vehicleCategoryLabel(category);
   if (!profile.needsBiggerVehicle) return label;
-  return '$label — for ${profile.passengersLabel}';
+  final animalDesc = profile.animalCount > 1
+      ? '${profile.animalCount} animals'
+      : (profile.hasLargeAnimal ? 'a large animal' : 'special handling');
+  return '$label — suitable for $animalDesc';
 }

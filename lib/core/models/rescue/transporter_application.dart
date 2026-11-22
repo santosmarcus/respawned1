@@ -31,6 +31,9 @@ class TransporterApplication {
 
   /// Declared animal capacity (null on applications made before it was asked).
   final int? maxAnimals;
+
+  /// Motorcycles: declared an animal carrier.
+  final bool hasAnimalCarrier;
   final String? licenseFrontUrl;
   final String? licenseBackUrl;
   final String? portraitUrl;
@@ -48,6 +51,7 @@ class TransporterApplication {
     this.vehicleType,
     this.licensePlate,
     this.maxAnimals,
+    this.hasAnimalCarrier = false,
     this.licenseFrontUrl,
     this.licenseBackUrl,
     this.portraitUrl,
@@ -73,6 +77,7 @@ class TransporterApplication {
       vehicleType: str('vehicleType'),
       licensePlate: str('licensePlate'),
       maxAnimals: declaredAnimalCapacity(d['maxAnimals']),
+      hasAnimalCarrier: d['hasAnimalCarrier'] == true,
       licenseFrontUrl: str('licenseFrontUrl'),
       licenseBackUrl: str('licenseBackUrl'),
       portraitUrl: str('portraitUrl'),

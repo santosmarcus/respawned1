@@ -29,6 +29,11 @@ class PetTransporter {
   /// (`transporterVerification.maxAnimals`); null for accounts that
   /// registered before it was asked (transport_suitability.dart).
   final int? maxAnimals;
+
+  /// Motorcycles: the transporter has an animal carrier
+  /// (`transporterVerification.hasAnimalCarrier`), so it may take an
+  /// animal that needs enclosed transport (transport_suitability.dart).
+  final bool hasAnimalCarrier;
   final String? licensePlate;
   final bool isVerified;
 
@@ -55,6 +60,7 @@ class PetTransporter {
     this.photoUrl,
     this.vehicleType,
     this.maxAnimals,
+    this.hasAnimalCarrier = false,
     this.licensePlate,
     this.isVerified = false,
     this.verificationStatus = '',
@@ -94,6 +100,7 @@ class PetTransporter {
       photoUrl: verification?['portraitUrl'] as String?,
       vehicleType: verification?['vehicleType'] as String?,
       maxAnimals: declaredAnimalCapacity(verification?['maxAnimals']),
+      hasAnimalCarrier: verification?['hasAnimalCarrier'] == true,
       licensePlate: verification?['licensePlate'] as String?,
       isVerified: data['isVerified'] as bool? ?? false,
       verificationStatus: data['transporterVerificationStatus'] as String? ?? '',

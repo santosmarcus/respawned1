@@ -1,5 +1,6 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
+import 'package:respawnd1/core/utils/transporter_ranking.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -56,6 +57,9 @@ class TransporterDetailPage extends StatelessWidget {
                 _row(Icons.confirmation_number_outlined, 'License plate', t.licensePlate),
                 _row(Icons.pets_outlined, 'Carries safely',
                     t.maxAnimals == null ? 'Not declared (single-animal trips only)' : '${t.maxAnimals} animal${t.maxAnimals == 1 ? '' : 's'}'),
+                if (classifyVehicle(t.vehicleType) == VehicleCategory.motorcycle)
+                  _row(Icons.work_outline, 'Animal carrier',
+                      t.hasAnimalCarrier ? 'Yes' : 'No (not matched to animals needing enclosed transport)'),
               ]),
               _Section(title: 'Availability', children: [
                 _row(Icons.circle, 'Status', t.isOnline ? 'Online now' : 'Offline',

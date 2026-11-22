@@ -781,6 +781,7 @@ class _AssignRiderPageState extends ConsumerState<AssignRiderPage> {
       Map<String, TransportAssignmentStatus> activeByRider,
       AnimalTransportProfile animalProfile, {
       required int tripAnimals,
+      required List<String> enclosedReasons,
       }) {
     // Unverified transporters can't take transits (firestore.rules
     // isVerifiedResponder), so they are never offered one.
@@ -822,6 +823,7 @@ class _AssignRiderPageState extends ConsumerState<AssignRiderPage> {
           vehicleType: vehicle,
           declaredCapacity: null,
           animals: tripAnimals,
+          enclosedReasons: enclosedReasons,
         ),
       );
     }
@@ -870,6 +872,8 @@ class _AssignRiderPageState extends ConsumerState<AssignRiderPage> {
           vehicleType: t.vehicleType,
           declaredCapacity: t.maxAnimals,
           animals: tripAnimals,
+          enclosedReasons: enclosedReasons,
+          hasAnimalCarrier: t.hasAnimalCarrier,
         ),
       );
     }).toList();
@@ -1379,15 +1383,29 @@ class _AssignRiderPageState extends ConsumerState<AssignRiderPage> {
         ref.watch(activeAssignmentsByRiderProvider).asData?.value ?? const <String, TransportAssignmentStatus>{};
 
     final animals = (d['animals'] as List?) ?? const [];
-    // Ranking and suitability need only the number of passengers (animals
-    // riding); no "enclosed vehicle" requirement.
+    // A transporter's own "requires specialized transport" End Reason
+    // (transit_progress_page.dart) means this case needs a bigger/better-
+    // equipped vehicle even if the animals[] data alone wouldn't suggest
+    // it — factored into ranking the same way a large animal or high-risk
+    // behavior already is, so a van/truck transporter is preferred for
+    // the reassignment.
+    final requiresSpecializedTransport =
+        (d['endReasonServiceType'] as String?)?.isNotEmpty ?? false;
     final animalProfile = AnimalTransportProfile(
+      hasLargeAnimal: animals.any((a) => a is Map && a['size'] == 'Large'),
       animalCount: animals.isEmpty ? 1 : animals.length,
+      needsSpecialHandling: requiresSpecializedTransport ||
+          highRiskAnimalsIn(
+            animals: d['animals'] as List?,
+            legacyBiteRisk: d['biteRisk'] as String?,
+            legacyEscapeRisk: d['escapeRisk'] as String?,
+          ).isNotEmpty,
     );
     // What the trip needs from a vehicle (transport_suitability.dart).
     final tripAnimals = animalsToTransport(d);
+    final enclosedReasons = enclosedTransportReasons(d);
     final riders = _buildRiderVms(riderCenter, caseLocation, transporters, activeByRider, animalProfile,
-        tripAnimals: tripAnimals);
+        tripAnimals: tripAnimals, enclosedReasons: enclosedReasons);
 
     // Progressive Search Radius spec — only riders within the current
     // radius are actually shown/selectable; the underlying compatibility/
@@ -1586,6 +1604,38 @@ class _AssignRiderPageState extends ConsumerState<AssignRiderPage> {
               ),
             ),
           ),
+          if (requiresSpecializedTransport)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
+              child: Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: AppColors.lavenderrspwn.withValues(alpha: 0.2),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: AppColors.lavenderrspwn),
+                ),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Icon(Icons.local_shipping_outlined, color: AppColors.textPrimary, size: 20),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text('Specialized transport required',
+                              style: GoogleFonts.zain(fontSize: 13, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
+                          Text(d['endReasonServiceType'] as String,
+                              style: GoogleFonts.zain(fontSize: 12, color: AppColors.textPrimary)),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+
           // Real map: case marker + transporter markers (real-or-demo positions).
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -1713,8 +1763,9 @@ class _AssignRiderPageState extends ConsumerState<AssignRiderPage> {
                     children: [
                       Text(
                         hasUnsuitableOnly
-                            ? 'No available vehicle has room for this trip\'s $tripAnimals '
-                                'passenger${tripAnimals == 1 ? '' : 's'}.'
+                            ? 'No available vehicle meets this trip\'s needs ($tripAnimals '
+                                'animal${tripAnimals == 1 ? '' : 's'}${enclosedReasons.isEmpty ? '' : ', animal carrier needed on a motorcycle'}). '
+                                'The transporters online can\'t carry it safely.'
                             : atMaxRadius
                             ? (hasAvailableAnywhere
                         // Shouldn't happen (max radius should contain
@@ -1781,8 +1832,10 @@ class _AssignRiderPageState extends ConsumerState<AssignRiderPage> {
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
               child: Text(
-                'Passengers: $tripAnimals animal${tripAnimals == 1 ? '' : 's'}. '
-                'Transporters without room for them are listed but can\'t be selected.',
+                'Passengers: $tripAnimals animal${tripAnimals == 1 ? '' : 's'}'
+                '${enclosedReasons.isEmpty ? '' : ' · needs enclosed transport (${enclosedReasons.join(', ')}): '
+                    'a car or larger, or a motorcycle with an animal carrier'}. '
+                'Transporters whose vehicle can\'t carry it safely are listed but can\'t be selected.',
                 style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary),
               ),
             ),
