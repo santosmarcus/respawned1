@@ -820,9 +820,6 @@ class RescueCaseRepository {
   Future<void> endQuarantine({required String caseId, String? reason}) =>
       intake.endQuarantine(caseId: caseId, reason: reason);
 
-  /// Delegates to [CaseIntakeRepository.skipQuarantine].
-  Future<void> skipQuarantine({required String caseId}) =>
-      intake.skipQuarantine(caseId: caseId);
 
   /// Delegates to [CaseIntakeRepository.checkAndCompleteQuarantineIfDue].
   Future<void> checkAndCompleteQuarantineIfDue(RescueCase c) =>
