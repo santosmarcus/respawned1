@@ -35,6 +35,10 @@ class _AdminQrGeneratorScreenState extends State<AdminQrGeneratorScreen> {
   Timer? _loadTimeout;
 
   final _searchCtrl = TextEditingController();
+
+  /// null = all; true = shelter animals (animal records); false = pets
+  /// (owners' collar tags).
+  bool? _shelterFilter;
   final _qrKey = GlobalKey();
 
   @override
@@ -131,9 +135,9 @@ class _AdminQrGeneratorScreenState extends State<AdminQrGeneratorScreen> {
   void _onSearchChanged() {
     final q = _searchCtrl.text.trim().toLowerCase();
     setState(() {
-      _filtered = q.isEmpty
-          ? _allTags
-          : _allTags.where((t) {
+      _filtered = _allTags.where((t) {
+        if (_shelterFilter != null && t.isAnimalRecordTag != _shelterFilter) return false;
+        if (q.isEmpty) return true;
         return t.name.toLowerCase().contains(q) ||
             t.ownerName.toLowerCase().contains(q) ||
             (t.tagId?.toLowerCase().contains(q) ?? false);
@@ -317,6 +321,29 @@ class _AdminQrGeneratorScreenState extends State<AdminQrGeneratorScreen> {
                       color: AppColors.greenrspwn, width: 1.5),
                 ),
               ),
+            ),
+          ),
+
+          // Shelter animals (from Records) or owners' pets.
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 10, 20, 0),
+            child: Wrap(
+              spacing: 8,
+              children: [
+                for (final (label, value) in const [('All', null), ('Shelter animals', true), ('Pets', false)])
+                  ChoiceChip(
+                    label: Text(
+                      '$label (${_allTags.where((t) => value == null || t.isAnimalRecordTag == value).length})',
+                      style: GoogleFonts.zain(fontSize: 13, color: AppColors.textPrimary),
+                    ),
+                    selected: _shelterFilter == value,
+                    selectedColor: AppColors.yellowrspwn,
+                    onSelected: (_) {
+                      _shelterFilter = value;
+                      _onSearchChanged();
+                    },
+                  ),
+              ],
             ),
           ),
 

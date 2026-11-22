@@ -27,6 +27,7 @@ import 'package:respawnd1/features/admin/rescue/widgets/case_animals_card.dart';
 import 'package:respawnd1/features/admin/rescue/rescue_detail_page.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/community_reports_section.dart';
+import 'package:respawnd1/features/rescue/widgets/case_chat.dart';
 import 'package:respawnd1/core/utils/app_date_format.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/select_clinic_sheet.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/transporter_details_card.dart';
@@ -1088,169 +1089,29 @@ class _AdminTrackingTabState extends State<_AdminTrackingTab> {
         // (never conditionally created/destroyed by the collapse toggle),
         // so expanding/collapsing never disposes or duplicates the
         // messages listener — see the class doc comment.
-        StreamBuilder<QuerySnapshot>(
-          stream: FirebaseFirestore.instance
-              .collection('cases')
-              .doc(widget.caseId)
-              .collection('messages')
-              .orderBy('timestamp')
-              .snapshots(),
-          builder: (context, snap) {
-            final docs = snap.data?.docs ?? const [];
-            final count = docs.length;
-            final summary = count == 0
-                ? 'No messages yet'
-                : '$count message${count == 1 ? '' : 's'}';
-
-            return Column(
+        // Messages: the same chat as Rescue Details and the reporter's
+        // Track Case (CaseChat). Collapsed by default so the timeline above
+        // stays readable.
+        InkWell(
+          onTap: () => setState(() => _messagesExpanded = !_messagesExpanded),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                InkWell(
-                  onTap: () =>
-                      setState(() => _messagesExpanded = !_messagesExpanded),
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 16,
-                      vertical: 10,
-                    ),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Text(
-                          'Messages',
-                          style: GoogleFonts.zain(
-                            fontSize: 14,
-                            fontWeight: FontWeight.w600,
-                            color: AppColors.textPrimary,
-                          ),
-                        ),
-                        Row(
-                          children: [
-                            Text(
-                              summary,
-                              style: GoogleFonts.zain(
-                                fontSize: 12,
-                                color: AppColors.textSecondary,
-                              ),
-                            ),
-                            const SizedBox(width: 4),
-                            Icon(
-                              _messagesExpanded
-                                  ? Icons.keyboard_arrow_up
-                                  : Icons.keyboard_arrow_down,
-                              size: 18,
-                              color: AppColors.textSecondary,
-                            ),
-                          ],
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-                if (_messagesExpanded) ...[
-                  SizedBox(
-                    height: 200,
-                    child: docs.isEmpty
-                        ? Center(
-                      child: Text(
-                        'No messages yet.',
-                        style: GoogleFonts.zain(
-                          fontSize: 12,
-                          color: AppColors.textSecondary,
-                        ),
-                      ),
-                    )
-                        : ListView.builder(
-                      padding: const EdgeInsets.symmetric(horizontal: 16),
-                      itemCount: docs.length,
-                      itemBuilder: (context, i) {
-                        final msg =
-                        docs[i].data() as Map<String, dynamic>;
-                        return Padding(
-                          padding: const EdgeInsets.only(bottom: 4),
-                          child: Row(
-                            children: [
-                              CircleAvatar(
-                                radius: 12,
-                                backgroundColor: AppColors.slaterspwn,
-                                child: Text(
-                                  (msg['senderName'] ?? 'U')[0],
-                                  style: GoogleFonts.zain(fontSize: 10),
-                                ),
-                              ),
-                              const SizedBox(width: 8),
-                              Expanded(
-                                child: Text(
-                                  '${msg['senderName']}: ${msg['text']}',
-                                  style: GoogleFonts.zain(
-                                    fontSize: 12,
-                                    color: AppColors.textPrimary,
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
-                        );
-                      },
-                    ),
-                  ),
-                  Padding(
-                    padding: const EdgeInsets.all(12),
-                    child: Row(
-                      children: [
-                        Expanded(
-                          child: TextField(
-                            controller: widget.messageController,
-                            decoration: InputDecoration(
-                              hintText: 'Type a message',
-                              hintStyle: GoogleFonts.zain(
-                                fontSize: 13,
-                                color: AppColors.textSecondary,
-                              ),
-                              contentPadding: const EdgeInsets.symmetric(
-                                horizontal: 16,
-                                vertical: 10,
-                              ),
-                              enabledBorder: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(50),
-                                borderSide: const BorderSide(
-                                  color: AppColors.slaterspwn,
-                                ),
-                              ),
-                              focusedBorder: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(50),
-                                borderSide: const BorderSide(
-                                  color: AppColors.textPrimary,
-                                ),
-                              ),
-                              filled: true,
-                              fillColor: Colors.white,
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        GestureDetector(
-                          onTap: widget.onSend,
-                          child: Container(
-                            padding: const EdgeInsets.all(10),
-                            decoration: const BoxDecoration(
-                              color: AppColors.yellowrspwn,
-                              shape: BoxShape.circle,
-                            ),
-                            child: const Icon(
-                              Icons.send,
-                              size: 18,
-                              color: AppColors.textPrimary,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
+                Text('Messages',
+                    style: GoogleFonts.zain(fontSize: 14, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
+                Icon(_messagesExpanded ? Icons.keyboard_arrow_up : Icons.keyboard_arrow_down,
+                    size: 18, color: AppColors.textSecondary),
               ],
-            );
-          },
+            ),
+          ),
         ),
+        if (_messagesExpanded)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+            child: CaseChat(caseId: widget.caseId, staff: true),
+          ),
 
       ],
     );

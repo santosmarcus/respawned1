@@ -227,6 +227,9 @@ class NotificationService {
       // reported location.
       case 'case_live_proof_requested':
       case 'verification_visit':
+      // requestCommunityReportConfirmation: the reporter confirms, staff
+      // follow it on the case.
+      case 'community_report_confirm':
         final caseId = data['caseId'] as String?;
         if (caseId == null || caseId.isEmpty) return null;
         return _casePageFor(caseId);
@@ -273,6 +276,8 @@ class NotificationService {
 
       case 'transporter_location_updated':
       case 'transporter_clinic_changed':
+      // The organization closed the case mid-transit: confirm and stop.
+      case 'transporter_case_closed':
         final caseId = data['caseId'] as String?;
         if (caseId == null || caseId.isEmpty) return null;
         return TransitProgressPage(caseId: caseId);

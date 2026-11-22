@@ -3,6 +3,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
+import 'package:respawnd1/core/widgets/dismiss_keyboard_on_tap.dart';
 import 'package:respawnd1/features/pettransporter/transporter_shell.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter_facebook_auth/flutter_facebook_auth.dart';
@@ -128,6 +129,9 @@ class _ResPAWndAppState extends State<ResPAWndApp> {
       // web page). A cold start opens it over the home screen.
       onGenerateRoute: animalLinkRoute,
       onUnknownRoute: unknownLinkRoute,
+      // Choosing from a dropdown, radio or chip no longer reopens the
+      // keyboard and scrolls the form (DismissKeyboardOnTap).
+      builder: (context, child) => DismissKeyboardOnTap(child: child ?? const SizedBox.shrink()),
     );
   }
 }

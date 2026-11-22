@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:respawnd1/core/models/rescue/closure_reason.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
@@ -449,6 +450,23 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
     } finally {
       if (mounted) setState(() => _isActing = false);
     }
+  }
+
+  /// The transporter confirms they saw the case was closed: posted in the
+  /// case's Messages for staff, then the trip ends.
+  Future<void> _confirmCaseClosed() async {
+    setState(() => _isActing = true);
+    try {
+      await _service.sendMessage('I confirm the rescue is closed and I have stopped the transit.');
+    } catch (_) {
+      // Best effort: the trip still ends.
+    }
+    _positionSub?.cancel();
+    if (mounted) setState(() => _isActing = false);
+    _openResultPage(
+      completed: false,
+      reason: ClosureReason.fromName(_latestCase?['closureReason'] as String?).label,
+    );
   }
 
   Future<void> _startTrip() async {
@@ -1086,6 +1104,16 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
           locked: !_isAtVerificationStop(data),
         );
 
+    // Closed by the organization while in transit (e.g. the reporter
+    // confirmed the animal was rescued by others): stop and confirm.
+      case 'cancelled':
+        return _ClosedByOrgPanel(
+          reason: ClosureReason.fromName(data['closureReason'] as String?).label,
+          details: data['closureDetails'] as String?,
+          busy: _isActing,
+          onConfirm: _confirmCaseClosed,
+        );
+
     // Standard panel for other statuses
       default:
         return StandardProgressPanel(
@@ -1099,5 +1127,53 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
           onArriveAtClinic: _arriveAtClinic,
         );
     }
+  }
+}
+
+/// Shown when the organization closed the case during the transit.
+class _ClosedByOrgPanel extends StatelessWidget {
+  const _ClosedByOrgPanel({required this.reason, required this.details, required this.busy, required this.onConfirm});
+
+  final String reason;
+  final String? details;
+  final bool busy;
+  final VoidCallback onConfirm;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      color: AppColors.background,
+      padding: const EdgeInsets.fromLTRB(20, 16, 20, 16),
+      child: SingleChildScrollView(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(children: [
+              const Icon(Icons.block, color: AppColors.error),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text('This rescue was closed',
+                    style: GoogleFonts.tiltWarp(fontSize: 18, color: AppColors.textPrimary)),
+              ),
+            ]),
+            const SizedBox(height: 8),
+            Text('Reason: $reason', style: GoogleFonts.zain(fontSize: 14, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
+            if (details != null && details!.trim().isNotEmpty) ...[
+              const SizedBox(height: 4),
+              Text(details!, style: GoogleFonts.zain(fontSize: 13, color: AppColors.textSecondary)),
+            ],
+            const SizedBox(height: 8),
+            Text('Please stop the transit. Confirm so the organization knows you got this.',
+                style: GoogleFonts.zain(fontSize: 13, color: AppColors.textPrimary)),
+            const SizedBox(height: 14),
+            ElevatedButton(
+              onPressed: busy ? null : onConfirm,
+              style: AppButtons.primary,
+              child: Text('Confirm case closed', style: GoogleFonts.tiltWarp(fontSize: 15, color: AppColors.textPrimary)),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 }

@@ -16,6 +16,9 @@ enum ClosureReason {
   aggressive,
   reunited,
   rescuedOutsideWorkflow,
+  // Closed from a community report the reporter confirmed (the animal is no
+  // longer at the location). Not in the Close Case picker ([selectable]).
+  animalNotPresent,
   // Never shown in the Close Case picker (see [selectable]) — exists only
   // so [fromName] has somewhere safe to land for a `closureReason` value
   // written before this reduction to 5 reasons (hasOwner/animalMoved/
@@ -31,6 +34,7 @@ enum ClosureReason {
     ClosureReason.aggressive => 'Aggressive',
     ClosureReason.reunited => 'Reunited',
     ClosureReason.rescuedOutsideWorkflow => 'Rescued outside ResPAWnd',
+    ClosureReason.animalNotPresent => 'Animal no longer at the location',
     ClosureReason.legacyOther => 'Other (legacy closure reason)',
   };
 

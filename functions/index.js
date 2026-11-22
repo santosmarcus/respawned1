@@ -1178,6 +1178,20 @@ exports.notifyTransporterCaseChanges = onDocumentUpdated(
 
     const riderId = after.riderId || after.assignedVolunteerId;
     if (!riderId) return;
+    // Closed by the organization while the transporter was on it (e.g. the
+    // reporter confirmed the animal was rescued by others): tell them to
+    // stop; they confirm in the app (transit_progress_page.dart).
+    const wasActive = TRANSPORTER_ACTIVE_STATUSES.includes((before.status || '').toLowerCase());
+    if (wasActive && (after.status || '') === 'cancelled' && (before.status || '') !== 'cancelled') {
+      await safeNotifyUser({
+        uid: riderId,
+        title: 'Rescue closed — please stop',
+        body: after.closureDetails || after.closureReasonLabel ||
+          'The organization closed this rescue. Open the app to confirm.',
+        data: {type: 'transporter_case_closed', caseId: event.params.caseId},
+      });
+      return;
+    }
     if (!TRANSPORTER_ACTIVE_STATUSES.includes((after.status || '').toLowerCase())) return;
     // The rider's own clinic reroute (transit_progress_page.dart) changes
     // the clinic too, but they already know — don't push it back to them.
@@ -2346,6 +2360,82 @@ exports.followUpAdopterPickups = onSchedule('every 30 minutes', async () => {
     }
   }
 });
+
+// ---- Community report needs the reporter's confirmation ------------------
+//
+// Another community member reports that the animal moved, was already
+// rescued by another team, or is no longer there. The person who filed the
+// case is asked to confirm it in the case's Messages (a confirm_request
+// message they answer with Yes/No, and who rescued it; CaseChat in
+// lib/features/rescue/widgets/case_chat.dart). The reporter and the
+// organization's rescue staff are notified. Staff then change the location
+// or close the case (community_reports_section.dart).
+const CONFIRM_TYPES = ['moved', 'rescued', 'no_animal'];
+
+function confirmQuestion(type, newAddress) {
+  if (type === 'moved') {
+    return `Someone reported that the animal moved${newAddress ? ` to ${newAddress}` : ''}. Is this true?`;
+  }
+  if (type === 'rescued') return 'Someone reported that the animal was already rescued by another team. Is this true?';
+  return 'Someone reported that the animal is no longer at the location. Is this true?';
+}
+
+exports.requestCommunityReportConfirmation = onDocumentCreated(
+  'cases/{caseId}/communityReports/{reportId}',
+  async (event) => {
+    const r = event.data && event.data.data();
+    if (!r || !CONFIRM_TYPES.includes(r.type)) return;
+    const {caseId, reportId} = event.params;
+    const caseRef = db.collection('cases').doc(caseId);
+    const c = (await caseRef.get()).data();
+    if (!c) return;
+    // The case's own reporter needs no confirmation from themselves.
+    if (c.reporterId && c.reporterId === r.reporterId) return;
+
+    const messages = caseRef.collection('messages');
+    const existing = await messages.where('reportId', '==', reportId).limit(1).get();
+    if (existing.empty) {
+      await messages.add({
+        kind: 'confirm_request',
+        text: confirmQuestion(r.type, r.newAddress),
+        reportId,
+        reportType: r.type,
+        ...(r.newAddress ? {newAddress: r.newAddress} : {}),
+        ...(typeof r.newLat === 'number' ? {lat: r.newLat} : {}),
+        ...(typeof r.newLng === 'number' ? {lng: r.newLng} : {}),
+        status: 'open',
+        senderId: 'system',
+        senderName: 'ResPAWnd',
+        senderRole: 'system',
+        timestamp: admin.firestore.FieldValue.serverTimestamp(),
+      });
+    }
+
+    const what = r.type === 'moved' ? 'the animal moved' :
+      r.type === 'rescued' ? 'the animal was already rescued' : 'the animal is no longer there';
+    if (c.reporterId) {
+      await safeNotifyUser({
+        uid: c.reporterId,
+        title: 'Please confirm a report about your rescue',
+        body: `Someone reported that ${what}. Open your report to confirm.`,
+        data: {type: 'community_report_confirm', caseId},
+      });
+    }
+    const orgIds = c.organizationId ? [c.organizationId] : (Array.isArray(c.areaOrgIds) ? c.areaOrgIds : []);
+    const uids = new Set();
+    for (const orgId of orgIds) {
+      for (const uid of await orgMemberUids(db, orgId, {anyOf: ['rescue']})) uids.add(uid);
+    }
+    uids.delete(r.reporterId);
+    if (uids.size) {
+      await notifyStaff([...uids], {
+        title: 'Community report: ' + (r.type === 'moved' ? 'animal moved' : r.type === 'rescued' ? 'rescued by others' : 'animal not there'),
+        body: `Someone reported that ${what}. The reporter was asked to confirm in Messages.`,
+        data: {type: 'community_report_confirm', caseId},
+      });
+    }
+  },
+);
 
 // ---- Reporter-led report turned into a request for help -----------------
 //

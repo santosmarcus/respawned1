@@ -8,7 +8,11 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 import 'package:respawnd1/app_theme.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:respawnd1/core/models/rescue/case_message.dart';
+import 'package:respawnd1/core/models/rescue/closure_reason.dart';
 import 'package:respawnd1/core/models/rescue/community_report.dart';
+import 'package:respawnd1/core/repos/rescue_case/case_messages_repository.dart';
 import 'package:respawnd1/features/admin/rescue/state/rescue_reports_providers.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/section_card.dart';
 import 'package:respawnd1/core/utils/app_date_format.dart';
@@ -413,6 +417,12 @@ class _CommunityReportTileState extends ConsumerState<_CommunityReportTile> {
                     'Filed on merged duplicate report',
                     style: GoogleFonts.zain(fontSize: 11, color: AppColors.textSecondary),
                   ),
+                // Moved / rescued by others / no longer there: confirmed with
+                // the person who filed the case, in Messages, before acting.
+                if (const {'moved', 'rescued', 'no_animal'}.contains(report.type)) ...[
+                  const SizedBox(height: 6),
+                  _ReporterConfirmation(caseId: widget.caseId, report: report),
+                ],
                 if (report.isPendingMove && report.newLat != null && report.newLng != null) ...[
                   const SizedBox(height: 6),
                   _MoveCheckMap(current: widget.currentPin, reported: LatLng(report.newLat!, report.newLng!)),
@@ -498,4 +508,172 @@ class _CommunityReportTileState extends ConsumerState<_CommunityReportTile> {
       ),
     );
   }
+}
+
+
+/// Whether the person who filed the case confirmed a community report
+/// (the confirmation request and their answer live in the case's Messages,
+/// see CaseChat), and the next step once they have: the location change
+/// (handled by the tile's Confirm Move) or closing the case.
+class _ReporterConfirmation extends ConsumerStatefulWidget {
+  final String caseId;
+  final CommunityReport report;
+  const _ReporterConfirmation({required this.caseId, required this.report});
+
+  @override
+  ConsumerState<_ReporterConfirmation> createState() => _ReporterConfirmationState();
+}
+
+class _ReporterConfirmationState extends ConsumerState<_ReporterConfirmation> {
+  bool _busy = false;
+
+  String get _threadCaseId => widget.report.caseId ?? widget.caseId;
+
+  Future<void> _act(Future<void> Function() action, String failure) async {
+    if (_busy) return;
+    setState(() => _busy = true);
+    try {
+      await action();
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(appSnackBar('$failure: $e', kind: AppMessageKind.error));
+      }
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _closeCase(CaseMessage? answer) async {
+    final r = widget.report;
+    final rescued = r.type == 'rescued';
+    final ok = await showConfirmActionDialog(
+      context,
+      title: 'Close this case?',
+      message: rescued
+          ? 'The reporter confirmed the animal was already rescued'
+              '${answer?.rescuedBy != null ? ' (${answer!.rescuedBy!.toLowerCase()})' : ''}. '
+              'The case closes, and an assigned transporter is told to stop.'
+          : 'The reporter confirmed the animal is no longer at the location. '
+              'The case closes, and an assigned transporter is told to stop.',
+      confirmLabel: 'Close Case',
+      destructive: true,
+    );
+    if (!ok || !mounted) return;
+    final user = FirebaseAuth.instance.currentUser;
+    final name = (user?.displayName?.trim().isNotEmpty ?? false) ? user!.displayName!.trim() : 'Admin Staff';
+    await _act(() async {
+      await ref.read(rescueCaseRepositoryProvider).closeCase(
+            caseId: widget.caseId,
+            reason: rescued ? ClosureReason.rescuedOutsideWorkflow : ClosureReason.animalNotPresent,
+            details: [
+              rescued ? 'Rescued by another team' : 'Animal no longer at the location',
+              if (answer?.rescuedBy != null) 'Rescued by: ${answer!.rescuedBy}',
+              'Reported by ${r.reporterName ?? 'a community member'}, confirmed by the reporter.',
+            ].join('. '),
+            actorUid: user?.uid ?? '',
+            actorName: name,
+          );
+      await FirebaseFirestore.instance
+          .collection('cases')
+          .doc(_threadCaseId)
+          .collection('communityReports')
+          .doc(r.id)
+          .update({'approvalStatus': 'approved', 'approvedBy': name, 'approvedAt': Timestamp.now(), 'resolution': 'case_closed'});
+    }, 'Could not close the case');
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final r = widget.report;
+    final rescueCase = ref.watch(caseDetailProvider(widget.caseId)).asData?.value;
+    final caseReporterId = rescueCase?.raw['reporterId'] as String?;
+    final closed = rescueCase?.status.isTerminal ?? false;
+    TextStyle t(Color c, [FontWeight w = FontWeight.w600]) => GoogleFonts.zain(fontSize: 11.5, fontWeight: w, color: c);
+
+    // Filed by the case's own reporter: nothing to confirm.
+    if (caseReporterId != null && r.reporterId == caseReporterId) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('Reported by the case reporter themselves.', style: t(AppColors.greenrspwn)),
+          if (r.type != 'moved' && !closed && r.approvalStatus != 'approved') _closeButton(null),
+        ],
+      );
+    }
+
+    return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+      stream: FirebaseFirestore.instance
+          .collection('cases')
+          .doc(_threadCaseId)
+          .collection('messages')
+          .where('reportId', isEqualTo: r.id)
+          .snapshots(),
+      builder: (context, snap) {
+        final requests = [
+          for (final d in snap.data?.docs ?? const <QueryDocumentSnapshot<Map<String, dynamic>>>[])
+            if (d.data()['kind'] == CaseMessageKind.confirmRequest.firestoreValue) CaseMessage.fromDoc(d),
+        ];
+        final req = requests.isEmpty ? null : requests.first;
+        if (req == null) {
+          return Align(
+            alignment: Alignment.centerLeft,
+            child: TextButton.icon(
+              onPressed: _busy
+                  ? null
+                  : () => _act(() => CaseMessagesRepository().requestConfirmation(_threadCaseId, r),
+                      'Could not ask the reporter'),
+              icon: const Icon(Icons.forum_outlined, size: 16, color: AppColors.textPrimary),
+              label: Text('Ask the reporter to confirm (in Messages)', style: t(AppColors.textPrimary, FontWeight.w700)),
+            ),
+          );
+        }
+        if (req.isOpen) {
+          return Row(children: [
+            const Icon(Icons.hourglass_top, size: 14, color: AppColors.warning),
+            const SizedBox(width: 4),
+            Expanded(child: Text('Asked the reporter in Messages. Waiting for their answer.', style: t(AppColors.warning))),
+          ]);
+        }
+        if (!req.confirmed) {
+          return Row(children: [
+            const Icon(Icons.cancel, size: 14, color: AppColors.error),
+            const SizedBox(width: 4),
+            Expanded(child: Text('The reporter says this is not true.', style: t(AppColors.error))),
+          ]);
+        }
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(children: [
+              const Icon(Icons.check_circle, size: 14, color: AppColors.greenrspwn),
+              const SizedBox(width: 4),
+              Expanded(
+                child: Text(
+                  'Confirmed by the reporter'
+                  '${req.rescuedBy != null && req.rescuedBy!.isNotEmpty ? ' · Rescued by: ${req.rescuedBy}' : ''}',
+                  style: t(AppColors.greenrspwn),
+                ),
+              ),
+            ]),
+            if (r.type != 'moved' && !closed && r.approvalStatus != 'approved') _closeButton(req),
+          ],
+        );
+      },
+    );
+  }
+
+  Widget _closeButton(CaseMessage? answer) => Padding(
+        padding: const EdgeInsets.only(top: 6),
+        child: ElevatedButton.icon(
+          onPressed: _busy ? null : () => _closeCase(answer),
+          style: ElevatedButton.styleFrom(
+            backgroundColor: AppColors.error,
+            foregroundColor: Colors.white,
+            minimumSize: const Size(0, 36),
+          ),
+          icon: const Icon(Icons.block, size: 16),
+          label: Text(widget.report.type == 'rescued' ? 'Close case: rescued by others' : 'Close case: animal not there',
+              style: const TextStyle(fontSize: 12)),
+        ),
+      );
 }

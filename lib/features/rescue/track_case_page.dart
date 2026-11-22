@@ -27,6 +27,7 @@ import 'package:respawnd1/features/rescue/widgets/community_report_section.dart'
 import 'package:respawnd1/features/rescue/widgets/live_proof_request_card.dart';
 import 'package:respawnd1/features/rescue/widgets/independent_report_section.dart';
 import 'package:respawnd1/core/models/rescue/org_involvement.dart';
+import 'package:respawnd1/features/rescue/widgets/case_chat.dart';
 import 'package:respawnd1/core/widgets/app_messages.dart';
 import 'package:respawnd1/core/repos/rescue_case/rescue_case_store.dart';
 
@@ -1300,145 +1301,12 @@ class _TrackingTabState extends State<_TrackingTab> {
           ),
 
           if (_messagesExpanded) ...[
-            // Message list
-            SizedBox(
-              height: 100,
-              child: StreamBuilder<QuerySnapshot>(
-                stream: FirebaseFirestore.instance
-                    .collection('cases')
-                    .doc(widget.caseId)
-                    .collection('messages')
-                    .orderBy('timestamp')
-                    .snapshots(),
-                builder: (context, snap) {
-                  if (!snap.hasData || snap.data!.docs.isEmpty) {
-                    return const SizedBox();
-                  }
-                  return ListView.builder(
-                    padding: const EdgeInsets.symmetric(horizontal: 16),
-                    itemCount: snap.data!.docs.length,
-                    itemBuilder: (context, i) {
-                      final msg =
-                      snap.data!.docs[i].data() as Map<String, dynamic>;
-                      final ts = msg['timestamp'] as Timestamp?;
-                      final timeStr = ts != null
-                          ? '${ts.toDate().hour}:${ts.toDate().minute.toString().padLeft(2, '0')} ${ts.toDate().hour >= 12 ? 'PM' : 'AM'}'
-                          : '';
-                      return Padding(
-                        padding: const EdgeInsets.only(bottom: 8),
-                        child: Row(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            CircleAvatar(
-                              radius: 14,
-                              backgroundColor: AppColors.slaterspwn,
-                              child: Text(
-                                _initial(msg['senderName']),
-                                style: GoogleFonts.zain(
-                                  fontSize: 12,
-                                  color: AppColors.textPrimary,
-                                ),
-                              ),
-                            ),
-                            const SizedBox(width: 8),
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Row(
-                                    mainAxisAlignment:
-                                    MainAxisAlignment.spaceBetween,
-                                    children: [
-                                      Text(
-                                        msg['senderName'] ?? '',
-                                        style: GoogleFonts.zain(
-                                          fontSize: 12,
-                                          fontWeight: FontWeight.w600,
-                                          color: AppColors.textPrimary,
-                                        ),
-                                      ),
-                                      Text(
-                                        timeStr,
-                                        style: GoogleFonts.zain(
-                                          fontSize: 10,
-                                          color: AppColors.textSecondary,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                  Text(
-                                    msg['text'] ?? '',
-                                    style: GoogleFonts.zain(
-                                      fontSize: 12,
-                                      color: AppColors.textSecondary,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ],
-                        ),
-                      );
-                    },
-                  );
-                },
-              ),
-            ),
-
-            // Message input
+            // The same chat as the organization's (CaseChat): suggested
+            // replies, sharing the animal's location, and confirming what
+            // other community members reported.
             Padding(
-              padding: const EdgeInsets.all(12),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: TextField(
-                      controller: widget.messageController,
-                      focusNode: widget.messageFocusNode,
-                      decoration: InputDecoration(
-                        hintText: 'Type a message',
-                        hintStyle: GoogleFonts.zain(
-                          fontSize: 13,
-                          color: AppColors.textSecondary,
-                        ),
-                        contentPadding: const EdgeInsets.symmetric(
-                          horizontal: 16,
-                          vertical: 10,
-                        ),
-                        enabledBorder: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(50),
-                          borderSide: const BorderSide(
-                            color: AppColors.slaterspwn,
-                          ),
-                        ),
-                        focusedBorder: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(50),
-                          borderSide: const BorderSide(
-                            color: AppColors.textPrimary,
-                          ),
-                        ),
-                        filled: true,
-                        fillColor: Colors.white,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  GestureDetector(
-                    onTap: widget.onSend,
-                    child: Container(
-                      padding: const EdgeInsets.all(10),
-                      decoration: const BoxDecoration(
-                        color: AppColors.yellowrspwn,
-                        shape: BoxShape.circle,
-                      ),
-                      child: const Icon(
-                        Icons.send,
-                        size: 18,
-                        color: AppColors.textPrimary,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+              child: CaseChat(caseId: widget.caseId, staff: false, maxListHeight: 360),
             ),
           ] else
             const SizedBox(height: 12),
@@ -2141,11 +2009,4 @@ class _RescueAdoptionSection extends StatelessWidget {
       ),
     );
   }
-}
-
-/// First letter of a sender's name for the message avatar; 'U' when the
-/// name is missing or empty (indexing an empty string throws a RangeError).
-String _initial(Object? name) {
-  final s = (name is String ? name : '').trim();
-  return s.isEmpty ? 'U' : s[0].toUpperCase();
 }
