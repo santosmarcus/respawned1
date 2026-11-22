@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
-
+import 'package:flutter/gestures.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/core/utils/app_date_format.dart';
 import 'package:respawnd1/features/rescue/neglect_abuse_guide_content.dart';
@@ -247,19 +248,29 @@ Future<void> showNeglectAbuseGuide(BuildContext context) {
             'Reporting suspected neglect or abuse',
             style: GoogleFonts.tiltWarp(fontSize: 17, color: AppColors.textPrimary),
           ),
-          const SizedBox(height: 8),
-          if (kAbuseGuideSourceNote.isNotEmpty)
-            Container(
-              padding: const EdgeInsets.all(10),
-              decoration: BoxDecoration(
-                color: AppColors.yellowrspwn.withValues(alpha: 0.2),
-                borderRadius: BorderRadius.circular(10),
-              ),
-              child: Text(
-                kAbuseGuideSourceNote,
-                style: GoogleFonts.zain(fontSize: 12, color: AppColors.textPrimary),
-              ),
+          Text.rich(
+            TextSpan(
+              style: GoogleFonts.zain(fontSize: 14, color: AppColors.textPrimary),
+              children: [
+                const TextSpan(text: 'For an in-depth guide, visit this '),
+                TextSpan(
+                  text: 'How to Report Animal Abuse and Cruelty in the Philippines',
+                  style: const TextStyle(
+                    decoration: TextDecoration.underline,
+                    fontWeight: FontWeight.bold,
+                  ),
+                  recognizer: TapGestureRecognizer()
+                    ..onTap = () => launchUrl(
+                      Uri.parse(
+                        'https://www.respicio.ph/commentaries/how-to-report-animal-abuse-and-cruelty-in-the-philippines',
+                      ),
+                      mode: LaunchMode.externalApplication,
+                    ),
+                ),
+                const TextSpan(text: '.'),
+              ],
             ),
+          ),
           const SizedBox(height: 8),
           for (var i = 0; i < kNeglectAbuseGuideSteps.length; i++)
             _GuideStepTile(index: i, step: kNeglectAbuseGuideSteps[i]),

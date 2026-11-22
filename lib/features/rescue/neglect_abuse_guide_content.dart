@@ -19,13 +19,13 @@ library;
 
 const bool kAbuseGuideVerifiedAgainstPaws = false;
 
-const String kAbuseGuideSourceNote = kAbuseGuideVerifiedAgainstPaws
+/*const String kAbuseGuideSourceNote = kAbuseGuideVerifiedAgainstPaws
     ? ''
     : 'This is general guidance from Respawnd. It is not yet verified against '
         'the Philippine Animal Welfare Society (PAWS) guidelines, it is not '
         'legal advice, and it is not an official government procedure. Your '
         'local government and the authorities you report to decide how a '
-        'complaint is handled.';
+        'complaint is handled.';*/
 
 /// Where a step's content comes from, shown next to it once verified.
 enum GuideSource { respawndGeneral, pawsRecommendation, officialProcedure }
@@ -49,10 +49,11 @@ const List<GuideStep> kNeglectAbuseGuideSteps = [
     title: 'Document what you see',
     summary: 'Record facts, only when it is safe to do so.',
     points: [
-      'Take photos or videos from a public place or with permission. Do not '
-          'enter private property to get them.',
-      'Write down the exact location, the date and the time of each '
-          'observation.',
+      'Take photos or videos from the incident.',
+      'Identify the identity of the offender if known.',
+      'If an animal has been ran over by a vehicle, take note of the plate number.',
+      'Write down the exact location, screenshots of posts or chat messages, '
+          'veterinary findings the date and the time of each observation.',
       'Describe what you observed: the animal\'s condition, injuries, food, '
           'water and shelter, how it is confined, and how long it has been that '
           'way.',
@@ -60,6 +61,7 @@ const List<GuideStep> kNeglectAbuseGuideSteps = [
           'intent.',
       'Keep the original files. Note anyone else who saw it and is willing '
           'to be contacted.',
+      'Do not tamper or manipulate the evidence.',
     ],
   ),
   GuideStep(
@@ -84,7 +86,7 @@ const List<GuideStep> kNeglectAbuseGuideSteps = [
           'barangay, the local police station, or the city or municipal '
           'veterinary office.',
       'Bring a written account (what, where, when), your photos and videos, '
-          'and your contact details.',
+          ' your contact details, and willing witnesses',
       'Mention that you are reporting suspected neglect or cruelty to an '
           'animal. The Philippine Animal Welfare Act (Republic Act No. 8485, as '
           'amended by Republic Act No. 10631) covers animal welfare; the office '
