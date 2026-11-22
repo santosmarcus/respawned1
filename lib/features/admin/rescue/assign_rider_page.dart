@@ -732,23 +732,9 @@ class _AssignRiderPageState extends ConsumerState<AssignRiderPage> {
         ref.watch(activeAssignmentsByRiderProvider).asData?.value ?? const <String, TransportAssignmentStatus>{};
 
     final animals = (d['animals'] as List?) ?? const [];
-    // A transporter's own "requires specialized transport" End Reason
-    // (transit_progress_page.dart) means this case needs a bigger/better-
-    // equipped vehicle even if the animals[] data alone wouldn't suggest
-    // it — factored into ranking the same way a large animal or high-risk
-    // behavior already is, so a van/truck transporter is preferred for
-    // the reassignment.
-    final requiresSpecializedTransport =
-        (d['endReasonServiceType'] as String?)?.isNotEmpty ?? false;
+    // Ranking needs only the number of passengers (animals riding).
     final animalProfile = AnimalTransportProfile(
-      hasLargeAnimal: animals.any((a) => a is Map && a['size'] == 'Large'),
       animalCount: animals.isEmpty ? 1 : animals.length,
-      needsSpecialHandling: requiresSpecializedTransport ||
-          highRiskAnimalsIn(
-            animals: d['animals'] as List?,
-            legacyBiteRisk: d['biteRisk'] as String?,
-            legacyEscapeRisk: d['escapeRisk'] as String?,
-          ).isNotEmpty,
     );
     final riders = _buildRiderVms(riderCenter, caseLocation, transporters, activeByRider, animalProfile);
 
@@ -881,37 +867,18 @@ class _AssignRiderPageState extends ConsumerState<AssignRiderPage> {
               ),
             ),
           ),
-          if (requiresSpecializedTransport)
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
-              child: Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: AppColors.lavenderrspwn.withValues(alpha: 0.2),
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: AppColors.lavenderrspwn),
-                ),
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Icon(Icons.local_shipping_outlined, color: AppColors.textPrimary, size: 20),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text('Specialized transport required',
-                              style: GoogleFonts.zain(fontSize: 13, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
-                          Text(d['endReasonServiceType'] as String,
-                              style: GoogleFonts.zain(fontSize: 12, color: AppColors.textPrimary)),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-              ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
+            child: Row(
+              children: [
+                const Icon(Icons.pets, size: 16, color: AppColors.textPrimary),
+                const SizedBox(width: 6),
+                Text('Passengers: ${animalProfile.passengersLabel}',
+                    style: GoogleFonts.zain(fontSize: 13, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
+              ],
             ),
+          ),
+          const SizedBox(height: 10),
 
           // Real map: case marker + transporter markers (real-or-demo positions).
           Padding(
@@ -1633,6 +1600,12 @@ class _TransporterAssignmentDialogState extends ConsumerState<_TransporterAssign
   /// behind a nondismissible modal for a real transporter with no
   /// accept/reject UI of their own yet. See RescueCaseRepository.cancelAssignment.
   Future<void> _back() async {
+    // No offer was created (the create itself failed): nothing to cancel,
+    // just close.
+    if (_assignmentId == null) {
+      Navigator.of(context).pop(_DialogOutcome.cancelled);
+      return;
+    }
     final confirmed = await showConfirmActionDialog(context, title: 'Stop waiting for this transporter?', message: 'The pending offer will be cancelled, and you can select another transporter.', confirmLabel: 'Stop and Cancel', cancelLabel: 'Keep Waiting', destructive: true);
     if (confirmed != true || !mounted || _assignmentId == null) return;
 
@@ -1728,7 +1701,7 @@ class _TransporterAssignmentDialogState extends ConsumerState<_TransporterAssign
     _ModalPhase.declined => 'Assignment Declined',
     _ModalPhase.expired => 'Offer Expired',
     _ModalPhase.cancelled => 'Offer Cancelled',
-    _ModalPhase.error => 'Could Not Check Response',
+    _ModalPhase.error => _assignmentId == null ? 'Could Not Assign Transporter' : 'Could Not Check Response',
     _ModalPhase.conflict => 'Active Transporter Assignment',
   };
 
@@ -1984,12 +1957,20 @@ class _TransporterAssignmentDialogState extends ConsumerState<_TransporterAssign
         child: Text('Choose Another Transporter', style: GoogleFonts.zain(fontWeight: FontWeight.w700)),
       ),
     ],
+    // Always closable: an error must never trap the admin. A pending
+    // offer left behind stays visible on Assign Transporter, with its own
+    // View Pending / Cancel Offer.
     _ModalPhase.error => [
-      OutlinedButton(
-        onPressed: _back,
-        style: AppButtons.outline,
-        child: Text('Back', style: GoogleFonts.zain(fontWeight: FontWeight.w700)),
+      TextButton(
+        onPressed: () => Navigator.of(context).pop(_DialogOutcome.cancelled),
+        child: Text('Close', style: GoogleFonts.zain(color: AppColors.textSecondary, fontWeight: FontWeight.w600)),
       ),
+      if (_assignmentId != null)
+        OutlinedButton(
+          onPressed: _back,
+          style: AppButtons.outline,
+          child: Text('Cancel Offer', style: GoogleFonts.zain(fontWeight: FontWeight.w700)),
+        ),
       ElevatedButton(
         onPressed: _isRetrying ? null : _retry,
         style: AppButtons.primary,
@@ -2040,6 +2021,7 @@ class _TransporterAssignmentDialogState extends ConsumerState<_TransporterAssign
         _phase == _ModalPhase.confirmation ||
         _phase == _ModalPhase.declined ||
         _phase == _ModalPhase.expired ||
+        _phase == _ModalPhase.error ||
         _phase == _ModalPhase.conflict;
 
     return PopScope(
