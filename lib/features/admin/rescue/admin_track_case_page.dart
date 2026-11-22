@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
@@ -11,10 +13,12 @@ import 'package:respawnd1/core/models/rescue/closure_reason.dart';
 import 'package:respawnd1/core/models/rescue/rescue_case.dart';
 import 'package:respawnd1/core/models/rescue/rescue_status.dart';
 import 'package:respawnd1/core/models/rescue/route_result.dart';
+import 'package:respawnd1/core/repos/directions_repository.dart';
+import 'package:respawnd1/core/widgets/transit_route.dart';
+import 'package:geolocator/geolocator.dart';
 import 'package:respawnd1/core/models/rescue/transport_assignment.dart';
 import 'package:respawnd1/core/models/rescue/transporter_profile.dart';
 import 'package:respawnd1/core/utils/case_id.dart';
-import 'package:respawnd1/core/utils/geo.dart';
 import 'package:respawnd1/core/utils/rescue_risk.dart';
 import 'package:respawnd1/core/utils/species_summary.dart'
 as species_summary_util;
@@ -78,8 +82,6 @@ class AdminTrackCasePage extends ConsumerStatefulWidget {
 class _AdminTrackCasePageState extends ConsumerState<AdminTrackCasePage> {
   int _tabIndex = 0;
   final _messageController = TextEditingController();
-  GoogleMapController? _mapController;
-  bool _hasFitCamera = false;
 
   // Drives the collapsible transporter card (see _CollapsibleTransporterCard)
   // — a purely local/visual toggle, never tied to re-fetching the
@@ -191,29 +193,6 @@ class _AdminTrackCasePageState extends ConsumerState<AdminTrackCasePage> {
   /// button's loading state while the write is in flight and being
   /// verified.
   bool _isProceedingToTreatment = false;
-
-  // Route request dedup: only kick off a new Directions call when the
-  // rider/case coordinates actually differ from the last request — the
-  // StreamBuilder in build() re-runs on every case-doc change, which would
-  // otherwise re-fetch the route on unrelated field updates too.
-  LatLng? _routeOrigin;
-  LatLng? _routeDestination;
-  Future<RouteResult>? _routeFuture;
-
-  Future<RouteResult> _routeFor(LatLng riderLocation, LatLng caseLocation) {
-    if (_routeFuture != null &&
-        _routeOrigin == riderLocation &&
-        _routeDestination == caseLocation) {
-      return _routeFuture!;
-    }
-    _routeOrigin = riderLocation;
-    _routeDestination = caseLocation;
-    _hasFitCamera = false; // a genuinely new route deserves a fresh camera fit
-    _routeFuture = ref
-        .read(directionsRepositoryProvider)
-        .fetchRoute(origin: riderLocation, destination: caseLocation);
-    return _routeFuture!;
-  }
 
   @override
   void dispose() {
@@ -445,33 +424,6 @@ class _AdminTrackCasePageState extends ConsumerState<AdminTrackCasePage> {
     }
   }
 
-  /// Fits the camera around every point on the route polyline (not just the
-  /// two endpoints) so a road route that bows away from a straight line is
-  /// still fully visible. Only runs once per distinct route — `_routeFor`
-  /// resets `_hasFitCamera` whenever the rider/case coordinates actually
-  /// change, so this never fights the user's own map gestures on rebuilds.
-  void _fitTrackingCameraToRoute(List<LatLng> points) {
-    if (_hasFitCamera || _mapController == null || points.isEmpty) return;
-    _hasFitCamera = true;
-    final lats = points.map((p) => p.latitude);
-    final lngs = points.map((p) => p.longitude);
-    _mapController!.animateCamera(
-      CameraUpdate.newLatLngBounds(
-        LatLngBounds(
-          southwest: LatLng(
-            lats.reduce((a, b) => a < b ? a : b),
-            lngs.reduce((a, b) => a < b ? a : b),
-          ),
-          northeast: LatLng(
-            lats.reduce((a, b) => a > b ? a : b),
-            lngs.reduce((a, b) => a > b ? a : b),
-          ),
-        ),
-        56,
-      ),
-    );
-  }
-
   Widget _buildTrackingMap(
       Map<String, dynamic> data,
       TransportAssignment? assignment,
@@ -620,171 +572,16 @@ class _AdminTrackCasePageState extends ConsumerState<AdminTrackCasePage> {
             (caseLocation.latitude != destinationLocation.latitude ||
                 caseLocation.longitude != destinationLocation.longitude);
 
-    return FutureBuilder<RouteResult>(
-      // No route until the transporter has reported a position.
-      future: rider == null ? null : _routeFor(rider, destinationLocation),
-      builder: (context, snapshot) {
-        final route = snapshot.data;
-        final markers = {
-          Marker(
-            markerId: const MarkerId('destination'),
-            position: destinationLocation,
-            icon: BitmapDescriptor.defaultMarkerWithHue(
-              BitmapDescriptor.hueAzure,
-            ),
-            infoWindow: InfoWindow(title: destination.label),
-          ),
-          if (showSeparateCaseMarker)
-            Marker(
-              markerId: const MarkerId('rescue_case'),
-              position: caseLocation,
-              icon: BitmapDescriptor.defaultMarkerWithHue(
-                BitmapDescriptor.hueViolet,
-              ),
-              infoWindow: InfoWindow(title: _originMarkerLabel),
-            ),
-          if (rider != null)
-            Marker(
-              markerId: const MarkerId('rider'),
-              position: rider,
-              icon: BitmapDescriptor.defaultMarkerWithHue(
-                BitmapDescriptor.hueGreen,
-              ),
-              infoWindow: const InfoWindow(title: 'Transporter'),
-            ),
-        };
-
-        // Distance prefers the route's own (road) distance; only the
-        // straight-line fallback falls back to haversine, and RouteResult
-        // already encodes that — this is never recomputed here.
-        final distanceKm = rider == null
-            ? null
-            : route?.distanceKm ??
-            haversineDistanceKm(
-              rider.latitude,
-              rider.longitude,
-              destinationLocation.latitude,
-              destinationLocation.longitude,
-            );
-        final isRoadFollowing = route?.isRoadFollowing ?? false;
-
-        // Covers the ordering where the route resolves *after* the map
-        // controller already exists (onMapCreated already fired with
-        // route == null at that time) — this call is idempotent (guarded
-        // by _hasFitCamera/_mapController in _fitTrackingCameraToRoute),
-        // so it's harmless to also attempt it here on every rebuild.
-        if (route != null) _fitTrackingCameraToRoute(route.polylinePoints);
-
-        return SizedBox(
-          height: 180,
-          child: Stack(
-            children: [
-              GoogleMap(
-                gestureRecognizers: {
-                  Factory<OneSequenceGestureRecognizer>(
-                        () => EagerGestureRecognizer(),
-                  ),
-                },
-                initialCameraPosition: CameraPosition(
-                  target: destinationLocation,
-                  zoom: 13,
-                ),
-                onMapCreated: (ctrl) {
-                  _mapController = ctrl;
-                  if (route != null) {
-                    _fitTrackingCameraToRoute(route.polylinePoints);
-                  }
-                },
-                markers: markers,
-                polylines: {
-                  if (route != null)
-                    Polyline(
-                      polylineId: const PolylineId('rider_to_destination'),
-                      points: route.polylinePoints,
-                      color: isRoadFollowing
-                          ? AppColors.textPrimary
-                          : AppColors.textSecondary,
-                      patterns: isRoadFollowing
-                          ? const []
-                          : [PatternItem.dash(12), PatternItem.gap(8)],
-                      width: 4,
-                    ),
-                },
-                myLocationButtonEnabled: false,
-                zoomControlsEnabled: false,
-                mapToolbarEnabled: false,
-              ),
-              Positioned(
-                left: 10,
-                bottom: 10,
-                child: Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 10,
-                    vertical: 6,
-                  ),
-                  decoration: BoxDecoration(
-                    color: AppColors.yellowrspwn,
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  child: Text(
-                    distanceKm == null
-                        ? 'Heading to ${destination.label} · transporter location not shared yet'
-                        : '${distanceKm.toStringAsFixed(1)} km to ${destination.label}'
-                        '${!isRoadFollowing ? ' (straight-line estimate)' : ''}',
-                    style: GoogleFonts.zain(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w600,
-                      color: AppColors.textPrimary,
-                    ),
-                  ),
-                ),
-              ),
-              // Explicit, visible fallback notice — never silently swap a
-              // road route for a straight line. route == null only while
-              // the FutureBuilder is still resolving (DirectionsRepository
-              // never itself returns null), so this only shows once we
-              // actually know the road API didn't come through.
-              if (route != null && !isRoadFollowing)
-                Positioned(
-                  left: 10,
-                  right: 10,
-                  top: 10,
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 10,
-                      vertical: 6,
-                    ),
-                    decoration: BoxDecoration(
-                      color: AppColors.warning,
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        const Icon(
-                          Icons.warning_amber_rounded,
-                          size: 16,
-                          color: Colors.white,
-                        ),
-                        const SizedBox(width: 6),
-                        Flexible(
-                          child: Text(
-                            'Road route unavailable. Showing approximate path.',
-                            style: GoogleFonts.zain(
-                              fontSize: 12,
-                              fontWeight: FontWeight.w600,
-                              color: Colors.white,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-            ],
-          ),
-        );
-      },
+    // Same route line and color as the transporter's own map, with the
+    // transporter's marker gliding between GPS reports (_LiveTrackingMap).
+    return _LiveTrackingMap(
+      caseId: widget.caseId,
+      rider: rider,
+      destination: destinationLocation,
+      destinationLabel: destination.label,
+      origin: showSeparateCaseMarker ? caseLocation : null,
+      originLabel: _originMarkerLabel,
+      directions: ref.read(directionsRepositoryProvider),
     );
   }
 
@@ -1972,6 +1769,280 @@ class _DeclinedAssignmentBanner extends StatelessWidget {
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+
+/// The admin's live view of a transit: the same route line and color as
+/// the transporter's map (TransitRouteStyle), the trail already driven,
+/// and the transporter's marker gliding between GPS reports instead of
+/// jumping, with the route ahead trimmed at the marker so it shrinks as
+/// they drive — like a transit app. The road route is re-requested only
+/// when the destination changes, the transporter has moved 200 m since the
+/// last request, or they leave the drawn line.
+class _LiveTrackingMap extends StatefulWidget {
+  final String caseId;
+  final LatLng? rider;
+  final LatLng destination;
+  final String destinationLabel;
+  final LatLng? origin;
+  final String originLabel;
+  final DirectionsRepository directions;
+
+  const _LiveTrackingMap({
+    required this.caseId,
+    required this.rider,
+    required this.destination,
+    required this.destinationLabel,
+    required this.origin,
+    required this.originLabel,
+    required this.directions,
+  });
+
+  @override
+  State<_LiveTrackingMap> createState() => _LiveTrackingMapState();
+}
+
+class _LiveTrackingMapState extends State<_LiveTrackingMap> with SingleTickerProviderStateMixin {
+  late final SmoothPositionAnimator _rider;
+  GoogleMapController? _map;
+  RouteResult? _route;
+  LatLng? _routeFrom;
+  LatLng? _routeTo;
+  bool _fetching = false;
+  bool _fitted = false;
+  StreamSubscription<QuerySnapshot<Map<String, dynamic>>>? _trailSub;
+  List<LatLng> _trail = const [];
+  DateTime _lastPaint = DateTime.fromMillisecondsSinceEpoch(0);
+
+  @override
+  void initState() {
+    super.initState();
+    _rider = SmoothPositionAnimator(vsync: this, onTick: _onTick);
+    if (widget.rider != null) _rider.moveTo(widget.rider!);
+    _trailSub = FirebaseFirestore.instance
+        .collection('cases')
+        .doc(widget.caseId)
+        .collection('tracking')
+        .orderBy('timestamp')
+        .limitToLast(100)
+        .snapshots()
+        .listen((snap) {
+      final points = <LatLng>[];
+      for (final d in snap.docs) {
+        final lat = d.data()['lat'], lng = d.data()['lng'];
+        if (lat is num && lng is num) points.add(LatLng(lat.toDouble(), lng.toDouble()));
+      }
+      if (mounted) setState(() => _trail = points);
+    }, onError: (_) {});
+    _maybeFetchRoute();
+  }
+
+  @override
+  void didUpdateWidget(covariant _LiveTrackingMap old) {
+    super.didUpdateWidget(old);
+    final rider = widget.rider;
+    if (rider != null && rider != old.rider) _rider.moveTo(rider);
+    if (widget.destination != old.destination) _fitted = false;
+    _maybeFetchRoute();
+  }
+
+  @override
+  void dispose() {
+    _trailSub?.cancel();
+    _rider.dispose();
+    super.dispose();
+  }
+
+  // ~30 repaints a second while the marker glides.
+  void _onTick() {
+    final now = DateTime.now();
+    if (now.difference(_lastPaint).inMilliseconds < 33) return;
+    _lastPaint = now;
+    if (mounted) setState(() {});
+  }
+
+  double _meters(LatLng a, LatLng b) => Geolocator.distanceBetween(a.latitude, a.longitude, b.latitude, b.longitude);
+
+  void _maybeFetchRoute() {
+    final rider = widget.rider;
+    if (rider == null || _fetching) return;
+    final dest = widget.destination;
+    final destChanged = _routeTo != dest;
+    final movedFar = _routeFrom == null || _meters(_routeFrom!, rider) > TransitRouteStyle.refetchAfterMovingMeters;
+    final route = _route;
+    final offRoute = route != null &&
+        route.isRoadFollowing &&
+        remainingRoute(route.polylinePoints, rider).offRouteMeters > TransitRouteStyle.offRouteMeters;
+    if (!destChanged && !movedFar && !offRoute) return;
+    _fetching = true;
+    _routeFrom = rider;
+    _routeTo = dest;
+    widget.directions.fetchRoute(origin: rider, destination: dest).then((r) {
+      if (!mounted) return;
+      setState(() => _route = r);
+      _fitCamera();
+    }).catchError((Object e) {
+      debugPrint('Admin tracking route failed: $e');
+    }).whenComplete(() => _fetching = false);
+  }
+
+  /// Fits the route, the transporter and the destination once per
+  /// destination, so later updates never fight the admin's own panning.
+  void _fitCamera() {
+    final map = _map;
+    if (_fitted || map == null) return;
+    final points = <LatLng>[
+      widget.destination,
+      ?_rider.position,
+      ...?_route?.polylinePoints,
+    ];
+    if (points.length < 2) return;
+    _fitted = true;
+    double minLat = points.first.latitude, maxLat = minLat, minLng = points.first.longitude, maxLng = minLng;
+    for (final p in points) {
+      minLat = p.latitude < minLat ? p.latitude : minLat;
+      maxLat = p.latitude > maxLat ? p.latitude : maxLat;
+      minLng = p.longitude < minLng ? p.longitude : minLng;
+      maxLng = p.longitude > maxLng ? p.longitude : maxLng;
+    }
+    if (maxLat - minLat < 0.0005 && maxLng - minLng < 0.0005) {
+      map.animateCamera(CameraUpdate.newLatLngZoom(points.first, 16));
+      return;
+    }
+    map.animateCamera(
+      CameraUpdate.newLatLngBounds(
+        LatLngBounds(southwest: LatLng(minLat, minLng), northeast: LatLng(maxLat, maxLng)),
+        48,
+      ),
+    );
+  }
+
+  double _pathMeters(List<LatLng> points) {
+    var total = 0.0;
+    for (var i = 0; i < points.length - 1; i++) {
+      total += _meters(points[i], points[i + 1]);
+    }
+    return total;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final riderPos = _rider.position;
+    final route = _route;
+    final isRoadFollowing = route?.isRoadFollowing ?? false;
+
+    List<LatLng>? ahead;
+    if (route != null && route.polylinePoints.length >= 2) {
+      ahead = riderPos == null ? route.polylinePoints : remainingRoute(route.polylinePoints, riderPos).points;
+    } else if (riderPos != null) {
+      ahead = [riderPos, widget.destination];
+    }
+
+    // The trail ends at the gliding marker, not at the newest report it
+    // hasn't reached yet.
+    final trail = (riderPos != null && _trail.isNotEmpty) ? [..._trail.take(_trail.length - 1), riderPos] : _trail;
+
+    final remainingMeters = ahead == null ? null : _pathMeters(ahead);
+    String? eta;
+    final total = route == null ? null : _pathMeters(route.polylinePoints);
+    if (route?.duration != null && remainingMeters != null && total != null && total > 0) {
+      final minutes = (route!.duration!.inSeconds * (remainingMeters / total) / 60).ceil();
+      eta = minutes <= 1 ? '~1 min' : '~$minutes min';
+    }
+
+    final markers = <Marker>{
+      Marker(
+        markerId: const MarkerId('destination'),
+        position: widget.destination,
+        icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueGreen),
+        infoWindow: InfoWindow(title: widget.destinationLabel),
+      ),
+      if (widget.origin != null)
+        Marker(
+          markerId: const MarkerId('rescue_case'),
+          position: widget.origin!,
+          icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueViolet),
+          infoWindow: InfoWindow(title: widget.originLabel),
+        ),
+      if (riderPos != null)
+        Marker(
+          markerId: const MarkerId('rider'),
+          position: riderPos,
+          icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueAzure),
+          anchor: const Offset(0.5, 1),
+          zIndexInt: 2,
+          infoWindow: const InfoWindow(title: 'Transporter'),
+        ),
+    };
+
+    final polylines = <Polyline>{
+      if (trail.length >= 2) TransitRouteStyle.trail(trail),
+      if (ahead != null && ahead.length >= 2) TransitRouteStyle.route(ahead, roadFollowing: isRoadFollowing),
+    };
+
+    return SizedBox(
+      height: 180,
+      child: Stack(
+        children: [
+          GoogleMap(
+            gestureRecognizers: {Factory<OneSequenceGestureRecognizer>(() => EagerGestureRecognizer())},
+            initialCameraPosition: CameraPosition(target: riderPos ?? widget.destination, zoom: 14),
+            onMapCreated: (ctrl) {
+              _map = ctrl;
+              _fitCamera();
+            },
+            markers: markers,
+            polylines: polylines,
+            myLocationButtonEnabled: false,
+            zoomControlsEnabled: false,
+            mapToolbarEnabled: false,
+          ),
+          Positioned(
+            left: 10,
+            bottom: 10,
+            right: 10,
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                decoration: BoxDecoration(color: AppColors.yellowrspwn, borderRadius: BorderRadius.circular(10)),
+                child: Text(
+                  remainingMeters == null || riderPos == null
+                      ? 'Heading to ${widget.destinationLabel} · transporter location not shared yet'
+                      : '${(remainingMeters / 1000).toStringAsFixed(1)} km${eta == null ? '' : ' · $eta'} to ${widget.destinationLabel}'
+                          '${route != null && !isRoadFollowing ? ' (straight-line estimate)' : ''}',
+                  style: GoogleFonts.zain(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.textPrimary),
+                ),
+              ),
+            ),
+          ),
+          if (route != null && !isRoadFollowing)
+            Positioned(
+              left: 10,
+              right: 10,
+              top: 10,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                decoration: BoxDecoration(color: AppColors.warning, borderRadius: BorderRadius.circular(10)),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(Icons.warning_amber_rounded, size: 16, color: Colors.white),
+                    const SizedBox(width: 6),
+                    Flexible(
+                      child: Text(
+                        'Road route unavailable. Showing approximate path.',
+                        style: GoogleFonts.zain(fontSize: 12, fontWeight: FontWeight.w600, color: Colors.white),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+        ],
       ),
     );
   }

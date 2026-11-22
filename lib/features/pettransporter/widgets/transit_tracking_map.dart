@@ -10,6 +10,7 @@ import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:geolocator/geolocator.dart';
 
 import 'package:respawnd1/core/repos/directions_repository.dart';
+import 'package:respawnd1/core/widgets/transit_route.dart';
 
 //Tracking map
 class TransitTrackingMap extends StatefulWidget {
@@ -64,7 +65,7 @@ class _TrackingMapState extends State<TransitTrackingMap> {
               riderPosition.latitude,
               riderPosition.longitude,
             ) >
-            200;
+            TransitRouteStyle.refetchAfterMovingMeters;
 
     if (!destChanged && !movedFar) return;
 
@@ -162,32 +163,22 @@ class _TrackingMapState extends State<TransitTrackingMap> {
           );
         }
 
+        // Same line and color as the admin Track Case map
+        // (TransitRouteStyle): the trail driven so far, and the road route
+        // still ahead, trimmed at the rider so it shrinks as they drive.
         final polylines = <Polyline>{};
         if (points.length >= 2) {
-          polylines.add(
-            Polyline(
-              polylineId: const PolylineId('route_trail'),
-              points: points,
-              color: AppColors.textPrimary.withValues(alpha: 0.35),
-              width: 3,
-              zIndex: 0,
-            ),
-          );
+          polylines.add(TransitRouteStyle.trail(points));
         }
 
         if (_route != null && _route!.points.length >= 2) {
-          polylines.add(
-            Polyline(
-              polylineId: const PolylineId('directions_route'),
-              points: _route!.points,
-              color: const Color(0xFF4285F4),
-              width: 6,
-              zIndex: 1,
-              jointType: JointType.round,
-              startCap: Cap.roundCap,
-              endCap: Cap.roundCap,
-            ),
-          );
+          final ahead = points.isEmpty
+              ? (points: _route!.points, offRouteMeters: 0.0)
+              : remainingRoute(_route!.points, points.last);
+          if (ahead.offRouteMeters > TransitRouteStyle.offRouteMeters) {
+            _routeFetchedFrom = null; // off the line: re-request next frame
+          }
+          polylines.add(TransitRouteStyle.route(ahead.points));
         }
 
         return Stack(
