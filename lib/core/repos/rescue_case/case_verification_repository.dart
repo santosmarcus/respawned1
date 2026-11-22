@@ -35,7 +35,7 @@ class CaseVerificationRepository {
       batch,
       caseId: caseId,
       action: 'live_proof_requested',
-      statusLine: 'The rescue team asked for a new photo or video of the animal.',
+      statusLine: 'The rescue team asked for a new photo of the animal.',
       actorUid: actorUid,
       actorName: actorName,
       fields: {

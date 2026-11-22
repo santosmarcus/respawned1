@@ -1,5 +1,6 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -92,6 +93,25 @@ class _PostAdoptionDetailsPageState extends ConsumerState<PostAdoptionDetailsPag
     if (!confirmed) return;
     await _run(
             () => ref.read(adoptionApplicationRepositoryProvider).completeFollowUp(applicationId: widget.applicationId, followUpId: f.id, actorName: _actorName));
+  }
+
+  // DEMO / TESTING ONLY (debug builds) — like Track Case's "Fast-forward
+  // to Clinic (Test)" and the transporter's "Skip (Demo)": closes the next
+  // open follow-up without waiting for its date or the adopter's check-in,
+  // so the whole post-adoption flow can be shown in one sitting.
+  Future<void> _skipNextFollowUp(List<FollowUpRecord> followUps) async {
+    final next = followUps.where((f) => !f.isTerminal).firstOrNull;
+    if (next == null) {
+      ScaffoldMessenger.of(context).showSnackBar(appSnackBar('No open follow-up to skip.'));
+      return;
+    }
+    await _run(() => ref.read(adoptionApplicationRepositoryProvider).completeFollowUp(
+          applicationId: widget.applicationId,
+          followUpId: next.id,
+          actorName: _actorName,
+          manualOverride: true,
+          reason: '[DEMO] Skipped follow-up #${next.sequenceNumber}',
+        ));
   }
 
   Future<void> _reschedule(FollowUpRecord f) async {
@@ -209,6 +229,15 @@ class _PostAdoptionDetailsPageState extends ConsumerState<PostAdoptionDetailsPag
         backgroundColor: AppColors.textPrimary,
         leading: IconButton(icon: const Icon(Icons.arrow_back, color: AppColors.background), onPressed: () => Navigator.pop(context)),
         title: Text('Post-Adoption Details', style: GoogleFonts.tiltWarp(fontSize: 17, color: AppColors.background)),
+        actions: [
+          // Demo skip (debug builds only).
+          if (kDebugMode && activeMonitoring && followUps.any((f) => !f.isTerminal))
+            TextButton.icon(
+              onPressed: _busy ? null : () => _skipNextFollowUp(followUps),
+              icon: const Icon(Icons.fast_forward, color: AppColors.background, size: 18),
+              label: Text('Skip (Demo)', style: GoogleFonts.zain(fontWeight: FontWeight.w700, color: AppColors.background)),
+            ),
+        ],
       ),
       body: app == null
           ? const Center(child: CircularProgressIndicator())
@@ -297,7 +326,7 @@ class _Header extends StatelessWidget {
         children: [
           ClipRRect(
             borderRadius: BorderRadius.circular(12),
-            child: AnimalRecordHeaderImage(animalRecordId: app.animalRecordId, height: 110),
+            child: AnimalRecordHeaderImage(animalRecordId: app.animalRecordId, caseId: app.raw['caseId'] as String?, height: 110),
           ),
           const SizedBox(height: 10),
           Text(app.animalName, style: GoogleFonts.tiltWarp(fontSize: 20, color: AppColors.textPrimary)),

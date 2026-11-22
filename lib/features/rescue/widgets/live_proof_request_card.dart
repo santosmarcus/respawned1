@@ -92,7 +92,7 @@ class _LiveProofRequestCardState extends State<LiveProofRequestCard> {
           ),
           const SizedBox(height: 6),
           Text(
-            'Take a photo or short video of the animal where it is right now. '
+            'Take a photo of the animal where it is right now. '
             'It helps the team confirm your report before sending someone.',
             style: GoogleFonts.zain(fontSize: 13, color: AppColors.textPrimary),
           ),

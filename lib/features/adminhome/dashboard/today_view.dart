@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 
+import 'package:respawnd1/core/constants/feature_flags.dart';
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/core/models/adoption/adoption_application.dart';
 import 'package:respawnd1/core/models/rescue/animal_record.dart';
@@ -10,6 +11,8 @@ import 'package:respawnd1/core/models/rescue/rescue_case.dart';
 import 'package:respawnd1/core/utils/currency.dart';
 import 'package:respawnd1/features/admin/adoption/state/adoption_providers.dart';
 import 'package:respawnd1/features/admin/animals/state/animal_records_providers.dart';
+import 'package:respawnd1/features/admin/animals/promote_adoptions_page.dart';
+import 'package:respawnd1/features/admin/widgets/admin_app_bar.dart';
 import 'package:respawnd1/features/admin/donation/donation_admin_providers.dart';
 import 'package:respawnd1/features/admin/rescue/state/rescue_reports_providers.dart';
 import 'package:respawnd1/features/adminhome/dashboard/alert_claims.dart';
@@ -552,7 +555,7 @@ class ShelterCareCard extends ConsumerWidget {
                 'Carers log each dose, with optional photos, on the animal’s Medical tab. Missed doses show here.',
                 maxLines: null,
               ),
-              if (orgId != null)
+              if (orgId != null && FeatureFlags.careTasksEnabled)
                 Padding(
                   padding: const EdgeInsets.only(top: 6),
                   child: Align(
@@ -714,6 +717,25 @@ class AdoptionSummaryCard extends ConsumerWidget {
                   '${plural(unscheduled, 'application')} in Interview without a date yet.',
                   color: DashSeverity.warning.color,
                 ),
+              // Promotions: the adoption post schedule and Facebook posts
+              // (moved here from the side menu). Every member sees it.
+              if (ref.watch(currentOrganizationCapabilitiesProvider).asData?.value.isActive ?? false) ...[
+                const SizedBox(height: 8),
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: DashLinkButton(
+                    label: 'Promotions',
+                    icon: Icons.campaign,
+                    onPressed: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        settings: const RouteSettings(name: kFromDashboardRoute),
+                        builder: (_) => const PromoteAdoptionsPage(),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
             ],
           );
         },

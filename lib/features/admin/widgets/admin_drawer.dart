@@ -1,6 +1,5 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
-import 'package:respawnd1/features/adminhome/dashboard/monthly_report_page.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 
@@ -11,7 +10,6 @@ import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/core/repos/auth_service.dart';
 import 'package:respawnd1/features/admin/adoption/adoption_application_review_page.dart';
 import 'package:respawnd1/features/admin/animals/animal_record_page.dart';
-import 'package:respawnd1/features/admin/animals/promote_adoptions_page.dart';
 import 'package:respawnd1/features/admin/audit/audit_page.dart';
 import 'package:respawnd1/features/admin/collarTags/admin_collar_screen.dart';
 import 'package:respawnd1/features/admin/donation/donation_admin_home.dart';
@@ -303,28 +301,13 @@ class _AdminDrawerState extends ConsumerState<AdminDrawer> {
                     selected: widget.active == AdminModule.donations,
                     onTap: () => _openModule(context, (_) => const DonationAdminHomeScreen()),
                   ),
-                  // Finance staff only. The screen opens through
-                  // openMonthlyReport, so it can also be linked from the
-                  // dashboard with one call.
-                  if (caps.canViewFinances)
-                    _DrawerItem(
-                      label: 'Monthly Report',
-                      onTap: () => _openModule(context, (_) => const MonthlyReportPage()),
-                    ),
                   _DrawerItem(
                     label: 'Records',
                     viewOnly: !can(caps.canManageRecords || caps.canGiveCare),
                     selected: widget.active == AdminModule.records,
                     onTap: () => _openModule(context, (_) => const AnimalRecordsPage()),
                   ),
-                  // Every member sees the adoption post schedule (they all get
-                  // its reminders); members allowed to share to Facebook post.
-                  if (caps.isActive)
-                    _DrawerItem(
-                      label: 'Promote Adoptions',
-                      onTap: () => _openModule(context, (_) => const PromoteAdoptionsPage()),
-                    ),
-                  if (caps.canOpenCareTasks && orgId != null)
+                  if (FeatureFlags.careTasksEnabled && caps.canOpenCareTasks && orgId != null)
                     _DrawerItem(
                       label: 'Care Tasks',
                       selected: widget.active == AdminModule.careTasks,
@@ -361,7 +344,8 @@ class _AdminDrawerState extends ConsumerState<AdminDrawer> {
                       onTap: () => _openModule(context, (_) => const OrganizationReviewPage()),
                     ),
                   // After the divider: Staff Members (invite, access, remove; Admins only),
-                  // and the volunteers and transporters the organization works with.
+                  // then the transporters and, last, the rescue volunteers the
+                  // organization works with.
                   const Divider(color: Colors.white24),
                   if (caps.canManageTeam && orgId != null)
                     _DrawerItem(
@@ -370,16 +354,16 @@ class _AdminDrawerState extends ConsumerState<AdminDrawer> {
                       onTap: () => _openModule(context, (_) => StaffMembersPage(organizationId: orgId)),
                     ),
                   _DrawerItem(
-                    label: 'Rescue Volunteers',
-                    viewOnly: !can(caps.canManageVolunteers),
-                    selected: widget.active == AdminModule.volunteers,
-                    onTap: () => _openModule(context, (_) => const VolunteersPage()),
-                  ),
-                  _DrawerItem(
                     label: 'Transporters',
                     viewOnly: !can(caps.canManageVolunteers),
                     selected: widget.active == AdminModule.transporters,
                     onTap: () => _openModule(context, (_) => const VolunteersPage(transporters: true)),
+                  ),
+                  _DrawerItem(
+                    label: 'Rescue Volunteers',
+                    viewOnly: !can(caps.canManageVolunteers),
+                    selected: widget.active == AdminModule.volunteers,
+                    onTap: () => _openModule(context, (_) => const VolunteersPage()),
                   ),
                 ],
               ),

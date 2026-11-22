@@ -255,7 +255,7 @@ class _SlotRowState extends ConsumerState<_SlotRow> {
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         title: Text('Record dose ${widget.slot} of ${widget.plan.drug}?',
             style: GoogleFonts.tiltWarp(fontSize: 17, color: AppColors.textPrimary)),
-        content: Text('Add a photo or video as proof, or record it without one.',
+        content: Text('Add a photo as proof, or record it without one.',
             style: GoogleFonts.zain(fontSize: 14, color: AppColors.textSecondary)),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
@@ -263,7 +263,7 @@ class _SlotRowState extends ConsumerState<_SlotRow> {
           ElevatedButton(
             onPressed: () => Navigator.pop(ctx, 'media'),
             style: AppButtons.primary,
-            child: const Text('Add photo or video'),
+            child: const Text('Add photo'),
           ),
         ],
       ),

@@ -24,4 +24,10 @@ class FeatureFlags {
   /// refer a case on to a shelter or rescue group (their way to hand over a
   /// case they can't finish), even while [multiOrganizationEnabled] is off.
   static const bool independentRescuersEnabled = true;
+
+  /// Care tasks (care rounds, roster, the Daily care permission box) are
+  /// hidden from the admin side menu, the dashboard and the Staff access
+  /// editor. The screens, data, permission and rules stay; set to true to
+  /// show them again.
+  static const bool careTasksEnabled = false;
 }

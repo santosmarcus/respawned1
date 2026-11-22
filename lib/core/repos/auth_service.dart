@@ -62,15 +62,37 @@ class AuthService {
   /// Best-effort only (spec: audit writes never block/affect the real
   /// action) — called AFTER the credential is already established, so a
   /// failure here can never prevent or roll back a successful sign-in.
+  ///
+  /// Carries the user's organization (users/{uid}.organizationId): the Audit
+  /// page only lists its own organization's entries, so logins written
+  /// without it (every method, Google and phone included) never showed.
   Future<void> _logLogin(User? user, {required String method}) async {
     if (user == null) return;
+    String? organizationId;
+    String? role;
+    String? name;
+    try {
+      final data = (await _firestore.collection('users').doc(user.uid).get()).data();
+      organizationId = data?['organizationId'] as String?;
+      role = data?['role'] as String?;
+      final first = (data?['firstName'] as String?)?.trim() ?? '';
+      final last = (data?['lastName'] as String?)?.trim() ?? '';
+      name = '$first $last'.trim();
+    } catch (_) {
+      // Logged without the organization rather than not at all.
+    }
     await _auditLog.log(
       category: AuditCategory.logins,
       action: 'Successful login',
       actorId: user.uid,
-      actorEmail: user.email,
-      actorName: user.displayName,
-      metadata: {'method': method},
+      actorEmail: user.email ?? user.phoneNumber,
+      actorName: (name != null && name.isNotEmpty) ? name : (user.displayName ?? user.phoneNumber),
+      actorRole: role,
+      organizationId: organizationId,
+      metadata: {
+        'method': method,
+        if (user.phoneNumber != null) 'phone': user.phoneNumber,
+      },
     );
   }
 
@@ -225,6 +247,7 @@ class AuthService {
           final userCredential =
           await firebaseAuth.signInWithCredential(credential);
           await _afterPhoneSignIn(userCredential.user!);
+          await _logLogin(userCredential.user, method: 'phone_otp');
           onAutoVerified?.call(userCredential);
         } on PhoneTakenException catch (e) {
           onError(e.message);

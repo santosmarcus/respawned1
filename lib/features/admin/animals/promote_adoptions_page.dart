@@ -11,6 +11,7 @@ import 'package:respawnd1/core/widgets/app_dialogs.dart';
 import 'package:respawnd1/core/widgets/app_messages.dart';
 import 'package:respawnd1/features/admin/animals/state/animal_records_providers.dart';
 import 'package:respawnd1/features/admin/rescue/state/rescue_reports_providers.dart';
+import 'package:respawnd1/features/admin/widgets/admin_app_bar.dart';
 import 'package:respawnd1/features/organization/widgets/adoption_promotion_schedule_sheet.dart';
 
 /// Facebook only shows so many photos in one post well.
@@ -37,7 +38,7 @@ String adoptionPostCaption(List<String> names) {
       'Message us or apply through the ResPAWnd app to adopt.';
 }
 
-/// Promote Adoptions: the Admin's post schedule (every member sees it and
+/// Promotions (formerly Promote Adoptions): the Admin's post schedule (every member sees it and
 /// gets its reminders) and, for members allowed to share to Facebook, pick
 /// animals open for adoption, edit the caption and post them to the
 /// organization's Facebook Page in one post. Opened from the admin drawer, the Facebook section of Organization Profile, and the
@@ -201,7 +202,10 @@ class _PromoteAdoptionsPageState extends ConsumerState<PromoteAdoptionsPage> {
     if (_orgId == null) {
       final orgAsync = ref.watch(currentOrganizationIdProvider);
       return orgAsync.when(
-        loading: () => const Scaffold(body: Center(child: CircularProgressIndicator())),
+        loading: () => const Scaffold(
+          appBar: AdminAppBar(title: 'Promotions', showDrawerButton: false),
+          body: Center(child: CircularProgressIndicator()),
+        ),
         error: (e, _) => _scaffold(const Center(child: Text('Could not load your organization.'))),
         data: (orgId) {
           if (orgId == null) {
@@ -215,7 +219,10 @@ class _PromoteAdoptionsPageState extends ConsumerState<PromoteAdoptionsPage> {
               });
             }
           });
-          return const Scaffold(body: Center(child: CircularProgressIndicator()));
+          return const Scaffold(
+            appBar: AdminAppBar(title: 'Promotions', showDrawerButton: false),
+            body: Center(child: CircularProgressIndicator()),
+          );
         },
       );
     }
@@ -247,11 +254,13 @@ class _PromoteAdoptionsPageState extends ConsumerState<PromoteAdoptionsPage> {
   Widget _scaffold(Widget body, {Widget? bottom}) {
     return Scaffold(
       backgroundColor: AppColors.background,
-      appBar: AppBar(
-        title: const Text('Promote Adoptions'),
-        actions: [
-          if (_orgId != null)
-            IconButton(tooltip: 'Refresh', icon: const Icon(Icons.refresh), onPressed: _posting ? null : _load),
+      // Same top bar as the other admin modules (opened from the dashboard).
+      appBar: AdminAppBar(
+        title: 'Promotions',
+        showDrawerButton: false,
+        menuActions: [
+          if (_orgId != null && !_posting)
+            AdminMenuAction(label: 'Refresh', icon: Icons.refresh, onTap: _load),
         ],
       ),
       body: body,

@@ -216,7 +216,7 @@ class _AddCareUpdateSheetState extends ConsumerState<_AddCareUpdateSheet> {
                 onPressed: _saving ? null : _addMedia,
                 style: AppButtons.outline,
                 icon: const Icon(Icons.add_a_photo_outlined, size: 18),
-                label: const Text('Photo or video'),
+                label: const Text('Add photo'),
               ),
           ],
         ),

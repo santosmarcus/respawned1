@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 
+import 'package:respawnd1/core/constants/feature_flags.dart';
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/core/models/rescue/animal_record.dart';
 import 'package:respawnd1/core/utils/currency.dart';
@@ -159,6 +160,8 @@ class RescueReadinessCard extends ConsumerWidget {
                 body: settings.isConfigured ? _Gauge(occ: occ) : _SetupPrompt(onTap: () => showShelterSetupSheet(context)),
               ),
               _SectionBlock(section: transport),
+              // Care tasks are hidden for now (FeatureFlags.careTasksEnabled).
+              if (FeatureFlags.careTasksEnabled)
               _SectionBlock(
                 section: carers,
                 actions: [

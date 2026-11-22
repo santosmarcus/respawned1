@@ -417,7 +417,7 @@ class _RescuePageState extends State<RescuePage> {
     if (placeCount < picked.length && mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         appSnackBar(placeCount == 0
-            ? 'You already have ${_form.mediaFiles.length} photos/videos added — remove one first.'
+            ? 'You already have ${_form.mediaFiles.length} photos added — remove one first.'
             : 'Only $placeCount of ${picked.length} photos were added (max ${_form.mediaFiles.length} total).', kind: AppMessageKind.error),
       );
     }
@@ -684,10 +684,10 @@ class _RescuePageState extends State<RescuePage> {
 
             RescueFormSection(
               step: 3,
-              title: 'Photos and videos',
+              title: 'Photos',
               subtitle: _form.isLostPetType
-                  ? 'Actual photos or videos of the animal. At least 1 is required.'
-                  : 'Actual photos or videos of the animal. At least 2 are required.',
+                  ? 'Actual photos of the animal. At least 1 is required.'
+                  : 'Actual photos of the animal. At least 2 are required.',
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [

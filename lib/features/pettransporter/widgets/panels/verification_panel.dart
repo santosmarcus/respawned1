@@ -97,7 +97,7 @@ class VerificationPanel extends StatelessWidget {
             Row(
               children: [
                 Text(
-                  'Provide images and video to verify',
+                  'Provide images to verify',
                   style: GoogleFonts.zain(
                     fontSize: 13,
                     color: AppColors.textPrimary,

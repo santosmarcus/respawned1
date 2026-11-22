@@ -88,7 +88,7 @@ class _ReportVerificationSectionState extends ConsumerState<ReportVerificationSe
     final note = await showTextInputDialog(
       context,
       title: 'Ask for live proof',
-      message: 'The reporter is asked for a photo or short video taken now, in the app. '
+      message: 'The reporter is asked for a photo taken now, in the app. '
           'It arrives here with the time and where their phone was.',
       label: 'Anything specific to show? (optional)',
       hint: 'e.g. the whole animal, the street sign',

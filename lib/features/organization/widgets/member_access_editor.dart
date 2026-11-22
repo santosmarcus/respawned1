@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
+import 'package:respawnd1/core/constants/feature_flags.dart';
 import 'package:respawnd1/core/utils/validators.dart';
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/core/models/organization/org_permission.dart';
@@ -145,7 +146,13 @@ class _MemberAccessEditorState extends State<MemberAccessEditor> {
               padding: const EdgeInsets.only(top: 8, bottom: 2),
               child: Text(group.label, style: label),
             ),
-            for (final p in OrgPermission.values.where((p) => p.group == group && _available.contains(p)))
+            // Daily care's box is hidden while care tasks are
+            // (FeatureFlags.careTasksEnabled); the permission itself stays in
+            // the default set and on members who have it.
+            for (final p in OrgPermission.values.where((p) =>
+                p.group == group &&
+                _available.contains(p) &&
+                (FeatureFlags.careTasksEnabled || p != OrgPermission.care)))
               CheckboxListTile(
                 key: ValueKey('perm-${p.key}'),
                 dense: true,

@@ -16,15 +16,27 @@ import 'package:respawnd1/core/models/rescue/animal_record.dart';
 /// Reads the public profile first (any signed-in user), then the full
 /// record for an animal that has none (hidden or archived), which only its
 /// staff and adopter can read.
+///
+/// [caseId]: a rescue adoption whose animal has no record yet (or a record
+/// without a photo) falls back to the rescue report's first photo.
+/// [width]: full width by default; set it for a thumbnail.
 class AnimalRecordHeaderImage extends StatelessWidget {
   final String? animalRecordId;
+  final String? caseId;
   final double height;
-  const AnimalRecordHeaderImage({super.key, required this.animalRecordId, this.height = 150});
+  final double width;
+  const AnimalRecordHeaderImage({
+    super.key,
+    required this.animalRecordId,
+    this.caseId,
+    this.height = 150,
+    this.width = double.infinity,
+  });
 
   @override
   Widget build(BuildContext context) {
     final id = animalRecordId;
-    if (id == null || id.isEmpty) return _placeholder();
+    if (id == null || id.isEmpty) return _caseImage();
     final db = FirebaseFirestore.instance;
     return StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
       stream: db.collection('publicAnimals').doc(id).snapshots(),
@@ -43,19 +55,37 @@ class AnimalRecordHeaderImage extends StatelessWidget {
     );
   }
 
+  /// The rescue report's first photo, or the paw.
+  Widget _caseImage() {
+    final id = caseId;
+    if (id == null || id.isEmpty) return _placeholder();
+    return StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+      stream: FirebaseFirestore.instance.collection('cases').doc(id).snapshots(),
+      builder: (context, snap) {
+        final photos = (snap.hasError ? null : snap.data?.data()?['photoUrls'] as List?) ?? const [];
+        final url = photos.whereType<String>().firstOrNull;
+        return url == null ? _placeholder() : _network(url);
+      },
+    );
+  }
+
   Widget _image(AnimalRecord record) {
-    if (record.photoUrls.isEmpty) return _placeholder();
+    if (record.photoUrls.isEmpty) return _caseImage();
+    return _network(record.photoUrls.first);
+  }
+
+  Widget _network(String url) {
     return Image.network(
-      record.photoUrls.first,
+      url,
       height: height,
-      width: double.infinity,
+      width: width,
       fit: BoxFit.cover,
       errorBuilder: (context, _, _) => _placeholder(),
       loadingBuilder: (context, child, progress) => progress == null
           ? child
           : Container(
               height: height,
-              width: double.infinity,
+              width: width,
               color: AppColors.tearspwn,
               child: const Center(child: CircularProgressIndicator(strokeWidth: 2)),
             ),
@@ -64,8 +94,8 @@ class AnimalRecordHeaderImage extends StatelessWidget {
 
   Widget _placeholder() => Container(
         height: height,
-        width: double.infinity,
+        width: width,
         color: AppColors.tearspwn,
-        child: const Center(child: Icon(Icons.pets, size: 56, color: AppColors.textPrimary)),
+        child: Center(child: Icon(Icons.pets, size: height < 80 ? height * 0.5 : 56, color: AppColors.textPrimary)),
       );
 }

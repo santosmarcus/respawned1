@@ -220,7 +220,7 @@ class TreatmentLogDetailSheet extends StatelessWidget {
                 Text(value, style: GoogleFonts.zain(fontSize: 14, color: AppColors.textPrimary)),
                 const SizedBox(height: 12),
               ],
-              Text('Images and Videos', style: GoogleFonts.zain(fontSize: 12, fontWeight: FontWeight.w700, color: AppColors.textSecondary)),
+              Text('Images', style: GoogleFonts.zain(fontSize: 12, fontWeight: FontWeight.w700, color: AppColors.textSecondary)),
               const SizedBox(height: 8),
               if (log.mediaUrls.isEmpty)
                 Padding(

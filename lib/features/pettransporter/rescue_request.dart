@@ -791,7 +791,7 @@ class _CaseMediaGalleryState extends State<_CaseMediaGallery> {
             height: 18,
             child: CircularProgressIndicator(strokeWidth: 2),
           )
-              : Text('No photos or videos were attached to this report.',
+              : Text('No photos were attached to this report.',
               style: GoogleFonts.zain(
                   fontSize: 13, color: AppColors.textSecondary)),
         ),

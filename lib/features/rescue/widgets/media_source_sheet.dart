@@ -39,7 +39,7 @@ Future<String?> showMediaSourceSheet(
           ),
           const SizedBox(height: 14),
           Text(
-            'Add Photo or Video',
+            'Add a Photo',
             style: GoogleFonts.tiltWarp(
               fontSize: 15,
               fontWeight: FontWeight.bold,

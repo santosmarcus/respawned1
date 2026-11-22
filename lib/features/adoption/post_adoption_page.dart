@@ -122,7 +122,10 @@ class PostAdoptionMonitoringPage extends StatelessWidget {
                     children: [
                       Stack(
                         children: [
-                          AnimalRecordHeaderImage(animalRecordId: animalRecordId),
+                          AnimalRecordHeaderImage(
+                            animalRecordId: animalRecordId,
+                            caseId: data['caseId'] as String?,
+                          ),
                           _BackHeader(onTap: () => Navigator.pop(context)),
                           _MoreOptionsButton(
                             onTap: () => _showPetOptionsDialog(
@@ -2494,7 +2497,16 @@ class PostAdoption extends StatelessWidget {
                 ),
                 child: Row(
                   children: [
-                    const Icon(Icons.pets, color: AppColors.greenrspwn),
+                    // The animal's photo (record, else the rescue report).
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(10),
+                      child: AnimalRecordHeaderImage(
+                        animalRecordId: personal['animalRecordId'] as String?,
+                        caseId: data['caseId'] as String?,
+                        height: 48,
+                        width: 48,
+                      ),
+                    ),
                     const SizedBox(width: 10),
                     Expanded(
                       child: Column(
