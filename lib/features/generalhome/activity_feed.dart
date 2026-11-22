@@ -140,12 +140,14 @@ class ActivityFeed extends StatelessWidget {
                         rejectedAt = hts.toDate();
                       }
                     }
-                    communityAdoptionEligible = isCommunityAdoptionEligible(
-                      status: rawStatus,
-                      rejectionReason: reasonName,
-                      rescueType: data['rescueType'] as String?,
-                    );
                   }
+                  // Rejected as healthy, or a Pet Surrender listed for
+                  // Community Adoption as soon as it is filed.
+                  communityAdoptionEligible = isCommunityAdoptionEligible(
+                    status: rawStatus,
+                    rejectionReason: data['rejectionReason'] as String?,
+                    rescueType: data['rescueType'] as String?,
+                  );
 
                   items.add(ActivityItem(
                     id: doc.id,

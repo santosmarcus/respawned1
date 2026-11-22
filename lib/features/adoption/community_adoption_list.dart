@@ -1,4 +1,5 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:respawnd1/core/utils/stream_combine.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
@@ -35,7 +36,8 @@ class CommunityListingAnimal {
 }
 
 /// Every animal still available across the reports open for Community
-/// Adoption (rejected as healthy / low urgency, not lost pets), newest
+/// Adoption (rejected as healthy / low urgency, not lost pets; and Pet
+/// Surrenders while active), newest
 /// first. Read from the public copy of each case (`publicCases`), which
 /// carries the reporter's adoption profile as `communityListing`.
 List<CommunityListingAnimal> communityListingAnimalsOf(
@@ -93,12 +95,19 @@ class CommunityAdoptionList extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-      stream: FirebaseFirestore.instance
-          .collection('publicCases')
-          .where('status', isEqualTo: 'rejected')
-          .where('rejectionReason', isEqualTo: RejectionReason.healthyAnimalLowUrgency.name)
-          .snapshots(),
+    final cases = FirebaseFirestore.instance.collection('publicCases');
+    return StreamBuilder<List<QueryDocumentSnapshot<Map<String, dynamic>>>>(
+      // Healthy strays an organization rejected for rescue, and Pet
+      // Surrenders, listed as soon as they are filed (a withdrawn one has
+      // left this status and so leaves the list).
+      stream: combineLatest([
+        cases
+            .where('status', isEqualTo: 'rejected')
+            .where('rejectionReason', isEqualTo: RejectionReason.healthyAnimalLowUrgency.name)
+            .snapshots()
+            .map((s) => s.docs),
+        cases.where('status', isEqualTo: kCommunityAdoptionStatus).snapshots().map((s) => s.docs),
+      ]).map((lists) => [for (final l in lists) ...l]),
       builder: (context, snap) {
         if (snap.hasError) {
           return _message('Could not load community adoptions. Please try again later.');
@@ -107,7 +116,7 @@ class CommunityAdoptionList extends StatelessWidget {
           return const Center(child: CircularProgressIndicator());
         }
         final q = searchQuery.trim().toLowerCase();
-        final animals = communityListingAnimalsOf(snap.data!.docs).where((a) {
+        final animals = communityListingAnimalsOf(snap.data!).where((a) {
           if (speciesFilter != null && a.species.toLowerCase() != speciesFilter!.toLowerCase()) {
             return false;
           }
@@ -119,8 +128,8 @@ class CommunityAdoptionList extends StatelessWidget {
         if (animals.isEmpty) {
           return _message(
             'No animals are open for Community Adoption right now.\n'
-                'These are healthy strays reported by the community that are '
-                'looking for a home.',
+                'These are healthy strays reported by the community, and pets '
+                'whose owners are looking for a new home for them.',
           );
         }
         // Same list layout as the Adopt a Stray list (adoption_page.dart).

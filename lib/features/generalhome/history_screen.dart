@@ -125,7 +125,10 @@ class _RescueHistoryTab extends StatelessWidget {
         final docs = (snap.data?.docs ?? const [])
             .where((d) {
           final s = (d.data()['status'] as String? ?? '').toLowerCase();
-          return s == 'closed' || s.contains('completed') || s.contains('ended') || s == 'rejected';
+          // Withdrawn Pet Surrenders are archived here, where the reporter
+          // can still open them.
+          return s == 'closed' || s.contains('completed') || s.contains('ended') || s == 'rejected' ||
+              s == 'withdrawn';
         })
             .toList();
 
@@ -200,6 +203,7 @@ class _RescueHistoryCard extends StatelessWidget {
     final s = (data['status'] as String? ?? 'pending');
     final lower = s.toLowerCase();
     if (lower == 'rejected') return 'Rejected';
+    if (lower == 'withdrawn') return 'Surrender Withdrawn';
     // Adopted through Community Adoption, or a finished Pet Surrender.
     if (isCommunityAdoptedCase(data) || isCompletedSurrenderCase(data)) {
       return finishedCaseTitle(data);

@@ -329,6 +329,8 @@ class _AnimalsSection extends StatelessWidget {
           for (final a in animals)
             {
               ...Map<String, dynamic>.from(a as Map),
+              // Litter photos are stored per animal index on the case.
+              'litterPhotoUrls': ((data['litterPhotoUrls'] as Map?) ?? const {})['${animals.indexOf(a)}'],
               // "Visible signs of injury / illness / harm" by rescue type.
               'visibleSignsLabel': _titleCase(
                 visibleSignsLabelFor(data['rescueType'] as String?),
@@ -442,6 +444,21 @@ List<Widget> _animalRows(Map<String, dynamic> a, bool isSurrender) {
           'Suspected Pregnancy',
           '${a['suspectedPregnancy']} (reporter observation, not vet-confirmed)',
         ),
+    ],
+    // A female dog's litter (LitterDetailsFields).
+    if (a['sex'] == 'Female' && a['litter'] is Map) ...[
+      CaseDetailRow.optional('Puppies in the Litter', (a['litter'] as Map)['count']),
+      CaseDetailRow.optional('Where the Puppies Are', (a['litter'] as Map)['location']),
+      CaseDetailRow.optional('Known Puppy Locations', _list((a['litter'] as Map)['groupLocations'])),
+      CaseDetailRow.optional('Puppies\' Condition', (a['litter'] as Map)['condition']),
+      CaseDetailRow.optional('Puppies Needing Medical Attention', (a['litter'] as Map)['puppiesNeedingAttention']),
+      CaseDetailRow.optional('Litter Observations', (a['litter'] as Map)['notes']),
+      if ((a['litterPhotoUrls'] as List?)?.isNotEmpty ?? false) ...[
+        Text('Litter Photos', style: _labelStyle),
+        const SizedBox(height: 6),
+        _PhotoStrip(urls: List<String>.from(a['litterPhotoUrls'] as List)),
+        const SizedBox(height: 12),
+      ],
     ],
     CaseDetailRow.optional('Visible Injury', a['injury']),
     CaseDetailRow.optional('Injury in Photos (reporter)', a['injuryVisibleInPhotos']),

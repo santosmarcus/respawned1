@@ -1,4 +1,6 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:respawnd1/features/rescue/widgets/surrender_withdrawal_section.dart';
+import 'package:respawnd1/core/utils/community_adoption_eligibility.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -503,14 +505,24 @@ class _AdoptionButtonSection extends StatelessWidget {
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid == null) return const SizedBox.shrink();
 
+    final isSurrender = isSurrenderRescueType(data['rescueType'] as String?);
     if (uid == data['reporterId']) {
       return Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
+          // Pet Surrender: withdraw while active, or see why it was withdrawn.
+          if (isSurrender) SurrenderWithdrawalSection(caseId: caseId, data: data),
+          if (data['status'] == 'withdrawn')
+            const SizedBox.shrink()
+          else ...[
           _note(
-            'You reported this animal, so you can\'t adopt it yourself. Help it '
-                'find a home instead: complete its adoption profile, talk with the '
-                'people who express interest, and choose the best fit.',
+            isSurrender
+                ? 'You listed your pet for Community Adoption. Complete its adoption profile, talk '
+                    'with the people who express interest, and choose the best fit. Your pet stays '
+                    'in your care until then.'
+                : 'You reported this animal, so you can\'t adopt it yourself. Help it '
+                    'find a home instead: complete its adoption profile, talk with the '
+                    'people who express interest, and choose the best fit.',
           ),
           const SizedBox(height: 10),
           ElevatedButton(
@@ -529,8 +541,16 @@ class _AdoptionButtonSection extends StatelessWidget {
               ),
             ),
           ),
+          ],
         ],
       );
+    }
+
+    // A withdrawn surrender takes no new inquiries (firestore.rules too);
+    // any open ones were closed with a note when it was withdrawn.
+    if (data['status'] == 'withdrawn') {
+      return _note('The owner has withdrawn this pet from Community Adoption, so it is no longer '
+          'available. Thank you for your interest.');
     }
 
     return StreamBuilder<List<CommunityAdoptionRequest>>(

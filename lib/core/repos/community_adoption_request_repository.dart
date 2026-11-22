@@ -3,6 +3,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:respawnd1/core/models/adoption/community_adoption.dart';
 import 'package:respawnd1/core/models/adoption/community_adoption_request.dart';
 import 'package:respawnd1/core/repos/community_adoption_repository.dart';
+import 'package:respawnd1/core/models/rescue/surrender_withdrawal.dart';
 
 /// Reads and writes for the reporter-managed Community Adoption flow —
 /// see [CommunityAdoptionRequest] for the whole sequence.
@@ -170,6 +171,82 @@ class CommunityAdoptionRequestRepository {
     CommunityRequestStatus.withdrawn,
     extra: {'withdrawnAt': FieldValue.serverTimestamp()},
   );
+
+  // ---- Pet Surrender withdrawal ----------------------------------------------
+
+  /// The reporter withdraws their Pet Surrender: the case goes to
+  /// 'withdrawn' (archived, never deleted) with the reason, which takes it
+  /// off Community Adoption (the listing and new inquiries only accept
+  /// active cases). Open inquiries are then declined, each with a note to
+  /// the adopter. Adoptions already completed stay as they are.
+  ///
+  /// Throws [StateError] if the case is no longer active (already
+  /// withdrawn, adopted or closed), so a second tap can't withdraw twice.
+  /// Returns how many open inquiries were closed.
+  Future<int> withdrawSurrender({
+    required String caseId,
+    required String reporterId,
+    required String reporterName,
+    required SurrenderWithdrawalReason reason,
+    String? otherText,
+    String? details,
+  }) async {
+    final caseRef = _db.collection('cases').doc(caseId);
+    final reasonText = reason == SurrenderWithdrawalReason.other && (otherText ?? '').trim().isNotEmpty
+        ? otherText!.trim()
+        : reason.label;
+    await _db.runTransaction((tx) async {
+      final snap = await tx.get(caseRef);
+      final data = snap.data();
+      if (data == null) throw StateError('This report no longer exists.');
+      if (data['reporterId'] != reporterId) {
+        throw StateError('Only the person who filed this surrender can withdraw it.');
+      }
+      if (!canWithdrawSurrender(data)) {
+        throw StateError('This surrender request is no longer active, so it can\'t be withdrawn.');
+      }
+      tx.update(caseRef, {
+        'status': 'withdrawn',
+        'surrenderWithdrawal': {
+          'reason': reason.name,
+          if ((otherText ?? '').trim().isNotEmpty) 'otherText': otherText!.trim(),
+          if ((details ?? '').trim().isNotEmpty) 'details': details!.trim(),
+          'previousStatus': data['status'],
+          'withdrawnAt': FieldValue.serverTimestamp(),
+          'withdrawnBy': reporterId,
+        },
+        'statusHistory': FieldValue.arrayUnion([
+          {'status': 'Surrender request withdrawn: $reasonText.', 'timestamp': Timestamp.now()},
+        ]),
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+    });
+
+    // Inquiries still waiting on the reporter are closed, with a note, so
+    // nobody is left waiting on an animal that is no longer offered.
+    final open = await _requests
+        .where('caseId', isEqualTo: caseId)
+        .where('listerId', isEqualTo: reporterId)
+        .get();
+    var closed = 0;
+    for (final doc in open.docs) {
+      final status = doc.data()['status'];
+      if (status != CommunityRequestStatus.pending.name && status != CommunityRequestStatus.selected.name) continue;
+      await _setStatus(doc.id, CommunityRequestStatus.declined, extra: {
+        'declinedAt': FieldValue.serverTimestamp(),
+        'declinedBecause': 'surrender_withdrawn',
+      });
+      await sendMessage(
+        requestId: doc.id,
+        senderId: reporterId,
+        senderName: reporterName,
+        text: 'This surrender request has been withdrawn, so this adoption inquiry is now closed. '
+            'Thank you for your interest in giving this pet a home.',
+      );
+      closed++;
+    }
+    return closed;
+  }
 
   // ---- Messages -------------------------------------------------------------
 

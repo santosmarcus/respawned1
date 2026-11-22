@@ -8,6 +8,7 @@ import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:image_picker/image_picker.dart';
 
 import 'package:respawnd1/core/utils/animal_health_assessment.dart';
+import 'package:respawnd1/core/utils/community_adoption_eligibility.dart';
 import 'package:respawnd1/core/models/rescue/org_involvement.dart';
 import 'package:respawnd1/core/models/rescue/report_verification.dart';
 import 'package:respawnd1/features/collartag/collar_tag_data_model.dart';
@@ -187,6 +188,8 @@ class RescueReportService {
     },
     'orgInvolvement': involvement.firestoreValue,
     if (form.isNeglectAbuseType) 'abuseReportPath': form.abuseReportPath,
+    // Puppies from a litter reported on another case (LitterReportLink).
+    'litterOf': ?form.litterLink?.toMap(),
     // Reporter-led path: what they have filed so far, from the "Reporting
     // to Authorities" answers; updated later from Track Case.
     if (form.isIndependentAbuseReport)
@@ -262,7 +265,9 @@ class RescueReportService {
     // The reporter accepted the truthfulness declaration (rescue_page).
     'truthfulnessDeclaredAt': Timestamp.now(),
     'scannedTagId': form.scannedTagId,
-    'status': 'pending',
+    // A Pet Surrender goes straight to Community Adoption: the organization
+    // does not facilitate surrenders, so it never waits in a review queue.
+    'status': form.isPetSurrenderType ? kCommunityAdoptionStatus : 'pending',
     'statusHistory': [
     {
     'status': switch (involvement) {
@@ -272,9 +277,9 @@ class RescueReportService {
     'yourself; the organization can see it and may assist if its '
     'capacity and coverage allow.',
     OrgInvolvement.notFacilitated =>
-    'Surrender report recorded. The organization does not facilitate '
-    'surrenders; nearby organizations may reach out if they are able '
-    'to help.',
+    'Your pet is now listed for Community Adoption. Interested adopters '
+    'can reach you there; please keep caring for your pet in the '
+    'meantime. You can withdraw this request at any time.',
     },
     'timestamp': Timestamp.now(),
     },
@@ -287,6 +292,32 @@ class RescueReportService {
     });
 
     final primaryCaseId = docRef.id;
+
+    // A puppy report: list it on the mother's report, so rescuers see both.
+    final link = form.litterLink;
+    if (link != null) {
+      try {
+        await casesCollection.doc(link.parentCaseId).update({
+          'litterReportCaseIds': FieldValue.arrayUnion([primaryCaseId]),
+        });
+      } catch (_) {
+        // The puppy report itself is saved and carries litterOf either way.
+      }
+    }
+
+    // Litter photos, per animal: cases/<id>/litter_<animal>_<n>.jpg.
+    final litterPhotoUrls = <String, List<String>>{};
+    for (var i = 0; i < validAnimals.length; i++) {
+      final photos = validAnimals[i].asksLitterDetails ? validAnimals[i].litterPhotos : const <XFile>[];
+      for (var n = 0; n < photos.length; n++) {
+        final ref = FirebaseStorage.instance.ref().child('cases/$primaryCaseId/litter_${i}_$n.jpg');
+        await ref.putFile(File(photos[n].path), SettableMetadata(contentType: 'image/jpeg'));
+        (litterPhotoUrls['$i'] ??= []).add(await ref.getDownloadURL());
+      }
+    }
+    if (litterPhotoUrls.isNotEmpty) {
+      await casesCollection.doc(primaryCaseId).update({'litterPhotoUrls': litterPhotoUrls});
+    }
     // Media and vet records upload side by side.
     final mediaFuture = uploadMedia(
     form.mediaFiles,
@@ -509,6 +540,9 @@ Map<String, dynamic> animalDetailsMap(
     'suspectedPregnancy': animal.suspectedPregnancy,
   },
   // Injury, Illness, Neglect or Abuse — asked per animal.
+  // A female dog's litter: count, places, condition (photos are uploaded
+  // after the case exists, into litterPhotoUrls).
+  'litter': ?animal.litterMap,
   if (form.asksVisibleSigns) ...{
     'visibleSigns': animal.visibleSigns.toList(),
     'needsMedical': animal.needsMedical,

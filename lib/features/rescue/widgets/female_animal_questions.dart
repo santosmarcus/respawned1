@@ -4,6 +4,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/core/utils/animal_health_assessment.dart';
 import 'package:respawnd1/features/rescue/rescue_form_controller.dart';
+import 'package:respawnd1/features/rescue/widgets/litter_details_fields.dart';
 import 'package:respawnd1/features/rescue/widgets/rescue_form_fields.dart';
 
 /// Litter and suspected-pregnancy questions. Shown only while the animal's
@@ -44,6 +45,9 @@ class FemaleAnimalQuestions extends StatelessWidget {
           options: kLitterOptions,
           onChanged: (v) => _set(() => entry.hasLitter = v),
         ),
+        // Female dog with a litter: count, places, condition. Not for cats,
+        // and not for a suspected pregnancy without a litter.
+        if (entry.asksLitterDetails) LitterDetailsFields(entry: entry, onChanged: onChanged),
         const SizedBox(height: 10),
         Row(
           crossAxisAlignment: CrossAxisAlignment.end,

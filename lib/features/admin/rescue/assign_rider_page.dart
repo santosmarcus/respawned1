@@ -21,6 +21,7 @@ import 'package:respawnd1/core/utils/case_id.dart';
 import 'package:respawnd1/core/utils/geo.dart';
 import 'package:respawnd1/core/utils/rescue_risk.dart';
 import 'package:respawnd1/core/utils/transporter_ranking.dart';
+import 'package:respawnd1/core/utils/transport_suitability.dart';
 import 'package:respawnd1/core/utils/species_summary.dart' as species_summary_util;
 import 'package:respawnd1/core/widgets/rescue_risk_banner.dart';
 import 'package:respawnd1/features/admin/rescue/admin_track_case_page.dart';
@@ -121,6 +122,13 @@ class _RiderVm {
   final int compatibilityScore;
   final bool isPreferred;
 
+  /// Whether the vehicle can carry this trip's animals, and why
+  /// (transport_suitability.dart). Unsuitable transporters are listed but
+  /// never selectable.
+  final VehicleSuitability suitability;
+
+  bool get isSelectable => availability == _RiderAvailability.available && suitability.suitable;
+
   const _RiderVm({
     required this.uid,
     required this.name,
@@ -134,6 +142,7 @@ class _RiderVm {
     required this.distanceKm,
     required this.vehicleCategory,
     required this.compatibilityScore,
+    required this.suitability,
     this.phone,
     this.isPreferred = false,
   });
@@ -152,6 +161,7 @@ class _RiderVm {
     distanceKm: distanceKm,
     vehicleCategory: vehicleCategory,
     compatibilityScore: compatibilityScore,
+    suitability: suitability,
     isPreferred: isPreferred ?? this.isPreferred,
   );
 
@@ -769,8 +779,10 @@ class _AssignRiderPageState extends ConsumerState<AssignRiderPage> {
       LatLng? caseLocation,
       List<PetTransporter> transporters,
       Map<String, TransportAssignmentStatus> activeByRider,
-      AnimalTransportProfile animalProfile,
-      ) {
+      AnimalTransportProfile animalProfile, {
+      required int tripAnimals,
+      required List<String> enclosedReasons,
+      }) {
     // Unverified transporters can't take transits (firestore.rules
     // isVerifiedResponder), so they are never offered one.
     // Phone and location are required too: staff call the transporter
@@ -807,6 +819,12 @@ class _AssignRiderPageState extends ConsumerState<AssignRiderPage> {
         distanceKm: distanceFor(pos),
         vehicleCategory: category,
         compatibilityScore: vehicleCompatibilityScore(category, animalProfile),
+        suitability: vehicleSuitability(
+          vehicleType: vehicle,
+          declaredCapacity: null,
+          animals: tripAnimals,
+          enclosedReasons: enclosedReasons,
+        ),
       );
     }
 
@@ -850,6 +868,12 @@ class _AssignRiderPageState extends ConsumerState<AssignRiderPage> {
         distanceKm: (pos == null || caseLocation == null) ? null : distanceFor(pos),
         vehicleCategory: category,
         compatibilityScore: vehicleCompatibilityScore(category, animalProfile),
+        suitability: vehicleSuitability(
+          vehicleType: t.vehicleType,
+          declaredCapacity: t.maxAnimals,
+          animals: tripAnimals,
+          enclosedReasons: enclosedReasons,
+        ),
       );
     }).toList();
 
@@ -879,24 +903,37 @@ class _AssignRiderPageState extends ConsumerState<AssignRiderPage> {
 
     final demoAvailable = demoRiders.where((r) => r.availability == _RiderAvailability.available).toList()
     ..sort(byDistance);
-    var available = realRiders.where((r) => r.availability == _RiderAvailability.available).toList()
+    // Vehicle suitability first (transport_suitability.dart): available
+    // transporters whose vehicle can carry this trip, ranked; then the
+    // available ones whose vehicle can't, listed with the reason but not
+    // selectable. Preferred only ever goes to a suitable transporter.
+    var available = realRiders
+        .where((r) => r.availability == _RiderAvailability.available && r.suitability.suitable)
+        .toList()
     ..sort(byCompatibilityThenDistance);
-    // The single top-ranked real, available transporter is labeled
-    // Preferred — every other eligible transporter stays listed below it,
-    // never hidden.
     if (available.isNotEmpty) {
     available = [available.first.copyWith(isPreferred: true), ...available.skip(1)];
     }
+    final availableUnsuitable = realRiders
+        .where((r) => r.availability == _RiderAvailability.available && !r.suitability.suitable)
+        .toList()
+    ..sort(byDistance);
     final pending = allRiders.where((r) => r.availability == _RiderAvailability.pending).toList()
     ..sort(byDistance);
     final busy = allRiders.where((r) => r.availability == _RiderAvailability.busy).toList()
     ..sort(byDistance);
 
-    return [...demoAvailable, ...available, ...pending, ...busy];
+    return [...demoAvailable, ...available, ...availableUnsuitable, ...pending, ...busy];
   }
 
   void _selectRider(_RiderVm rider) {
     if (rider.availability != _RiderAvailability.available || _isAssigning) return;
+    if (!rider.suitability.suitable) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        appSnackBar("${rider.name}'s vehicle isn't suitable for this trip: ${rider.suitability.reason}."),
+      );
+      return;
+    }
     setState(() {
       // Tapping the already-selected transporter deselects it; tapping a
       // different available transporter replaces the selection — only one
@@ -1223,6 +1260,8 @@ class _AssignRiderPageState extends ConsumerState<AssignRiderPage> {
       _offerRefused(e.toString());
     } on TransporterNotReachableException catch (e) {
       _offerRefused(e.toString());
+    } on UnsuitableVehicleException catch (e) {
+      _offerRefused(e.toString());
     } catch (e, st) {
       debugPrint('Assign transporter failed: $e\n$st');
       if (mounted) {
@@ -1361,7 +1400,11 @@ class _AssignRiderPageState extends ConsumerState<AssignRiderPage> {
             legacyEscapeRisk: d['escapeRisk'] as String?,
           ).isNotEmpty,
     );
-    final riders = _buildRiderVms(riderCenter, caseLocation, transporters, activeByRider, animalProfile);
+    // What the trip needs from a vehicle (transport_suitability.dart).
+    final tripAnimals = animalsToTransport(d);
+    final enclosedReasons = enclosedTransportReasons(d);
+    final riders = _buildRiderVms(riderCenter, caseLocation, transporters, activeByRider, animalProfile,
+        tripAnimals: tripAnimals, enclosedReasons: enclosedReasons);
 
     // Progressive Search Radius spec — only riders within the current
     // radius are actually shown/selectable; the underlying compatibility/
@@ -1370,8 +1413,12 @@ class _AssignRiderPageState extends ConsumerState<AssignRiderPage> {
     // listed — the radius can't rule them in or out, and hiding them would
     // hide every transporter who hasn't shared a location.
     final visibleRiders = riders.where((r) => r.distanceKm == null || r.distanceKm! <= _currentRadiusKm).toList();
-    final hasAvailableInRadius = visibleRiders.any((r) => r.availability == _RiderAvailability.available);
-    final hasAvailableAnywhere = riders.any((r) => r.availability == _RiderAvailability.available);
+    // "Available" here means available with a suitable vehicle: the search
+    // keeps widening until one is in range.
+    final hasAvailableInRadius = visibleRiders.any((r) => r.isSelectable);
+    final hasAvailableAnywhere = riders.any((r) => r.isSelectable);
+    final hasUnsuitableOnly = !hasAvailableAnywhere &&
+        riders.any((r) => r.availability == _RiderAvailability.available);
     final atMaxRadius = _currentRadiusKm >= _maxRadiusKm;
 
     // Auto-expand one step at a time whenever nothing compatible/available
@@ -1707,14 +1754,18 @@ class _AssignRiderPageState extends ConsumerState<AssignRiderPage> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        atMaxRadius
+                        hasUnsuitableOnly
+                            ? 'No available vehicle meets this trip\'s needs ($tripAnimals '
+                                'animal${tripAnimals == 1 ? '' : 's'}${enclosedReasons.isEmpty ? '' : ', enclosed vehicle needed'}). '
+                                'The transporters online can\'t carry it safely.'
+                            : atMaxRadius
                             ? (hasAvailableAnywhere
                         // Shouldn't happen (max radius should contain
                         // everyone), kept only as a safe fallback.
                             ? 'No available transporters in range.'
                             : 'No compatible transporters are currently available. Try again later or use manual assignment.')
                             : hasAvailableAnywhere
-                            ? 'No available transporters nearby. Expanding the search radius…'
+                            ? 'No suitable transporters nearby. Expanding the search radius…'
                             : 'No available transporters nearby.',
                         style: GoogleFonts.zain(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.textPrimary),
                       ),
@@ -1769,6 +1820,17 @@ class _AssignRiderPageState extends ConsumerState<AssignRiderPage> {
                 ),
               ),
 
+            // What the vehicle has to carry (transport_suitability.dart).
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+              child: Text(
+                'This trip: $tripAnimals animal${tripAnimals == 1 ? '' : 's'}'
+                '${enclosedReasons.isEmpty ? '' : ' · needs an enclosed vehicle (${enclosedReasons.join(', ')})'}. '
+                'Transporters whose vehicle can\'t carry it safely are listed but can\'t be selected.',
+                style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary),
+              ),
+            ),
+
             // Transporter list — fixed order (see _buildRiderVms): demo
             // transporters pinned above the real-Available group only while
             // they're Available themselves, then real transporters grouped
@@ -1804,6 +1866,7 @@ class _AssignRiderPageState extends ConsumerState<AssignRiderPage> {
                     isSelected: isSelected,
                     onSelect: () => _selectRider(rider),
                     animalProfile: animalProfile,
+                    tripAnimals: tripAnimals,
                   );
                 },
               ),
@@ -1874,12 +1937,14 @@ class _RiderCard extends StatelessWidget {
   final bool isSelected;
   final VoidCallback onSelect;
   final AnimalTransportProfile animalProfile;
+  final int tripAnimals;
 
   const _RiderCard({
     required this.rider,
     required this.isSelected,
     required this.onSelect,
     required this.animalProfile,
+    required this.tripAnimals,
   });
 
   // Same tel: launch pattern as transporter_details_card.dart's _launchCall.
@@ -1959,6 +2024,8 @@ class _RiderCard extends StatelessWidget {
                       if (rider.isPreferred)
                         _pill('Preferred',
                             fill: AppColors.greenrspwn.withValues(alpha: 0.18), text: AppColors.greenrspwn),
+                      if (!rider.suitability.suitable)
+                        _pill('Not suitable', fill: AppColors.error.withValues(alpha: 0.12), text: AppColors.error),
                       if (rider.isDemo)
                         _pill('DEMO',
                             fill: Colors.transparent,
@@ -1980,6 +2047,23 @@ class _RiderCard extends StatelessWidget {
                       overflow: TextOverflow.ellipsis,
                       style: GoogleFonts.zain(
                           fontSize: 11, color: AppColors.textSecondary)),
+                  // Why this transporter is (or isn't) suitable: declared
+                  // capacity against the animals in this trip.
+                  Text(
+                    '${rider.suitability.declaredCapacity == null ? 'Capacity not declared' : 'Carries up to ${rider.suitability.declaredCapacity}'}'
+                    ' · this trip: $tripAnimals',
+                    style: GoogleFonts.zain(fontSize: 11, color: AppColors.textSecondary),
+                  ),
+                  Text(
+                    rider.suitability.reason,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: GoogleFonts.zain(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      color: rider.suitability.suitable ? AppColors.greenrspwn : AppColors.error,
+                    ),
+                  ),
                 ],
               ),
             ),

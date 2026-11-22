@@ -53,7 +53,15 @@ enum RescueStatus {
   // dashboard field issue. Older builds wrote the bare string 'ended' for
   // these (and for Vehicle breakdown), which no screen understood; it's
   // read as this status too.
-  transitEnded;
+  transitEnded,
+  // Pet Surrender: listed for Community Adoption as soon as it is filed.
+  // The organization does not facilitate surrenders, so it never enters
+  // the review pipeline; the reporter keeps caring for the animal until an
+  // adopter is found (community_adoption_eligibility.dart).
+  communityAdoption,
+  // Pet Surrender withdrawn by the reporter (CommunityAdoptionRequestRepository.
+  // withdrawSurrender). Terminal and archived: kept, never deleted.
+  withdrawn;
 
   /// The canonical string this module writes to Firestore for this status.
   ///
@@ -106,6 +114,8 @@ enum RescueStatus {
     RescueStatus.needsSpecializedAssistance => 'needs_specialized_assistance',
     RescueStatus.verifying => 'verifying',
     RescueStatus.transitEnded => 'transit_ended',
+    RescueStatus.communityAdoption => 'community_adoption',
+    RescueStatus.withdrawn => 'withdrawn',
   };
 
   /// Every raw Firestore string that should be treated as this status when
@@ -154,6 +164,8 @@ enum RescueStatus {
     RescueStatus.needsSpecializedAssistance: ['needs_specialized_assistance'],
     RescueStatus.verifying: ['verifying'],
     RescueStatus.transitEnded: ['transit_ended', 'ended'],
+    RescueStatus.communityAdoption: ['community_adoption'],
+    RescueStatus.withdrawn: ['withdrawn'],
   };
 
   static RescueStatus fromFirestoreValue(String? value) {
@@ -187,6 +199,8 @@ enum RescueStatus {
     RescueStatus.needsSpecializedAssistance => 'Needs Specialized Assistance',
     RescueStatus.verifying => 'Verifying Location',
     RescueStatus.transitEnded => 'Transit Stopped — Needs Decision',
+    RescueStatus.communityAdoption => 'Community Adoption',
+    RescueStatus.withdrawn => 'Withdrawn',
   };
 
   Color get color => switch (this) {
@@ -208,6 +222,8 @@ enum RescueStatus {
     RescueStatus.needsSpecializedAssistance => AppColors.error,
     RescueStatus.verifying => AppColors.tearspwn,
     RescueStatus.transitEnded => AppColors.error,
+    RescueStatus.communityAdoption => AppColors.lavenderrspwn,
+    RescueStatus.withdrawn => AppColors.textSecondary,
   };
 
   /// True once the case has left the active triage/rescue pipeline.
@@ -215,7 +231,8 @@ enum RescueStatus {
       this == RescueStatus.rejected ||
           this == RescueStatus.merged ||
           this == RescueStatus.completed ||
-          this == RescueStatus.cancelled;
+          this == RescueStatus.cancelled ||
+          this == RescueStatus.withdrawn;
 
   /// True for the three reporter-facing "waiting on you" statuses that the
   /// scheduled auto-expiry function in functions/index.js

@@ -1097,6 +1097,9 @@ class _CreateAnimalRecordPageState extends State<CreateAnimalRecordPage> {
         'rescueBackground': selectedBackground,
         'tags': tags,
         'adoptionStatus': _isAdoptable ? 'adoptable' : 'not_ready',
+        // The litter reported with this animal at intake (new records only).
+        if (!widget.isEditing && widget.prefillData?['litter'] is Map)
+          'litterAtIntake': widget.prefillData!['litter'],
         'adoptionReadiness': ?readiness,
         // Analytics gap 3: when the animal was confirmed ready, so
         // Analytics can show discharge → ready and ready → adopted.

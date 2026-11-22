@@ -414,6 +414,11 @@ final casesForTabProvider =
 const List<RescueStatus> kSecondaryStatuses = [
   RescueStatus.possibleDuplicate,
   RescueStatus.merged,
+  // Pet Surrenders: listed for Community Adoption, or withdrawn by the
+  // reporter. Never in a pipeline tab (the organization does not
+  // facilitate them); reachable here for reference.
+  RescueStatus.communityAdoption,
+  RescueStatus.withdrawn,
 ];
 
 class RescueFilters {

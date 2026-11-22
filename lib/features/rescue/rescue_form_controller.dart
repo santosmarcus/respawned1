@@ -23,7 +23,14 @@ class RescueMediaItem {
 
 /// One animal in a (possibly multi-animal) report.
 class FoundAnimalEntry {
-  String? species; // 'Dog' | 'Cat'
+  String? _species; // 'Dog' | 'Cat'
+  String? get species => _species;
+
+  /// Litter questions are dog-only: switching to another species drops them.
+  set species(String? value) {
+    _species = value;
+    if (!asksLitterDetails) _clearLitter();
+  }
   String? breed; // one of breedOptionsFor(species), or kOthersBreedLabel
   final TextEditingController breedOtherController = TextEditingController();
   final TextEditingController colorController = TextEditingController();
@@ -45,8 +52,84 @@ class FoundAnimalEntry {
 
   // Female-only (kLitterOptions / kSuspectedPregnancyOptions). Reporter
   // observations: a suspected pregnancy is never treated as confirmed.
-  String? hasLitter;
+  String? _hasLitter;
   String? suspectedPregnancy;
+
+  String? get hasLitter => _hasLitter;
+
+  /// Anything but Yes drops the litter details (count, places, condition).
+  set hasLitter(String? value) {
+    _hasLitter = value;
+    if (!asksLitterDetails) _clearLitter();
+  }
+
+  // ---- Litter: a female dog that has a litter ([asksLitterDetails]) ------
+  final TextEditingController litterCountController = TextEditingController();
+  String? litterLocation; // kLitterLocationOptions
+  /// One per known group when the puppies are split up.
+  final List<TextEditingController> litterGroupControllers = [];
+  String? litterCondition; // kLitterConditionOptions
+  final TextEditingController litterNotesController = TextEditingController();
+  final List<XFile> litterPhotos = [];
+  /// How many puppies need their own rescue report (sick, injured, weak).
+  final TextEditingController puppiesNeedingAttentionController = TextEditingController();
+
+  /// Only for a female dog the reporter says has a litter. Not asked for
+  /// cats, other sexes, or a suspected pregnancy without a litter.
+  bool get asksLitterDetails =>
+      _species == 'Dog' && sexAllowsPregnancyQuestions(_sex) && _hasLitter == 'Yes';
+
+  int? get litterCount => int.tryParse(litterCountController.text.trim());
+  int? get puppiesNeedingAttention => int.tryParse(puppiesNeedingAttentionController.text.trim());
+  bool get litterNeedsAttention => asksLitterDetails && litterConditionNeedsAttention(litterCondition);
+
+  /// What is still missing or wrong in the litter details, or null.
+  String? get litterError {
+    if (!asksLitterDetails) return null;
+    final count = litterCount;
+    if (count == null || count < 1) return 'Enter how many puppies are in the litter (at least 1).';
+    if (count > kMaxLitterSize) return 'Enter a litter size of $kMaxLitterSize puppies or fewer.';
+    if (litterLocation == null) return 'Say where the puppies are.';
+    if (litterCondition == null) return 'Say how the puppies look.';
+    if (litterNeedsAttention) {
+      final n = puppiesNeedingAttention;
+      if (n == null || n < 1 || n > count) {
+        return 'Enter how many puppies need attention (1 to $count).';
+      }
+    }
+    return null;
+  }
+
+  void _clearLitter() {
+    litterCountController.clear();
+    litterLocation = null;
+    for (final c in litterGroupControllers) {
+      c.dispose();
+    }
+    litterGroupControllers.clear();
+    litterCondition = null;
+    litterNotesController.clear();
+    litterPhotos.clear();
+    puppiesNeedingAttentionController.clear();
+  }
+
+  /// The litter as saved on the report's animals[] entry (photos are added
+  /// after upload, as `litterPhotoUrls` on the case). Null when not asked.
+  Map<String, dynamic>? get litterMap {
+    if (!asksLitterDetails) return null;
+    return {
+      'count': litterCount,
+      'location': litterLocation,
+      if (litterLocationIsSplit(litterLocation))
+        'groupLocations': [
+          for (final c in litterGroupControllers)
+            if (c.text.trim().isNotEmpty) c.text.trim(),
+        ],
+      'condition': litterCondition,
+      if (litterNotesController.text.trim().isNotEmpty) 'notes': litterNotesController.text.trim(),
+      if (litterNeedsAttention) 'puppiesNeedingAttention': puppiesNeedingAttention,
+    };
+  }
 
   // Visible injury and whether the reporter's photos show it (the app
   // does not analyze photos itself).
@@ -132,6 +215,7 @@ class FoundAnimalEntry {
                   (!asksInjuryPhotos || injuryVisibleInPhotos != null))) &&
           (!sexAllowsPregnancyQuestions(sex) ||
               (hasLitter != null && suspectedPregnancy != null)) &&
+          litterError == null &&
           bodyCondition != null &&
           mobility != null &&
           alertness != null &&
@@ -176,6 +260,12 @@ class FoundAnimalEntry {
     colorController.dispose();
     environmentSafetyOtherController.dispose();
     ageController.dispose();
+    litterCountController.dispose();
+    litterNotesController.dispose();
+    puppiesNeedingAttentionController.dispose();
+    for (final c in litterGroupControllers) {
+      c.dispose();
+    }
     stayDurationController.dispose();
   }
 
@@ -186,6 +276,28 @@ class FoundAnimalEntry {
         ? breedOtherController.text.trim()
         : breed!;
   }
+}
+
+/// A rescue report for puppies from a litter reported on another case
+/// (LitterDetailsFields → "report these puppies separately"). Saved as
+/// `litterOf` on the new case; the mother's case lists it in
+/// `litterReportCaseIds`.
+class LitterReportLink {
+  const LitterReportLink({
+    required this.parentCaseId,
+    required this.motherIndex,
+    required this.puppyCount,
+  });
+
+  final String parentCaseId;
+
+  /// The mother's index in the parent case's animals[].
+  final int motherIndex;
+
+  /// How many puppies need their own report (pre-filled as animals).
+  final int puppyCount;
+
+  Map<String, dynamic> toMap() => {'caseId': parentCaseId, 'animalIndex': motherIndex, 'puppyCount': puppyCount};
 }
 
 /// All user-entered state of the Report a Stray form, plus the form's
@@ -206,6 +318,28 @@ class RescueFormController {
   TextEditingController();
 
   String? selectedRescueType;
+
+  /// Set when this report is for puppies from a litter on another report.
+  LitterReportLink? litterLink;
+
+  /// Starts a puppy report: [link.puppyCount] small dogs, already filled
+  /// in, under the Illness type (the reporter can change both).
+  void startLitterReport(LitterReportLink link) {
+    litterLink = link;
+    selectedRescueType = 'Illness';
+    for (final a in foundAnimals) {
+      a.dispose();
+    }
+    foundAnimals
+      ..clear()
+      ..addAll([
+        for (var i = 0; i < link.puppyCount; i++)
+          FoundAnimalEntry()
+            ..species = 'Dog'
+            ..size = 'Small'
+            ..expanded = i == 0,
+      ]);
+  }
   String? coordinateChoice;
   String? adoptionChoice;
   // Only asked/answered when adoptionChoice == 'yes' — resets to false if

@@ -1,6 +1,7 @@
 // Split out of rescue_case_repository.dart (behavior-preserving refactor).
 
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:respawnd1/core/utils/transport_suitability.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
 
@@ -280,6 +281,19 @@ class TransportAssignmentRepository {
         )) {
           throw const TransporterNotReachableException();
         }
+        // Vehicle suitability, re-checked against the transporter's
+        // current vehicle and capacity and the case's current animals, so
+        // a stale Assign screen can't send an unsuitable offer
+        // (transport_suitability.dart; firestore.rules checks it too).
+        final vehicle = (riderData?['transporterVerification'] as Map?) ?? const {};
+        final caseData = caseSnap.data() ?? const <String, dynamic>{};
+        final suitability = vehicleSuitability(
+          vehicleType: vehicle['vehicleType'] as String?,
+          declaredCapacity: vehicle['maxAnimals'],
+          animals: animalsToTransport(caseData),
+          enclosedReasons: enclosedTransportReasons(caseData),
+        );
+        if (!suitability.suitable) throw UnsuitableVehicleException(suitability.reason);
       }
       final currentId = caseSnap.data()?['currentAssignmentId'] as String?;
       if (currentId != null) {

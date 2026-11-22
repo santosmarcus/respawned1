@@ -1,6 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 
 import 'package:respawnd1/core/models/volunteer/volunteer_stats.dart';
+import 'package:respawnd1/core/utils/transport_suitability.dart';
 
 /// Typed view over a `users/{uid}` doc for accounts with role
 /// 'pet_transporter' (see onboard_screen.dart / role_screen.dart, the only
@@ -23,6 +24,11 @@ class PetTransporter {
   final String? phone;
   final String? photoUrl;
   final String? vehicleType;
+
+  /// Most animals the transporter says the vehicle carries safely
+  /// (`transporterVerification.maxAnimals`); null for accounts that
+  /// registered before it was asked (transport_suitability.dart).
+  final int? maxAnimals;
   final String? licensePlate;
   final bool isVerified;
 
@@ -48,6 +54,7 @@ class PetTransporter {
     this.phone,
     this.photoUrl,
     this.vehicleType,
+    this.maxAnimals,
     this.licensePlate,
     this.isVerified = false,
     this.verificationStatus = '',
@@ -86,6 +93,7 @@ class PetTransporter {
       phone: data['phone'] as String?,
       photoUrl: verification?['portraitUrl'] as String?,
       vehicleType: verification?['vehicleType'] as String?,
+      maxAnimals: declaredAnimalCapacity(verification?['maxAnimals']),
       licensePlate: verification?['licensePlate'] as String?,
       isVerified: data['isVerified'] as bool? ?? false,
       verificationStatus: data['transporterVerificationStatus'] as String? ?? '',

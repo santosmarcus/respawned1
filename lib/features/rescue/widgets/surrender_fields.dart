@@ -68,10 +68,10 @@ class SurrenderFields extends StatelessWidget {
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
-                  'The organization does not facilitate pet surrenders, and '
-                  'submitting this does not mean it will take in your pet. '
-                  'Your report is recorded, and nearby organizations may reach '
-                  'out if they are able to help with rehoming.',
+                  'Your pet will be listed in Community Adoption, where people '
+                  'looking to adopt can contact you. The organization does not '
+                  'take in surrendered pets, so your pet stays with you until '
+                  'you choose an adopter.',
                   style: GoogleFonts.zain(fontSize: 13, color: AppColors.textPrimary),
                 ),
               ),

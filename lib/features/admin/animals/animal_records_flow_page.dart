@@ -26,6 +26,14 @@ Map<String, dynamic> animalRecordPrefillFor(RescueCase c, Map<String, dynamic> a
     'photoUrls': [...c.photoUrls],
     'rescueDate': c.raw['createdAt'],
     'scannedTagId': c.scannedTagId,
+    // A female dog's litter as reported (count, places, condition, linked
+    // puppy reports), kept on the animal record as litterAtIntake.
+    if (animal['litter'] is Map)
+      'litter': {
+        ...Map<String, dynamic>.from(animal['litter'] as Map),
+        if ((c.raw['litterReportCaseIds'] as List?)?.isNotEmpty ?? false)
+          'puppyReportCaseIds': List<String>.from(c.raw['litterReportCaseIds'] as List),
+      },
   };
 }
 

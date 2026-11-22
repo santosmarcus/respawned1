@@ -1,4 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:respawnd1/features/rescue/widgets/surrender_withdrawal_section.dart';
+import 'package:respawnd1/features/rescue/widgets/litter_report_link.dart';
+import 'package:respawnd1/core/utils/community_adoption_eligibility.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:respawnd1/core/utils/rescue_progress.dart';
@@ -1684,6 +1687,12 @@ class _CaseDetailTabState extends State<_CaseDetailTab> {
 
           // Reporter-led Neglect or Abuse: what was filed with the
           // authorities, the guide, and asking the organization for help.
+          // Pet Surrender: withdraw (older reports still waiting in review)
+          // or, once withdrawn, the reason and date.
+          // Litter: linked puppy / mother reports, and "report these puppies".
+          LitterReportsSection(caseId: widget.caseId, data: data),
+          if (isSurrenderRescueType(data['rescueType'] as String?))
+            SurrenderWithdrawalSection(caseId: widget.caseId, data: data),
           if (OrgInvolvement.fromFirestoreValue(data['orgInvolvement']) == OrgInvolvement.independentReport)
             IndependentReportSection(caseId: widget.caseId, data: data, isReporter: widget.isReporter),
 

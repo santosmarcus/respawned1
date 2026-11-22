@@ -359,11 +359,6 @@ function serviceAreaMessage(c, isCritical) {
         body: 'The reporter is taking this to the authorities themselves. ' +
           'Review it and assist only if your capacity allows.',
       };
-    case orgInvolvement.NOT_ORG_FACILITATED:
-      return {
-        title: 'Surrender report in your service area',
-        body: 'For awareness: your organization is not asked to facilitate it.',
-      };
     default:
       return {
         title: isCritical ? 'URGENT: Critical case in your service area' : 'New case in your service area',
@@ -386,6 +381,10 @@ async function assignCaseToServiceAreas({caseRef, caseId, c, isCritical}) {
     areaOrgIds: matched,
     outsideServiceArea: matched.length === 0,
   });
+
+  // Pet Surrender goes to Community Adoption, not to an organization: no
+  // staff push and no outside-coverage alert (org_involvement.js).
+  if (orgInvolvement.involvementOf(c) === orgInvolvement.NOT_ORG_FACILITATED) return;
 
   if (matched.length === 0) {
     await db.collection('adminAlerts').add({

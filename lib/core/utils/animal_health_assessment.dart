@@ -193,3 +193,51 @@ const List<String> kSuspectedPregnancyOptions = ['Yes, suspected', 'No', 'Not su
 /// sex changes away from Female, so a report never carries a litter or
 /// pregnancy answer for a male or unsexed animal.
 bool sexAllowsPregnancyQuestions(String? sex) => sex == 'Female';
+
+// ---- Litter (female dog that has a litter) ---------------------------------
+// Asked only for a female Dog whose "has a litter?" answer is Yes
+// (FoundAnimalEntry.asksLitterDetails). Separate from the suspected
+// pregnancy question: a pregnancy is not an existing litter.
+
+const String kLitterTogether = 'All puppies are together in one place';
+const String kLitterScattered = 'Puppies are scattered in different places';
+const String kLitterSomeSeparated = 'Some are together, others are separated';
+const String kLitterLocationUnsure = 'Not sure';
+
+const List<String> kLitterLocationOptions = [
+  kLitterTogether,
+  kLitterScattered,
+  kLitterSomeSeparated,
+  kLitterLocationUnsure,
+];
+
+/// Locations that ask where each known group of puppies is.
+bool litterLocationIsSplit(String? location) =>
+    location == kLitterScattered || location == kLitterSomeSeparated;
+
+const String kLitterAllHealthy = 'All appear healthy';
+const String kLitterSomeSick = 'Some appear sick or injured';
+const String kLitterAllSick = 'All appear sick or injured';
+const String kLitterSomeWeak = 'Some are weak or appear malnourished';
+const String kLitterConditionUnknown = 'Unknown or unable to assess';
+
+const List<String> kLitterConditionOptions = [
+  kLitterAllHealthy,
+  kLitterSomeSick,
+  kLitterAllSick,
+  kLitterSomeWeak,
+  kLitterConditionUnknown,
+];
+
+/// Conditions where some puppies may need their own rescue report.
+bool litterConditionNeedsAttention(String? condition) =>
+    condition == kLitterSomeSick || condition == kLitterAllSick || condition == kLitterSomeWeak;
+
+/// Most puppies accepted in one litter (a sanity limit for typing errors).
+const int kMaxLitterSize = 20;
+
+/// Most known locations a reporter can list for a split litter.
+const int kMaxLitterGroups = 6;
+
+/// Most litter photos per animal.
+const int kMaxLitterPhotos = 3;

@@ -46,7 +46,10 @@ ApplicationSummary transporterSummary(TransporterApplication app) {
   return ApplicationSummary(
     name: app.name,
     phone: app.mobileNumber,
-    lines: [('Vehicle', vehicle), if (app.documents.isEmpty) ('Documents', 'None uploaded')],
+    lines: [
+      ('Vehicle', vehicle),
+      ('Carries safely', app.maxAnimals == null ? 'Not declared' : '${app.maxAnimals} animal${app.maxAnimals == 1 ? '' : 's'}'),
+      if (app.documents.isEmpty) ('Documents', 'None uploaded')],
     submittedAt: app.submittedAt,
     reviewedAt: app.status == TransporterApplicationStatus.pending ? null : app.reviewedAt,
     reviewNote: app.reviewNote,

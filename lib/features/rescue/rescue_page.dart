@@ -16,6 +16,8 @@ import 'package:respawnd1/features/collartag/animal_tag_scan.dart';
 import 'package:respawnd1/features/collartag/pet_found_chat.dart';
 import 'package:respawnd1/core/models/rescue/report_verification.dart';
 import 'package:respawnd1/features/rescue/rescue_form_controller.dart';
+import 'package:respawnd1/core/utils/case_id.dart';
+import 'package:respawnd1/features/rescue/widgets/litter_report_link.dart';
 import 'package:respawnd1/features/rescue/services/rescue_geocoding_service.dart';
 import 'package:respawnd1/features/rescue/services/rescue_report_service.dart';
 import 'package:respawnd1/features/rescue/widgets/lost_pet_fields.dart';
@@ -38,7 +40,11 @@ export 'package:respawnd1/features/rescue/widgets/qr_scanner_page.dart'
     show QRScannerPage;
 
 class RescuePage extends StatefulWidget {
-  const RescuePage({super.key});
+  const RescuePage({super.key, this.litterLink});
+
+  /// Opens the form for puppies from a litter on another report, already
+  /// filled in with that many puppies (LitterReportLink).
+  final LitterReportLink? litterLink;
 
   @override
   State<RescuePage> createState() => _RescuePageState();
@@ -83,6 +89,7 @@ class _RescuePageState extends State<RescuePage> {
   @override
   void initState() {
     super.initState();
+    if (widget.litterLink case final link?) _form.startLitterReport(link);
     _fetchCurrentLocation();
     _prefillContact();
   }
@@ -559,10 +566,29 @@ class _RescuePageState extends State<RescuePage> {
               padding: const EdgeInsets.fromLTRB(16, 4, 16, 14),
               child: Text(
                 'Four short steps: where the animal is, the type of rescue, photos, and what you saw. '
-                    'Our partner organizations review every report.',
+                    'Rescue reports go to our partner organizations; Pet Surrender and Lost Pet '
+                    'reports are shared with the community.',
                 style: GoogleFonts.zain(fontSize: 14, color: AppColors.textSecondary),
               ),
             ),
+
+            // A report for puppies from a litter on another report.
+            if (_form.litterLink case final link?)
+              Container(
+                width: double.infinity,
+                margin: const EdgeInsets.fromLTRB(16, 0, 16, 14),
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: AppColors.yellowrspwn.withValues(alpha: 0.2),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Text(
+                  'Reporting ${link.puppyCount} pupp${link.puppyCount == 1 ? 'y' : 'ies'} from the litter on '
+                  'report #${shortCaseId(link.parentCaseId)}. Describe each puppy on its own; this report '
+                  'stays linked to the mother\'s.',
+                  style: GoogleFonts.zain(fontSize: 13, color: AppColors.textPrimary),
+                ),
+              ),
 
             RescueFormSection(
               step: 1,
@@ -753,17 +779,31 @@ class _RescuePageState extends State<RescuePage> {
   /// The notice above the Submit button, worded for the selected type.
   String _submissionNoticeText() {
     if (_form.isPetSurrenderType) {
-      return 'Surrender requests are reviewed according to shelter capacity '
-          'and the needs of the animals already in our care, so intake '
-          'cannot always be immediate. Please continue to provide food, '
-          'shelter, and care for your pet $kSurrenderNoticeHighlight.';
+      return 'Thank you for thinking ahead for your pet. The organization '
+          'does not take in surrendered pets directly, so surrender requests '
+          'have the lowest priority in its work. Instead, your pet will be '
+          'listed in Community Adoption, where people looking to adopt can '
+          'contact you, and you choose who adopts. Until then, '
+          '$kSurrenderNoticeHighlight. Listing your pet does not guarantee a '
+          'quick adoption or rehoming, and you can withdraw your request at '
+          'any time while it is active.';
     }
     if (_form.isLostPetType) {
-      return 'Our team and the community will help look for your pet, but '
-          'a reunion cannot be guaranteed. Please continue searching '
-          'nearby areas, check with local shelters and your barangay, and '
-          'share your alert as widely as possible. Your own efforts remain '
-          'the most important part of bringing your pet home.';
+      if (_form.isOwner == false) {
+        return 'Thank you for looking out for this animal. Your report is '
+            'shared with the community and matched against lost pet alerts so '
+            'its owner can find it. It is not handled by the organization, so '
+            'no one is sent out because of it. If the animal is hurt or in '
+            'danger, switch to a rescue report instead.';
+      }
+      return 'We are sorry your pet is missing, and we hope you are together '
+          'again soon. Your alert is shared with people nearby and matched '
+          'against found pet reports, so someone who sees your pet can '
+          'recognize it and reach you. Lost pet reports are not handled by '
+          'the organization, so submitting one does not mean anyone will '
+          'search for your pet or that it will be found. Please keep '
+          'searching nearby, check with local shelters and your barangay, '
+          'and share your alert as widely as you can.';
     }
     return 'Our partner organizations review every report and will make '
         'every effort to respond as quickly as possible. However, response '
@@ -883,6 +923,15 @@ class _RescuePageState extends State<RescuePage> {
         onProgress: _onUploadProgress,
       );
 
+      if (!mounted) return;
+      // A litter with puppies that need attention: offer their own report
+      // now (it stays linked to this one). Also offered later on Track Case.
+      final link = litterReportOffer(primaryCaseId, _form.validAnimals);
+      if (link != null && await confirmLitterReport(context, link)) {
+        if (!mounted) return;
+        Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => RescuePage(litterLink: link)));
+        return;
+      }
       if (mounted) {
         Navigator.pushReplacement(
           context,
@@ -984,7 +1033,8 @@ class _RescuePageState extends State<RescuePage> {
 
 /// The bold part of the Pet Surrender notice above the Submit button.
 const String kSurrenderNoticeHighlight =
-    'until the team approves your animal for community adoption';
+    'please keep giving your pet food, shelter and care, as it stays in your '
+    'care until it is adopted';
 
 /// Checkbox declaring the report is truthful and accurate. Required before
 /// any report type can be submitted.

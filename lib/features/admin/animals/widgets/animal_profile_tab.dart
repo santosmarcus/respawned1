@@ -99,6 +99,20 @@ class AnimalProfileTab extends StatelessWidget {
             {'status': 'open'} => 'Open for sponsorship',
             _ => 'No live sponsorship listing',
           }),
+          // The litter reported with her at intake (female dogs).
+          if (animal.raw['litterAtIntake'] case final Map litter)
+            _InfoItem(
+              'Litter (at intake)',
+              [
+                if (litter['count'] != null) '${litter['count']} puppies',
+                ?litter['location'] as String?,
+                ?litter['condition'] as String?,
+                if (litter['puppiesNeedingAttention'] != null)
+                  '${litter['puppiesNeedingAttention']} needing attention',
+                if ((litter['puppyReportCaseIds'] as List?)?.isNotEmpty ?? false)
+                  'puppy reports: ${(litter['puppyReportCaseIds'] as List).map((id) => '#${shortCaseId(id as String)}').join(', ')}',
+              ].join(' · '),
+            ),
           _InfoItem(
             'Collar Tag',
             animal.hasCollarTag
