@@ -488,6 +488,16 @@ class RescueFormController {
   final TextEditingController neglectReportReferenceController =
   TextEditingController();
   String? neglectWillingWitness;
+  // Other witnesses: who else saw it, and whether they would testify.
+  String? neglectOtherWitness;
+  final TextEditingController neglectWitnessNameController =
+  TextEditingController();
+  final TextEditingController neglectWitnessContactController =
+  TextEditingController();
+  String? neglectWitnessWilling;
+  // A post or video of it online, if any (evidence).
+  final TextEditingController neglectOnlineLinkController =
+  TextEditingController();
 
   bool get isNeglectAbuseType => selectedRescueType == kNeglectAbuseType;
 
@@ -500,15 +510,14 @@ class RescueFormController {
   bool? abuseAreaCovered;
   List<String> abuseCoveringOrgs = const [];
 
-  /// Inside a partner organization's coverage the report asks it for help;
-  /// outside, the reporter takes it to the authorities with the guide.
-  /// [covered] null clears it (checking again).
+  /// Neglect or Abuse is reported to the organizations wherever the animal
+  /// is; coverage only changes the notes shown (outside it, the reporter is
+  /// told help may not reach them and to go to the authorities).
+  /// [covered] null means it is still being checked.
   void applyAbuseCoverage(bool? covered, [List<String> orgs = const []]) {
     abuseAreaCovered = covered;
     abuseCoveringOrgs = orgs;
-    abuseReportPath = covered == null
-        ? null
-        : (covered ? kAbusePathOrgAssistance : kAbusePathIndependent);
+    abuseReportPath = kAbusePathOrgAssistance;
   }
   bool get isIndependentAbuseReport =>
       isNeglectAbuseType && abuseReportPath == kAbusePathIndependent;
@@ -589,8 +598,6 @@ class RescueFormController {
           surrenderExplanationController.text.trim().isEmpty) {
         return 'Please explain the issue and what you\'ve tried.';
       }
-    } else if (isNeglectAbuseType && abuseReportPath == null) {
-      return 'Still checking whether a partner organization covers this location. Try again in a moment.';
     } else if (condition.isEmpty ||
         selectedRescueType == null ||
         valid.isEmpty ||
@@ -616,8 +623,22 @@ class RescueFormController {
           neglectOwnerKnown == null ||
           neglectFrequency == null ||
           neglectReportedToAuthorities == null ||
-          neglectWillingWitness == null) {
+          neglectWillingWitness == null ||
+          neglectOtherWitness == null) {
         return 'Please fill in all required fields.';
+      }
+      if (neglectOtherWitness == 'Yes') {
+        if (neglectWitnessNameController.text.trim().isEmpty) {
+          return 'Please enter the witness\'s name.';
+        }
+        if (neglectWitnessWilling == null) {
+          return 'Please say whether the witness is willing to testify.';
+        }
+        final contact = neglectWitnessContactController.text.trim();
+        if (contact.isNotEmpty) {
+          final phoneError = AppValidators.phFlexiblePhone(contact);
+          if (phoneError != null) return phoneError;
+        }
       }
     }
 
@@ -722,6 +743,9 @@ class RescueFormController {
     abandonmentWitnessDetailsController.dispose();
     abandonmentLocationOtherController.dispose();
     neglectObservedOtherController.dispose();
+    neglectWitnessNameController.dispose();
+    neglectWitnessContactController.dispose();
+    neglectOnlineLinkController.dispose();
     neglectOwnerDetailsController.dispose();
     neglectReportReferenceController.dispose();
     abandonmentBelongingsDetailsController.dispose();

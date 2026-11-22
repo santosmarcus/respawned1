@@ -143,14 +143,24 @@ const List<String> kAbandonmentWitnessOptions = [
 const String kNeglectAbuseType = 'Neglect or Abuse';
 
 const String kNeglectObservedOther = 'Other';
+/// Kinds of cruelty, paraphrased from the examples in "How to Report Animal
+/// Abuse and Cruelty in the Philippines" (Respicio & Co., under the Animal
+/// Welfare Act). Abandonment is one of them (it was a separate rescue type).
+const String kNeglectObservedAbandoned = 'Abandoned or dumped and left to suffer';
 const List<String> kNeglectObservedOptions = [
-  'Physical harm (beating, kicking, burning)',
-  'Starvation or no food and water',
-  'Constantly chained or caged',
-  'No shelter from sun or rain',
-  'Too many animals (hoarding)',
-  'Poisoning',
-  'Slaughter or meat trade',
+  'Hit, kicked or physically hurt',
+  'Stabbed, burned, cut or tortured',
+  'Poisoned on purpose',
+  'Starved or kept from food or water',
+  'Left sick or injured without care for a long time',
+  'Chained, caged or confined in cruel conditions',
+  kNeglectObservedAbandoned,
+  'Made to fight or used in cruel shows or entertainment',
+  'Transported or caged in overcrowded, harsh conditions',
+  'Killed unlawfully or in a cruel way',
+  'Too many animals kept to be cared for (hoarding)',
+  'Bred or sold in filthy, harmful conditions',
+  'Hurt as punishment, for fun or out of anger',
   kNeglectObservedOther,
 ];
 
@@ -308,10 +318,6 @@ const List<Map<String, String>> kRescueTypeOptions = [
         'for matching.',
   },
   {
-    'label': 'Abandonment',
-    'description': 'Animal left without care',
-  },
-  {
     'label': 'Illness',
     'description':
     'Appears weak, vomiting, coughing, skin disease; suspected illness',
@@ -322,8 +328,8 @@ const List<Map<String, String>> kRescueTypeOptions = [
   },
   {
     'label': 'Neglect or Abuse',
-    'description': 'Suspected animal cruelty, starvation, chaining, hoarding. '
-        'Ask the organization for help, or report it yourself with our guide.',
+    'description': 'Suspected cruelty: hurting, starving, poisoning, cruel '
+        'confinement, abandonment, hoarding. Reported anywhere; guidance included.',
   },
   {
     'label': 'Aggressive Animal',

@@ -832,9 +832,9 @@ class _RescuePageState extends State<RescuePage> {
     if (_form.isNeglectAbuseType) {
       if (_form.abuseAreaCovered == false) {
         return 'This location is outside our partner organizations\' reach. Your report is '
-            'recorded and subject to review, but no one can be sent from here. Please report '
-            'it to your barangay, city or municipal LGU, or the police (911), and keep your '
-            'photos and notes for them.';
+            'still sent to them and is subject to their review and approval, but help may not '
+            'be able to reach the animal. Please also report it to your barangay, city or '
+            'municipal LGU, or the police (911), and keep your photos and notes for them.';
       }
       return 'Your report is subject to review and approval by our partner organizations. '
           'They may coordinate with the authorities or rescue the animal depending on their '

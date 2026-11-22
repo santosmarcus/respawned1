@@ -139,7 +139,7 @@ class NeglectAbuseFields extends _NeglectSection {
         const SizedBox(height: 20),
 
         RescueFieldLabel(
-          'Does the animal have an owner you know of?',
+          'Do you know who did it or who is responsible for the animal?',
           required: true,
         ),
         const SizedBox(height: 4),
@@ -152,7 +152,7 @@ class NeglectAbuseFields extends _NeglectSection {
           const SizedBox(height: 6),
           RescueTextField(
             form.neglectOwnerDetailsController,
-            "Owner's name or address (optional)",
+            "Their name, address or anything that identifies them (optional)",
           ),
         ],
         const SizedBox(height: 20),
@@ -199,9 +199,51 @@ class NeglectAbuseFields extends _NeglectSection {
         ],
         const SizedBox(height: 20),
 
+        _heading('Evidence and Witnesses'),
+        const SizedBox(height: 14),
+
+        RescueFieldLabel('Link to a post or video of it online', required: false),
+        const SizedBox(height: 6),
+        RescueTextField(
+          form.neglectOnlineLinkController,
+          'If it was posted online (save a screenshot too, in case it is deleted)',
+        ),
+        const SizedBox(height: 20),
+
+        RescueFieldLabel('Did anyone else see it?', required: true),
+        const SizedBox(height: 4),
+        _radios(
+          kYesNoOptions,
+          form.neglectOtherWitness,
+              (v) => form.neglectOtherWitness = v,
+        ),
+        if (form.neglectOtherWitness == 'Yes') ...[
+          const SizedBox(height: 6),
+          RescueFieldLabel('Witness name', required: true),
+          const SizedBox(height: 6),
+          RescueTextField(form.neglectWitnessNameController, 'Name of the witness'),
+          const SizedBox(height: 12),
+          RescueFieldLabel('Witness mobile number', required: false),
+          const SizedBox(height: 6),
+          RescueTextField(
+            form.neglectWitnessContactController,
+            'So the organization can reach them',
+            keyboardType: TextInputType.phone,
+          ),
+          const SizedBox(height: 12),
+          RescueFieldLabel('Is this witness willing to testify?', required: true),
+          const SizedBox(height: 4),
+          _radios(
+            kYesNoNotSureOptions,
+            form.neglectWitnessWilling,
+                (v) => form.neglectWitnessWilling = v,
+          ),
+        ],
+        const SizedBox(height: 20),
+
         RescueFieldLabel(
-          'If a case is filed, are you willing to be a witness and give a '
-              'signed written statement?',
+          'If a case is filed, are you willing to testify (sign a written '
+              'statement and, if needed, appear in court)?',
           required: true,
         ),
         const SizedBox(height: 4),

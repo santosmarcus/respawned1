@@ -229,9 +229,18 @@ void main() {
       ..neglectOwnerKnown = 'Yes'
       ..neglectFrequency = 'Ongoing for weeks or longer'
       ..neglectReportedToAuthorities = 'No'
-      ..neglectWillingWitness = 'Yes';
+      ..neglectWillingWitness = 'Yes'
+      ..neglectOtherWitness = 'No';
     expect(form.validateRescueReport(), 'Please fill in all required fields.');
-    form.neglectObserved.add('Constantly chained or caged');
+    form.neglectObserved.add(kNeglectObservedAbandoned);
+    expect(form.validateRescueReport(), isNull);
+
+    // A named witness needs a name and whether they would testify.
+    form.neglectOtherWitness = 'Yes';
+    expect(form.validateRescueReport(), contains("witness's name"));
+    form.neglectWitnessNameController.text = 'Ana Cruz';
+    expect(form.validateRescueReport(), contains('willing to testify'));
+    form.neglectWitnessWilling = 'Yes';
     expect(form.validateRescueReport(), isNull);
 
     // "Other" is described in the report's own description.
@@ -448,31 +457,32 @@ void main() {
         ..neglectOwnerKnown = 'Yes'
         ..neglectFrequency = 'Ongoing for weeks or longer'
         ..neglectReportedToAuthorities = 'Yes'
-        ..neglectWillingWitness = 'Yes';
-      form.neglectObserved.add('Constantly chained or caged');
+        ..neglectWillingWitness = 'Yes'
+        ..neglectOtherWitness = 'No';
+      form.neglectObserved.add(kNeglectObservedAbandoned);
       form.conditionController.text = 'Chained without water';
       form.foundAnimals.first.species = kDogSpecies;
       return form;
     }
 
-    test('waits for the coverage check before it can be submitted', () {
-      expect(abuseReady().validateRescueReport(), contains('Still checking'));
+    test('can be reported before or without the coverage check', () {
+      final form = abuseReady();
+      expect(form.orgInvolvement, OrgInvolvement.orgAssist);
+      expect(form.validateRescueReport(), isNull);
     });
 
     test('inside coverage asks the organization; no stray-rescue questions', () {
       final form = abuseReady()..applyAbuseCoverage(true, ['Paws Org']);
       expect(form.abuseReportPath, kAbusePathOrgAssistance);
-      expect(form.orgInvolvement, OrgInvolvement.orgAssist);
       expect(form.asksOrgCoordination, isFalse);
       expect(form.asksOnSite, isFalse);
       expect(form.validateRescueReport(), isNull);
     });
 
-    test('outside coverage is reporter-led and still rates urgency', () {
+    test('outside coverage is still reported to the organizations', () {
       final form = abuseReady()..applyAbuseCoverage(false);
-      expect(form.orgInvolvement, OrgInvolvement.independentReport);
-      expect(form.isIndependentAbuseReport, isTrue);
-      expect(form.asksOrgCoordination, isFalse);
+      expect(form.abuseAreaCovered, isFalse);
+      expect(form.orgInvolvement, OrgInvolvement.orgAssist);
       expect(form.validateRescueReport(), isNull);
       expect(form.urgencyAssessment, isNotNull);
     });

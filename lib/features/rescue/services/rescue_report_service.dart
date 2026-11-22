@@ -187,7 +187,7 @@ class RescueReportService {
     'assessedAt': FieldValue.serverTimestamp(),
     },
     'orgInvolvement': involvement.firestoreValue,
-    if (form.isNeglectAbuseType) 'abuseReportPath': form.abuseReportPath,
+    if (form.isNeglectAbuseType) 'abuseReportPath': form.abuseReportPath ?? kAbusePathOrgAssistance,
     // Puppies from a litter reported on another case (LitterReportLink).
     'litterOf': ?form.litterLink?.toMap(),
     // Reporter-led path: what they have filed so far, from the "Reporting
@@ -240,6 +240,15 @@ class RescueReportService {
     'reportReference':
     form.neglectReportReferenceController.text.trim(),
     'willingWitness': form.neglectWillingWitness,
+    'otherWitness': form.neglectOtherWitness,
+    if (form.neglectOtherWitness == 'Yes') ...{
+      'witnessName': form.neglectWitnessNameController.text.trim(),
+      if (form.neglectWitnessContactController.text.trim().isNotEmpty)
+        'witnessContact': form.neglectWitnessContactController.text.trim(),
+      'witnessWillingToTestify': form.neglectWitnessWilling,
+    },
+    if (form.neglectOnlineLinkController.text.trim().isNotEmpty)
+      'onlineLink': form.neglectOnlineLinkController.text.trim(),
     },
     // Abandonment follow-up answers — see AbandonmentFields.
     if (form.isAbandonmentType) 'abandonment': {

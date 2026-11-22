@@ -99,17 +99,17 @@ class NeglectAbuseCoverageSection extends StatelessWidget {
                 ),
                 const SizedBox(height: 6),
                 Text(
-                  'No partner organization operates here, so we cannot send anyone to help. '
-                  'Please report it directly to your barangay, your city or municipal LGU '
-                  '(its veterinary office), or the police (911). They can act anywhere, and only '
-                  'they can act against an owner or file a case.',
+                  'No partner organization operates here, so help may not be able to reach '
+                  'this animal. Please also report it directly to your barangay, your city or '
+                  'municipal LGU (its veterinary office), or the police (911). They can act '
+                  'anywhere, and only they can act against an owner or file a case.',
                   style: body(),
                 ),
                 const SizedBox(height: 6),
                 Text(
-                  'You can still submit this report. It is kept on record as a report you are '
-                  'taking to the authorities yourself, and an organization may assist if it can. '
-                  'It is subject to review.',
+                  'You can still submit this report below. Our partner organizations review '
+                  'every neglect and abuse report and may assist if they can; it is subject to '
+                  'their review and approval.',
                   style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary),
                 ),
               ],
