@@ -22,15 +22,37 @@ CaseVerificationRepository _repository() =>
 /// location and say whether the animal is there. Shown on the rider's home
 /// screen whether they are online or not, because staff assigned it to them
 /// by name. Nothing is drawn when there are none.
-class VerificationVisitsBanner extends StatelessWidget {
+class VerificationVisitsBanner extends StatefulWidget {
   const VerificationVisitsBanner({super.key, required this.riderUid});
 
   final String riderUid;
 
   @override
+  State<VerificationVisitsBanner> createState() => _VerificationVisitsBannerState();
+}
+
+class _VerificationVisitsBannerState extends State<VerificationVisitsBanner> {
+  // Created once: a new stream on every rebuild re-ran the query.
+  late Stream<List<RescueCase>> _visits;
+
+  @override
+  void initState() {
+    super.initState();
+    _visits = _repository().streamVerificationVisits(widget.riderUid);
+  }
+
+  @override
+  void didUpdateWidget(VerificationVisitsBanner old) {
+    super.didUpdateWidget(old);
+    if (old.riderUid != widget.riderUid) {
+      _visits = _repository().streamVerificationVisits(widget.riderUid);
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
     return StreamBuilder<List<RescueCase>>(
-      stream: _repository().streamVerificationVisits(riderUid),
+      stream: _visits,
       builder: (context, snap) {
         final visits = snap.data ?? const <RescueCase>[];
         if (visits.isEmpty) return const SizedBox.shrink();
@@ -207,7 +229,7 @@ class _VerificationVisitPageState extends State<VerificationVisitPage> {
               const SizedBox(height: 10),
               Text(
                 'The organization has not accepted this report yet. Go to the location and tell them '
-                'whether the animal is there. You are not picking it up on this visit.',
+                    'whether the animal is there. You are not picking it up on this visit.',
                 style: text,
               ),
               const SizedBox(height: 14),

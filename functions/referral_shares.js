@@ -24,6 +24,7 @@ const {
   publicStatusLabel,
   buildReferralSnapshot,
   validateResponse,
+  linkReferralUpdate,
 } = require('./referral_share_rules');
 const {loadOrgAccess} = require('./org_access');
 
@@ -221,8 +222,9 @@ module.exports = ({notifyStaff, orgStaffUids}) => {
       }
       const caseRef = db.collection('cases').doc(s.caseId);
       const refRef = caseRef.collection('referrals').doc(s.referralId);
-      const refSnap = await tx.get(refRef);
+      const [refSnap, caseSnap] = await Promise.all([tx.get(refRef), tx.get(caseRef)]);
       const now = Timestamp.now();
+      const link = linkReferralUpdate(caseSnap.get('linkReferral'), s.referralId, answer, now);
       tx.set(shareRef.collection('responses').doc(), {...answer, createdAt: now});
       tx.update(shareRef, {responseCount: FieldValue.increment(1), lastResponseAt: now});
       if (refSnap.exists) {
@@ -238,9 +240,14 @@ module.exports = ({notifyStaff, orgStaffUids}) => {
         tx.update(refRef, update);
       }
       const label = SHARE_RESPONSES[answer.response];
-      tx.update(caseRef, {statusHistory: FieldValue.arrayUnion({
-        status: `Referral answer from ${answer.name}: ${label}.`, timestamp: now,
-      })});
+      tx.update(caseRef, {
+        statusHistory: FieldValue.arrayUnion({
+          status: `Referral answer from ${answer.name}: ${label}.`, timestamp: now,
+        }),
+        // Shared-link referral: "Will handle it" ends the wait (Closed in
+        // the app); the other answers keep the case pending in Review.
+        ...(link ? {linkReferral: link} : {}),
+      });
       activityLog(tx, caseRef, 'referral_response', {name: answer.name, role: 'referral_recipient'},
         {referralId: s.referralId, ...answer});
       return {s, label};

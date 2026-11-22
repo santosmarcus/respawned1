@@ -343,7 +343,7 @@ final rosterCandidatesProvider = FutureProvider.autoDispose.family<List<({Roster
         entry: RosterEntry(d.id, (name?.isNotEmpty ?? false) ? name! : (email?.isNotEmpty ?? false) ? email! : 'Member'),
         role: m['role'] == 'admin'
             ? 'admin'
-            : (OrgPreset.matching(staffPermissionsFrom(m)) == OrgPreset.animalCare ? 'care' : 'staff'),
+            : (staffPermissionsFrom(m).contains(OrgPermission.care) ? 'care' : 'staff'),
       ));
     }
     // Daily-care staff first, then other Staff, then Admins.

@@ -7,6 +7,7 @@ import 'package:respawnd1/core/models/rescue/expense.dart';
 import 'package:respawnd1/core/repos/general_expense_repository.dart';
 import 'package:respawnd1/core/repos/animal_record_repository.dart';
 import 'package:respawnd1/features/admin/rescue/state/rescue_reports_providers.dart';
+import 'package:respawnd1/core/models/donation/cash_out.dart';
 import 'package:respawnd1/core/models/donation/donation_model.dart';
 import 'package:respawnd1/features/donation/models.dart';
 
@@ -206,4 +207,30 @@ final canViewFinancesProvider = StreamProvider.autoDispose<bool>((ref) {
 /// Create and edit fundraising listings (the campaigns permission).
 final canRunCampaignsProvider = StreamProvider.autoDispose<bool>((ref) {
   return watchMyCapabilities(ref, (c) => c.canRunCampaigns);
+});
+
+/// The organization's cash-outs, newest first (people who see the money:
+/// financeView or financeManage; firestore.rules agrees). Empty for
+/// everyone else, so no screen hits a permission error.
+final cashOutsProvider = StreamProvider.autoDispose<List<CashOut>>((ref) async* {
+  final canView = await ref.watch(canViewFinancesProvider.future);
+  final orgId = await ref.watch(currentOrganizationIdProvider.future);
+  if (!canView || orgId == null || orgId.isEmpty) {
+    yield const [];
+    return;
+  }
+  yield* _db
+      .collection('organizations')
+      .doc(orgId)
+      .collection('cashOuts')
+      .orderBy('createdAt', descending: true)
+      .limit(100)
+      .snapshots()
+      .map((s) => s.docs.map(CashOut.fromDoc).toList());
+});
+
+/// Cash-outs still waiting for someone to say which fund they came from.
+final openCashOutsProvider = Provider.autoDispose<List<CashOut>>((ref) {
+  final all = ref.watch(cashOutsProvider).asData?.value ?? const <CashOut>[];
+  return all.where((c) => c.isOpen).toList();
 });

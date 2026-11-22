@@ -53,7 +53,7 @@ dependencies:
   fl_chart: ^0.69.2  # charts for the admin Analytics dashboard
   #sign in
   google_sign_in: ^6.2.1
-  #flutter_facebook_auth: ^7.1.5
+  flutter_facebook_auth: ^7.3.3 # Facebook Page connect (Organization Profile)
   # Geofencing + notifications
   native_geofence: ^1.5.1                # Google Geofencing API (Android) / region monitoring (iOS)
   flutter_local_notifications: ^22.3.3   # show pushes in foreground + geofence alerts
@@ -77,8 +77,6 @@ dependencies:
 
   #Scan/Write NFC and QR
   mobile_scanner: ^5.0.0      # QR scanning
-  flutter_nfc_kit: ^3.3.0
-  ndef: ^0.4.0               # NDEF records for flutter_nfc_kit (collar tag links)
   nfc_manager: ^4.1.0
   nfc_manager_ndef: ^1.1.0
   qr_flutter: ^4.1.0
@@ -89,6 +87,7 @@ dependencies:
   pdf: ^3.12.0
   printing: ^5.14.3
   file_picker: ^13.3.3
+  shared_preferences: ^2.5.6
 
 dev_dependencies:
   flutter_test:
@@ -99,6 +98,7 @@ dev_dependencies:
   # package. See that file for information about deactivating specific lint
   # rules and activating additional ones.
   flutter_lints: ^6.0.0
+  flutter_launcher_icons: ^0.14.4
 
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec
@@ -155,3 +155,17 @@ flutter:
   #
   # For details regarding fonts from package dependencies,
   # see https://flutter.dev/to/font-from-package
+# App icon: the paw from assets/Image/logo.png on the app's yellow.
+# Regenerate with: dart run flutter_launcher_icons
+flutter_launcher_icons:
+  image_path: "assets/icon/app_icon.png"
+  android: "ic_launcher"
+  adaptive_icon_background: "#FFD95E"
+  adaptive_icon_foreground: "assets/icon/app_icon_fg.png"
+  ios: true
+  remove_alpha_ios: true
+  web:
+    generate: true
+    image_path: "assets/icon/app_icon.png"
+    background_color: "#FFD95E"
+    theme_color: "#FFD95E"

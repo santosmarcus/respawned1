@@ -4,8 +4,6 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/core/repos/auth_service.dart';
-import 'package:respawnd1/features/generalhome/home_screen.dart';
-import 'package:respawnd1/features/generalhome/notifications_screen.dart';
 import 'package:respawnd1/features/userauth/favorite_screen.dart';
 import 'package:respawnd1/features/collartag/collar_tag_list_screen.dart';
 import 'package:respawnd1/features/generalhome/history_screen.dart';
@@ -15,6 +13,8 @@ import 'package:respawnd1/features/generalhome/profile/location_sharing_page.dar
 import 'package:respawnd1/features/generalhome/profile/communications_setting_page.dart';
 import 'package:respawnd1/core/widgets/app_dialogs.dart';
 import 'package:respawnd1/core/widgets/volunteer_badges.dart';
+import 'package:respawnd1/core/widgets/delete_account.dart';
+import 'package:respawnd1/features/account/account_page.dart';
 
 class UserProfile extends StatefulWidget {
   const UserProfile({super.key});
@@ -92,43 +92,6 @@ class _UserProfileState extends State<UserProfile> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      bottomNavigationBar: BottomNavigationBar(
-        currentIndex: 2,
-        items: const [
-          BottomNavigationBarItem(
-            icon: Icon(Icons.home_outlined),
-            activeIcon: Icon(Icons.home),
-            label: 'Home',
-          ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.notifications_outlined),
-            activeIcon: Icon(Icons.notifications),
-            label: 'Notifications',
-          ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.person_outline),
-            activeIcon: Icon(Icons.person),
-            label: 'My Profile',
-          ),
-        ],
-        onTap: (index) {
-          if (index == 0) {
-            if (Navigator.canPop(context)) {
-              Navigator.pop(context);
-            } else {
-              Navigator.pushReplacement(
-                context,
-                MaterialPageRoute(builder: (context) => const HomeScreen()),
-              );
-            }
-          } else if (index == 1) {
-            Navigator.pushReplacement(
-              context,
-              MaterialPageRoute(builder: (_) => const NotificationsScreen()),
-            );
-          }
-        },
-      ),
 
       body: _loading
           ? const Center(
@@ -226,6 +189,13 @@ class _UserProfileState extends State<UserProfile> {
                   _SectionLabel(label: 'Settings'),
                   _SectionLabel(label: 'My Account'),
                   _ProfileTile(
+                    label: 'Account and switch account',
+                    onTap: () {
+                      Navigator.push(context,
+                          MaterialPageRoute(builder: (_) => const AccountPage(returnToDashboard: false)));
+                    },
+                  ),
+                  _ProfileTile(
                     label: 'Edit account',
                     onTap: () {
                       Navigator.push(context,
@@ -261,6 +231,14 @@ class _UserProfileState extends State<UserProfile> {
                 child: Text('Log Out', style: GoogleFonts.zain(fontSize: 20, color: AppColors.error,
                 ),
                 ),
+              ),
+            ),
+            Center(
+              child: TextButton(
+                onPressed: () => showDeleteAccountFlow(context),
+                child: Text('Delete account',
+                    style: GoogleFonts.zain(fontSize: 14, color: AppColors.textSecondary,
+                        decoration: TextDecoration.underline)),
               ),
             ),
 

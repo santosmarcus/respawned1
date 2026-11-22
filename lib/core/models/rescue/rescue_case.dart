@@ -1,9 +1,12 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:respawnd1/core/models/rescue/org_involvement.dart' as org_involvement_model;
+import 'package:respawnd1/core/models/rescue/org_involvement.dart' show OrgInvolvement;
 import 'package:respawnd1/core/models/rescue/rejection_reason.dart';
 import 'package:respawnd1/core/models/rescue/rescue_status.dart';
 import 'package:respawnd1/core/utils/case_id.dart' as case_id_util;
 import 'package:respawnd1/core/utils/rescue_risk.dart' as rescue_risk_util;
 import 'package:respawnd1/core/utils/species_summary.dart' as species_summary_util;
+import 'package:respawnd1/core/utils/urgency_assessment.dart';
 
 /// A single entry in a case's `statusHistory` array — already used
 /// throughout the app as `{'status': String, 'timestamp': Timestamp}`.
@@ -45,6 +48,17 @@ class RescueCase {
   /// [animalCount] all fall back to [animalType] in that case.
   final List<Map<String, dynamic>> animals;
   final String? urgency; // 'Critical' | 'Medium' | 'Low', see UrgencyLevel
+  /// Why [urgency] is what it is (urgency_assessment.dart). Null for
+  /// reports saved before the assessment existed, whose urgency came from
+  /// the rescue type.
+  final UrgencyAssessment? urgencyAssessment;
+
+  /// The organization's expected role (org_involvement.dart). Reports
+  /// saved before this field existed read as [OrgInvolvement.orgAssist].
+  final OrgInvolvement orgInvolvement;
+
+  /// Neglect or Abuse only: 'org_assistance' | 'independent'.
+  final String? abuseReportPath;
   // Rescue Analytics Regression fix — written by rescue_page.dart at
   // report time (e.g. 'Stray', 'Neglect/Abuse', 'Surrender', 'Lost Pet')
   // but never parsed onto this model before, so nothing could read it by
@@ -154,6 +168,9 @@ class RescueCase {
     this.animalType,
     this.animals = const [],
     this.urgency,
+    this.urgencyAssessment,
+    this.orgInvolvement = OrgInvolvement.orgAssist,
+    this.abuseReportPath,
     this.rescueType,
     this.condition,
     this.photoUrls = const [],
@@ -236,6 +253,9 @@ class RescueCase {
           .map((e) => Map<String, dynamic>.from(e))
           .toList(),
       urgency: data['urgency'] as String?,
+      urgencyAssessment: UrgencyAssessment.fromMap(data['urgencyAssessment']),
+      orgInvolvement: OrgInvolvement.fromFirestoreValue(data['orgInvolvement']),
+      abuseReportPath: data['abuseReportPath'] as String?,
       rescueType: data['rescueType'] as String?,
       condition: data['condition'] as String?,
       photoUrls: List<String>.from(data['photoUrls'] ?? const []),
@@ -321,7 +341,46 @@ class RescueCase {
 
   String get shortCaseId => case_id_util.shortCaseId(id);
 
+  /// Whether this case is part of the organization's operational workload
+  /// (dashboard counts, alerts). Reporter-led and not-facilitated reports
+  /// are not, until staff take them on (org_involvement.dart).
+  bool get countsAsOrgWorkload => org_involvement_model.countsAsOrgWorkload(
+        orgInvolvement: orgInvolvement.firestoreValue,
+        status: status.firestoreValue,
+      );
+
+  /// Independent Neglect or Abuse path: what the reporter says they filed
+  /// with the authorities (`independentReport` map), or null.
+  Map<String, dynamic>? get independentReport {
+    final v = raw['independentReport'];
+    return v is Map ? Map<String, dynamic>.from(v) : null;
+  }
+
   bool get hasSavedClinic => vetClinicName != null && vetClinicName!.isNotEmpty;
+
+  /// Refer → shared link (CaseReferralRepository.referByLink): who answered
+  /// and how. State is 'waiting', 'declined', 'needs_info' or 'accepted'.
+  Map<String, dynamic>? get linkReferral =>
+      raw['linkReferral'] is Map ? Map<String, dynamic>.from(raw['linkReferral'] as Map) : null;
+
+  /// Referred by shared link and nobody has taken it yet: listed under
+  /// Review, not Closed.
+  bool get isPendingLinkReferral =>
+      status == RescueStatus.referred && linkReferral != null && linkReferral!['state'] != 'accepted';
+
+  /// Staff chose "Straight to shelter" on Assign Transport: the animal
+  /// goes from pickup to the organization's shelter with no clinic stop.
+  bool get goesToShelter => raw['transportDestination'] == 'shelter';
+
+  /// Where the animal goes is saved: the shelter pin for a shelter trip,
+  /// otherwise a clinic.
+  bool get hasTransportDestination =>
+      goesToShelter ? raw['shelterLat'] is num && raw['shelterLng'] is num : hasSavedClinic;
+
+  /// The shelter or clinic the animal is being taken to, for messages.
+  String get transportDestinationName => goesToShelter
+      ? ((raw['shelterName'] as String?)?.trim().isNotEmpty ?? false ? (raw['shelterName'] as String).trim() : 'the shelter')
+      : (hasSavedClinic ? vetClinicName! : 'the clinic');
 
   /// Every animal in this case with an elevated bite/escape risk — checks
   /// each entry in [animals] (a case now covers one or more animals), not

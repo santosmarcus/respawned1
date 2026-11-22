@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:respawnd1/core/utils/user_autofill.dart';
 import 'package:respawnd1/core/utils/validators.dart';
 import 'package:respawnd1/app_theme.dart';
 import 'collar_tag_data_model.dart';
@@ -16,9 +17,17 @@ import 'package:respawnd1/core/widgets/app_messages.dart';
 class CollarTagFormScreen extends StatefulWidget {
   final CollarTagData? existingTag;
 
+  /// For a new tag: pet details to start from (e.g. an adopted animal's
+  /// record). Keys: name, species ('Dog'/'Cat'), breed, sex ('M'/'F'),
+  /// colorMarkings, description, spayedNeutered, vaccinated, allergies.
+  /// Saving a new tag pops this screen with the new tag's id, so a caller
+  /// can link it (it then shows the tag's ID card in its place).
+  final Map<String, dynamic>? prefill;
+
   const CollarTagFormScreen({
     super.key,
     this.existingTag,
+    this.prefill,
   });
 
   @override
@@ -58,9 +67,45 @@ class _CollarTagFormScreenState extends State<CollarTagFormScreen> {
 
   final _picker = ImagePicker();
 
+  /// The owner's name, mobile and email from their account for a new tag
+  /// (an existing tag keeps what it has).
+  Future<void> _prefillOwner() async {
+    if (widget.existingTag != null) return;
+    final me = await UserAutofill.load();
+    if (me == null || !mounted) return;
+    setState(() {
+      fillIfEmpty(_ownerNameCtrl, me.fullName);
+      fillIfEmpty(_ownerMobileCtrl, me.phone);
+      fillIfEmpty(_ownerEmailCtrl, me.email);
+    });
+  }
+
+  /// Fills an empty new-tag form from [CollarTagFormScreen.prefill].
+  void _applyPrefill(Map<String, dynamic> p) {
+    String s(Object? v) => v == null ? '' : v.toString().trim();
+    _nameCtrl.text = s(p['name']);
+    _breedCtrl.text = s(p['breed']);
+    _colorCtrl.text = s(p['colorMarkings']);
+    _descCtrl.text = s(p['description']);
+    final species = s(p['species']).toLowerCase();
+    if (species == 'dog') _petType = 'Dog';
+    if (species == 'cat') _petType = 'Cat';
+    final sex = s(p['sex']).toUpperCase();
+    if (sex.startsWith('M')) _sex = 'M';
+    if (sex.startsWith('F')) _sex = 'F';
+    _spayedNeutered = p['spayedNeutered'] == true;
+    _vaccinated = p['vaccinated'] == true;
+    final allergies = s(p['allergies']);
+    if (allergies.toLowerCase() != 'none') _allergiesCtrl.text = allergies;
+  }
+
   @override
   void initState() {
     super.initState();
+    _prefillOwner();
+    if (widget.existingTag == null && widget.prefill != null) {
+      _applyPrefill(widget.prefill!);
+    }
 
     final tag = widget.existingTag;
     if (tag != null) {
@@ -233,6 +278,11 @@ class _CollarTagFormScreenState extends State<CollarTagFormScreen> {
         vacImageUrl = await _uploadImage(
             _vaccinationImage!, 'collar_tags/$uid/$tagId/vaccination.jpg');
       }
+      // Editing without picking new photos keeps the saved ones (they used
+      // to be overwritten with empty URLs). The vaccination photo goes only
+      // when the pet is no longer marked vaccinated.
+      petImageUrl ??= widget.existingTag?.petImageUrl;
+      if (_vaccinated) vacImageUrl ??= widget.existingTag?.vaccinationImageUrl;
 
       final breedValue = _petType != null
           ? '$_petType - ${_breedCtrl.text.trim()}'
@@ -296,10 +346,20 @@ class _CollarTagFormScreenState extends State<CollarTagFormScreen> {
           context,
           MaterialPageRoute(
             builder: (_) => CollarIdTagCardScreen(
-              tagData: tagData,
-              isNewlyCreated: true,
+              // The saved tag as stored (status, QR, links), so an edited
+              // tag opens as itself rather than as a brand-new one.
+              tagData: tagData
+                ..ownerId = uid
+                ..status = widget.existingTag?.status ?? 'active'
+                ..qrEnabled = widget.existingTag?.qrEnabled ?? false
+                ..linkedAlertId = widget.existingTag?.linkedAlertId
+                ..activeRescueSessionId = widget.existingTag?.activeRescueSessionId
+                ..lastSeenAddress = widget.existingTag?.lastSeenAddress,
+              isNewlyCreated: !isEditing,
             ),
           ),
+          // Whoever opened the form gets the saved tag's id.
+          result: tagId,
         );
       }
     } catch (e) {
@@ -367,6 +427,12 @@ class _CollarTagFormScreenState extends State<CollarTagFormScreen> {
                           ? ClipRRect(
                         borderRadius: BorderRadius.circular(8),
                         child: Image.file(_petImage!, fit: BoxFit.cover),
+                      )
+                          : (widget.existingTag?.petImageUrl?.isNotEmpty == true)
+                          ? ClipRRect(
+                        borderRadius: BorderRadius.circular(8),
+                        child: Image.network(widget.existingTag!.petImageUrl!,
+                            fit: BoxFit.cover),
                       )
                           : const Center(
                         child: Icon(Icons.add,
@@ -438,7 +504,7 @@ class _CollarTagFormScreenState extends State<CollarTagFormScreen> {
 
               const SizedBox(height: 14),
 
-            Text(
+              Text(
                 'Pet Type',
                 style: GoogleFonts.zain(
                   fontSize: 13,
@@ -506,6 +572,13 @@ class _CollarTagFormScreenState extends State<CollarTagFormScreen> {
                             ? ClipRRect(
                           borderRadius: BorderRadius.circular(8),
                           child: Image.file(_vaccinationImage!, fit: BoxFit.cover),
+                        )
+                            : (widget.existingTag?.vaccinationImageUrl?.isNotEmpty == true)
+                            ? ClipRRect(
+                          borderRadius: BorderRadius.circular(8),
+                          child: Image.network(
+                              widget.existingTag!.vaccinationImageUrl!,
+                              fit: BoxFit.cover),
                         )
                             : const Center(
                           child: Icon(Icons.add,

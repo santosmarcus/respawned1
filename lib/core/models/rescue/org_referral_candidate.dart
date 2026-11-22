@@ -45,7 +45,8 @@ class OrgReferralCandidate {
       lng: (data['lng'] as num?)?.toDouble(),
       acceptedSpecies: List<String>.from(data['acceptedSpecies'] ?? const []),
       serviceArea: data['serviceArea'] as String?,
-      intakeAvailable: data['intakeAvailable'] as bool? ?? true,
+      // An org that paused new rescue reports isn't offered as available.
+      intakeAvailable: (data['intakeAvailable'] as bool? ?? true) && (data['acceptingCases'] as bool? ?? true),
     );
   }
 

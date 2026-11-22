@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
 
@@ -38,8 +40,12 @@ class AuditLogRepository {
     Map<String, dynamic>? newValues,
     Map<String, dynamic>? metadata,
   }) async {
+    // Not awaited: the entry is queued locally at once and syncs on its own.
+    // Awaiting the server's confirmation made every action that logs
+    // (release, reserve, unreserve, attach agreement…) hang whenever the
+    // write channel was slow to answer, long after its real write was done.
     try {
-      await _logs.add({
+      unawaited(_logs.add({
         'category': category.name,
         'action': action,
         if (actorId != null && actorId.isNotEmpty) 'actorId': actorId,
@@ -53,7 +59,9 @@ class AuditLogRepository {
         if (newValues != null && newValues.isNotEmpty) 'newValues': newValues,
         if (metadata != null && metadata.isNotEmpty) 'metadata': metadata,
         'createdAt': FieldValue.serverTimestamp(),
-      });
+      }).then<void>((_) {}, onError: (Object e) {
+        debugPrint('[AuditLogRepository] Failed to write audit log ($category/$action): $e');
+      }));
     } catch (e) {
       debugPrint('[AuditLogRepository] Failed to write audit log ($category/$action): $e');
     }

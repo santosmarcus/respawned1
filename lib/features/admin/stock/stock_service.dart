@@ -4,6 +4,10 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:respawnd1/features/adminhome/dashboard/shelter_settings.dart';
 
+/// Units a stock item or in-kind item can be counted in. Mirrored in
+/// functions/campaigns.js (STOCK_UNITS) for campaign in-kind items.
+const stockUnits = ['pcs', 'kg', 'g', 'L', 'mL', 'sacks', 'packs', 'boxes', 'cans', 'bottles'];
+
 /// Donation gap 5: what the shelter has on hand, per organization.
 ///
 /// `organizations/{orgId}/stock/{itemId}` with every change logged in

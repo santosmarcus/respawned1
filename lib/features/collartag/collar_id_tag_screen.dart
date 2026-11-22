@@ -8,33 +8,29 @@ import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:qr_flutter/qr_flutter.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:respawnd1/app_theme.dart';
+import 'package:respawnd1/core/widgets/tag_qr_image.dart';
 import 'collar_tag_data_model.dart';
 import 'collar_tag_form_screen.dart';
 import 'package:respawnd1/core/constants/app.links.dart';
+import 'package:respawnd1/core/utils/animal_tag_codes.dart';
 import 'pet_found_chat.dart';
 import 'lost_pet_location_picker.dart';
 import 'package:respawnd1/core/widgets/app_messages.dart';
-import 'package:respawnd1/core/services/collar_tag_nfc.dart';
 
 //  Pet Identification Card Screen
 class CollarIdTagCardScreen extends StatefulWidget {
   final CollarTagData tagData;
   final bool isNewlyCreated;
   final bool readOnly;
-  /// Staff view of an animal record's tag: adds "Write NFC Chip", which
-  /// writes the tag link (the same one the QR code holds) onto a chip.
-  final bool showNfcWrite;
 
   const CollarIdTagCardScreen({
     super.key,
     required this.tagData,
     this.isNewlyCreated = false,
     this.readOnly = false,
-    this.showNfcWrite = false,
   });
 
   @override
@@ -44,7 +40,6 @@ class CollarIdTagCardScreen extends StatefulWidget {
 class _CollarIdTagCardScreenState extends State<CollarIdTagCardScreen> {
   final GlobalKey _cardKey = GlobalKey();
   bool _sharing = false;
-  bool _writingNfc = false;
   bool _updatingStatus = false;
   late CollarTagData _tag;
   StreamSubscription<DocumentSnapshot<Map<String, dynamic>>>? _tagSub;
@@ -100,7 +95,22 @@ class _CollarIdTagCardScreenState extends State<CollarIdTagCardScreen> {
     } catch (_) {}
   }
 
-  String get _qrData => AppLinks.tagUrl(_tag.tagId ?? '');
+  // Null (no QR drawn) rather than a link with no tag id in it, which
+  // no scanner can resolve.
+  /// A shelter animal's card shows its registered QR code (animalTags), the
+  /// one printed on its tag and written to its NFC chip, so scanning any of
+  /// them opens this card. A pet owner's card shows its tag link.
+  String? get _qrData {
+    final animalCode = _tag.animalQrCode?.trim() ?? '';
+    if (_tag.isAnimalRecordTag && animalCode.isNotEmpty) {
+      try {
+        return animalTagPayload(animalCode);
+      } catch (_) {
+        // Malformed code: fall back to the tag link.
+      }
+    }
+    return (_tag.tagId ?? '').isEmpty ? null : AppLinks.tagUrl(_tag.tagId!);
+  }
 
   Future<Uint8List?> _captureCard() async {
     try {
@@ -133,29 +143,6 @@ class _CollarIdTagCardScreenState extends State<CollarIdTagCardScreen> {
       _showSnack('Share failed: $e');
     } finally {
       if (mounted) setState(() => _sharing = false);
-    }
-  }
-
-  Future<void> _writeNfc() async {
-    final tagId = _tag.tagId;
-    if (tagId == null) return;
-    if (!await CollarTagNfc.isAvailable()) {
-      _showSnack('NFC is not available on this device.');
-      return;
-    }
-    setState(() => _writingNfc = true);
-    _showSnack('Hold the phone near the collar tag chip…');
-    try {
-      await CollarTagNfc.writeTag(tagId);
-      await FirebaseFirestore.instance.collection('collarTags').doc(tagId).set({
-        'nfcWritten': true,
-        'nfcWrittenAt': FieldValue.serverTimestamp(),
-      }, SetOptions(merge: true));
-      _showSnack('NFC chip written. Scanning it opens this collar tag.');
-    } catch (e) {
-      _showSnack('Could not write the NFC chip: $e');
-    } finally {
-      if (mounted) setState(() => _writingNfc = false);
     }
   }
 
@@ -197,47 +184,10 @@ class _CollarIdTagCardScreenState extends State<CollarIdTagCardScreen> {
         padding: const EdgeInsets.symmetric(horizontal: 20),
         child: Column(
           children: [
-            if (!widget.readOnly && tag.activeRescueSessionId != null)
-              Padding(
-                padding: const EdgeInsets.only(bottom: 12),
-                child: Material(
-                  color: AppColors.yellowrspwn,
-                  borderRadius: BorderRadius.circular(14),
-                  child: InkWell(
-                    borderRadius: BorderRadius.circular(14),
-                    onTap: () => Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) => PetFoundChatScreen(
-                          tagId: tag.tagId!,
-                          sessionId: tag.activeRescueSessionId!,
-                          petName: tag.name,
-                        ),
-                      ),
-                    ),
-                    child: Padding(
-                      padding: const EdgeInsets.all(14),
-                      child: Row(
-                        children: [
-                          const Icon(Icons.pets, color: AppColors.textPrimary),
-                          const SizedBox(width: 10),
-                          Expanded(
-                            child: Text(
-                              'Pet Found! Someone scanned ${tag.name}\'s tag — tap to view & chat.',
-                              style: GoogleFonts.zain(
-                                  fontSize: 13.5,
-                                  fontWeight: FontWeight.w600,
-                                  color: AppColors.textPrimary),
-                            ),
-                          ),
-                          const Icon(Icons.chevron_right,
-                              color: AppColors.textPrimary),
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
-              ),
+            // Each person who scanned the lost pet's tag has their own chat
+            // with the owner (getOrCreateRescueSession in functions/index.js).
+            if (!widget.readOnly && tag.tagId != null)
+              _ScanChatsList(tag: tag),
             Text(
               'Pet Identification\nCard',
               textAlign: TextAlign.center,
@@ -360,16 +310,6 @@ class _CollarIdTagCardScreenState extends State<CollarIdTagCardScreen> {
               const SizedBox(height: 16),
             ],
 
-            if (widget.showNfcWrite && tag.tagId != null) ...[
-              _ActionButton(
-                icon: Icons.nfc,
-                label: _writingNfc ? 'Waiting for chip…' : 'Write NFC Chip',
-                loading: _writingNfc,
-                onTap: _writingNfc ? null : _writeNfc,
-              ),
-              const SizedBox(height: 16),
-            ],
-
             if (!widget.readOnly &&
                 (widget.isNewlyCreated || tag.qrEnabled))
               SizedBox(
@@ -412,20 +352,7 @@ class _CollarIdTagCardScreenState extends State<CollarIdTagCardScreen> {
             color: Colors.white,
             borderRadius: BorderRadius.circular(10),
           ),
-          child: QrImageView(
-            data: _qrData,
-            version: QrVersions.auto,
-            size: 160,
-            backgroundColor: Colors.white,
-            eyeStyle: const QrEyeStyle(
-              eyeShape: QrEyeShape.square,
-              color: Colors.black,
-            ),
-            dataModuleStyle: const QrDataModuleStyle(
-              dataModuleShape: QrDataModuleShape.square,
-              color: Colors.black,
-            ),
-          ),
+          child: TagQrImage(data: _qrData),
         ),
         const SizedBox(height: 6),
         Text(
@@ -601,79 +528,37 @@ class _CollarIdTagCardScreenState extends State<CollarIdTagCardScreen> {
 
     setState(() => _updatingStatus = true);
     try {
-      final tagId = _tag.tagId;
-      if (tagId == null) return;
-
-      final update = <String, dynamic>{
-        'status': goingLost ? 'lost' : 'active',
-      };
+      if (_tag.tagId == null) return;
       if (goingLost) {
-        update['lastSeenLat'] = lastSeen!.lat;
-        update['lastSeenLng'] = lastSeen.lng;
-        update['lastSeenAddress'] = lastSeen.address;
-        update['lostAt'] = FieldValue.serverTimestamp();
+        final alertId = await CollarTagLostFound.markLost(
+          _tag,
+          lat: lastSeen!.lat,
+          lng: lastSeen.lng,
+          address: lastSeen.address,
+        );
+        _tag
+          ..status = 'lost'
+          ..linkedAlertId = alertId
+          ..activeRescueSessionId = null
+          ..lastSeenLat = lastSeen.lat
+          ..lastSeenLng = lastSeen.lng
+          ..lastSeenAddress = lastSeen.address
+          ..lostAt = DateTime.now();
       } else {
-        // Clear the pin so the pet immediately disappears from the
-        // Explore Reports map once it's found.
-        update['lastSeenLat'] = FieldValue.delete();
-        update['lastSeenLng'] = FieldValue.delete();
-        update['lastSeenAddress'] = FieldValue.delete();
-        update['lostAt'] = FieldValue.delete();
+        await CollarTagLostFound.markFound(_tag);
+        _tag
+          ..status = 'active'
+          ..linkedAlertId = null
+          ..activeRescueSessionId = null
+          ..lastSeenLat = null
+          ..lastSeenLng = null
+          ..lastSeenAddress = null
+          ..lostAt = null;
       }
-
-      // Resolve any rescue session still hanging off this tag — whether
-      // we're marking it found (the normal close-out) or marking it lost
-      // again while an old session never got formally resolved (e.g.
-      // nobody tapped "Mark as Found" last time). Without this, that old
-      // session stays status:'active' in Firestore, and the NEXT scan's
-      // resolveScannedTagId() reuses it instead of starting fresh — since
-      // that old session may already have chatEnabledByOwner:true from the
-      // previous round, the "tap to enable live chat" prompt then never
-      // shows again on subsequent lost/found cycles. Resolving it here
-      // guarantees every new lost cycle gets a brand-new session (with
-      // chatEnabledByOwner reset to false) the next time someone scans.
-      if (_tag.activeRescueSessionId != null) {
-        try {
-          await FirebaseFirestore.instance
-              .collection('rescueSessions')
-              .doc(_tag.activeRescueSessionId)
-              .set({'status': 'resolved'}, SetOptions(merge: true));
-        } catch (_) {
-          // Best-effort cleanup — never block marking the tag lost/found
-          // just because the old session doc couldn't be touched.
-        }
-        update['activeRescueSessionId'] = FieldValue.delete();
-      }
-
-      await FirebaseFirestore.instance
-          .collection('collarTags')
-          .doc(tagId)
-          .set(update, SetOptions(merge: true));
-      await FirebaseFirestore.instance
-          .collection('users')
-          .doc(_tag.ownerId)
-          .collection('collarTags')
-          .doc(tagId)
-          .set(update, SetOptions(merge: true));
-
       if (mounted) {
-        setState(() {
-          _tag.status = goingLost ? 'lost' : 'active';
-          _tag.activeRescueSessionId = null;
-          if (goingLost) {
-            _tag.lastSeenLat = lastSeen!.lat;
-            _tag.lastSeenLng = lastSeen.lng;
-            _tag.lastSeenAddress = lastSeen.address;
-            _tag.lostAt = DateTime.now();
-          } else {
-            _tag.lastSeenLat = null;
-            _tag.lastSeenLng = null;
-            _tag.lastSeenAddress = null;
-            _tag.lostAt = null;
-          }
-        });
+        setState(() {});
         _showSnack(goingLost
-            ? 'Marked as lost. Your contact info is now visible to anyone who scans the tag, and the pin is now on the Explore Reports map.'
+            ? 'Marked as lost. ${_tag.name.isNotEmpty ? _tag.name : 'Your pet'} is now on the Explore Reports map and nearby users are alerted. Anyone who scans the tag can reach you.'
             : 'Welcome back! Marked as found.');
       }
     } catch (e) {
@@ -787,6 +672,102 @@ class _ActionButton extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+/// The owner's open scan chats for a lost pet: one per person who scanned
+/// its tag, newest first. A chat from before chats were per finder
+/// (activeRescueSessionId only) is listed too.
+class _ScanChatsList extends StatelessWidget {
+  final CollarTagData tag;
+  const _ScanChatsList({required this.tag});
+
+  @override
+  Widget build(BuildContext context) {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return const SizedBox.shrink();
+    return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+      stream: FirebaseFirestore.instance
+          .collection('rescueSessions')
+          .where('tagId', isEqualTo: tag.tagId)
+          .where('ownerId', isEqualTo: uid)
+          .snapshots(),
+      builder: (context, snap) {
+        final open = [
+          for (final d in snap.data?.docs ??
+              const <QueryDocumentSnapshot<Map<String, dynamic>>>[])
+            if (d.data()['status'] != 'resolved') d,
+        ]..sort((a, b) {
+          final ta = (a.data()['lastScannedAt'] ?? a.data()['createdAt']) as Timestamp?;
+          final tb = (b.data()['lastScannedAt'] ?? b.data()['createdAt']) as Timestamp?;
+          return (tb ?? Timestamp(0, 0)).compareTo(ta ?? Timestamp(0, 0));
+        });
+        final legacy = tag.activeRescueSessionId;
+        final rows = <({String id, String who, String? where})>[
+          for (final d in open)
+            (
+            id: d.id,
+            who: (d.data()['finderName'] as String?)?.trim().isNotEmpty == true
+                ? d.data()['finderName'] as String
+                : 'Someone',
+            where: d.data()['address'] as String?,
+            ),
+          if (legacy != null && !open.any((d) => d.id == legacy))
+            (id: legacy, who: 'Someone', where: tag.lastSeenAddress),
+        ];
+        if (rows.isEmpty) return const SizedBox.shrink();
+        return Padding(
+          padding: const EdgeInsets.only(bottom: 12),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              for (final r in rows)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: Material(
+                    color: AppColors.yellowrspwn,
+                    borderRadius: BorderRadius.circular(14),
+                    child: InkWell(
+                      borderRadius: BorderRadius.circular(14),
+                      onTap: () => Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => PetFoundChatScreen(
+                            tagId: tag.tagId!,
+                            sessionId: r.id,
+                            petName: tag.name,
+                          ),
+                        ),
+                      ),
+                      child: Padding(
+                        padding: const EdgeInsets.all(14),
+                        child: Row(
+                          children: [
+                            const Icon(Icons.pets, color: AppColors.textPrimary),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: Text(
+                                '${r.who} scanned ${tag.name.isNotEmpty ? tag.name : 'your pet'}\'s tag'
+                                    '${r.where != null && r.where!.isNotEmpty ? ' near ${r.where}' : ''} — tap to view & chat.',
+                                style: GoogleFonts.zain(
+                                    fontSize: 13.5,
+                                    fontWeight: FontWeight.w600,
+                                    color: AppColors.textPrimary),
+                              ),
+                            ),
+                            const Icon(Icons.chevron_right,
+                                color: AppColors.textPrimary),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        );
+      },
     );
   }
 }

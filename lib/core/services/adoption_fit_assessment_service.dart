@@ -45,10 +45,12 @@ class FitAssessmentWeights {
   static const int compatibilityFirstTimeOwner = 6;
   static const int compatibilityMedicalNeeds = 8;
 
+  // Proof of Address is no longer asked for: its 2 points moved to the two
+  // remaining documents, so the category (and the overall total) keeps
+  // its weight.
   static const int documentsTotal = 5;
-  static const int documentsGovernmentId = 2;
-  static const int documentsProofOfAddress = 2;
-  static const int documentsHomePhotos = 1;
+  static const int documentsGovernmentId = 3;
+  static const int documentsHomePhotos = 2;
 }
 
 /// Tracks one category's running score/max plus the shared
@@ -440,13 +442,6 @@ _Tally _scoreDocuments(Map uploads) {
     t.satisfied(FitAssessmentWeights.documentsGovernmentId, FitAssessmentWeights.documentsGovernmentId);
   } else {
     t.failed(FitAssessmentWeights.documentsGovernmentId, concern: 'Government ID has not been uploaded.');
-  }
-
-  final proofOfAddress = _urlsFor(uploads['proofOfAddress']);
-  if (proofOfAddress.isNotEmpty) {
-    t.satisfied(FitAssessmentWeights.documentsProofOfAddress, FitAssessmentWeights.documentsProofOfAddress);
-  } else {
-    t.failed(FitAssessmentWeights.documentsProofOfAddress, concern: 'Proof of address has not been uploaded.');
   }
 
   // Never the animal's own photoUrls — a completely different field on a

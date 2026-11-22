@@ -7,25 +7,31 @@ import 'package:respawnd1/features/organization/widgets/member_access_editor.dar
 void main() {
   Finder box(OrgPermission p) => find.byKey(ValueKey('perm-${p.key}'));
 
-  testWidgets('changing a box from a preset makes it Custom', (tester) async {
+  testWidgets('ticking a money box makes access Custom; Reset goes back to the default', (tester) async {
     MemberAccess? last;
     await tester.pumpWidget(MaterialApp(
       home: Scaffold(
         body: SingleChildScrollView(
           child: MemberAccessEditor(
-            initial: MemberAccess(OrgRole.staff, {...OrgPreset.rescueCoordinator.permissions}),
+            initial: MemberAccess(OrgRole.staff, {...OrgPreset.staff.permissions}),
             onChanged: (a) => last = a,
           ),
         ),
       ),
     ));
-    expect(find.text('Rescue coordinator'), findsOneWidget);
-    await tester.ensureVisible(box(OrgPermission.adoptions));
-    await tester.tap(box(OrgPermission.adoptions));
+    expect(find.text('Default staff permissions'), findsOneWidget);
+    expect(find.byKey(const ValueKey('reset-default')), findsNothing);
+    await tester.ensureVisible(box(OrgPermission.campaigns));
+    await tester.tap(box(OrgPermission.campaigns));
     await tester.pumpAndSettle();
-    expect(last!.permissions, contains(OrgPermission.adoptions));
+    expect(last!.permissions, containsAll([...OrgPreset.staff.permissions, OrgPermission.campaigns]));
     expect(last!.preset, OrgPreset.custom);
-    expect(find.text('Custom (changed below)'), findsOneWidget);
+    expect(find.text('Custom permissions'), findsOneWidget);
+    await tester.ensureVisible(find.byKey(const ValueKey('reset-default')));
+    await tester.tap(find.byKey(const ValueKey('reset-default')));
+    await tester.pumpAndSettle();
+    expect(last!.permissions, OrgPreset.staff.permissions);
+    expect(last!.preset, OrgPreset.staff);
   });
 
   testWidgets('Manage money ticks and locks View donations', (tester) async {
@@ -49,7 +55,7 @@ void main() {
     expect(view.onChanged, isNull);
   });
 
-  testWidgets('Admins have no boxes; switching to Staff starts from Full staff', (tester) async {
+  testWidgets('Admins have no boxes; switching to Staff starts from the default set', (tester) async {
     MemberAccess? last;
     await tester.pumpWidget(MaterialApp(
       home: Scaffold(
@@ -65,7 +71,8 @@ void main() {
     await tester.tap(find.text('Staff'));
     await tester.pumpAndSettle();
     expect(last!.role, OrgRole.staff);
-    expect(last!.preset, OrgPreset.fullStaff);
+    expect(last!.preset, OrgPreset.staff);
+    expect(last!.permissions, isNot(contains(OrgPermission.financeView)));
     expect(box(OrgPermission.rescue), findsOneWidget);
   });
 

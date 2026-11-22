@@ -17,19 +17,89 @@ class DirectionsRoute {
   final double distanceMeters;
   final String distanceText;
   final String durationText;
+  final int? durationSeconds;
 
   const DirectionsRoute({
     required this.points,
     required this.distanceMeters,
     required this.distanceText,
     required this.durationText,
+    this.durationSeconds,
   });
 }
 
 Future<DirectionsRoute?> fetchDirectionsRoute(
-  LatLng origin,
-  LatLng destination,
-) async {
+    LatLng origin,
+    LatLng destination,
+    ) async {
+  // Google no longer lets newer Cloud projects enable the legacy
+  // Directions API; they get the Routes API instead. Try the legacy call
+  // first (older projects), then the Routes API with the same key.
+  return await _fetchLegacyDirections(origin, destination) ??
+      await _fetchRoutesApi(origin, destination);
+}
+
+/// Google Routes API (computeRoutes) — the replacement for the legacy
+/// Directions API. Needs "Routes API" enabled for the key.
+Future<DirectionsRoute?> _fetchRoutesApi(LatLng origin, LatLng destination) async {
+  try {
+    Map<String, dynamic> point(LatLng p) => {
+      'location': {
+        'latLng': {'latitude': p.latitude, 'longitude': p.longitude},
+      },
+    };
+    final res = await http.post(
+      Uri.https('routes.googleapis.com', '/directions/v2:computeRoutes'),
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Goog-Api-Key': MapsConfig.directionsApiKey,
+        'X-Goog-FieldMask':
+        'routes.distanceMeters,routes.duration,routes.polyline.encodedPolyline',
+      },
+      body: jsonEncode({
+        'origin': point(origin),
+        'destination': point(destination),
+        'travelMode': 'DRIVE',
+        'routingPreference': 'TRAFFIC_AWARE',
+      }),
+    );
+    if (res.statusCode != 200) {
+      debugPrint('Routes API: HTTP ${res.statusCode} — ${res.body}');
+      return null;
+    }
+    final routes = (jsonDecode(res.body) as Map<String, dynamic>)['routes'] as List?;
+    if (routes == null || routes.isEmpty) return null;
+    final r = routes.first as Map<String, dynamic>;
+    final encoded = r['polyline']?['encodedPolyline'] as String?;
+    if (encoded == null) return null;
+    final meters = (r['distanceMeters'] as num?)?.toDouble() ?? 0;
+    final seconds = int.tryParse('${r['duration'] ?? ''}'.replaceAll('s', '')) ?? 0;
+    return DirectionsRoute(
+      points: decodePolyline(encoded),
+      distanceMeters: meters,
+      distanceText: meters >= 1000
+          ? '${(meters / 1000).toStringAsFixed(1)} km'
+          : '${meters.round()} m',
+      durationText: _durationText(seconds),
+      durationSeconds: seconds,
+    );
+  } catch (e) {
+    debugPrint('Routes API: threw $e');
+    return null;
+  }
+}
+
+String _durationText(int seconds) {
+  final minutes = (seconds / 60).round();
+  if (minutes < 60) return '${minutes < 1 ? 1 : minutes} min${minutes == 1 ? '' : 's'}';
+  final h = minutes ~/ 60, m = minutes % 60;
+  return m == 0 ? '$h hr${h == 1 ? '' : 's'}' : '$h hr${h == 1 ? '' : 's'} $m mins';
+}
+
+Future<DirectionsRoute?> _fetchLegacyDirections(
+    LatLng origin,
+    LatLng destination,
+    ) async {
   try {
     final uri = Uri.https('maps.googleapis.com', '/maps/api/directions/json', {
       'origin': '${origin.latitude},${origin.longitude}',
@@ -46,7 +116,7 @@ Future<DirectionsRoute?> fetchDirectionsRoute(
     if (body['status'] != 'OK') {
       debugPrint(
         'fetchDirectionsRoute: status=${body['status']} '
-        'error_message=${body['error_message']}',
+            'error_message=${body['error_message']}',
       );
       return null;
     }
@@ -111,14 +181,10 @@ List<LatLng> decodePolyline(String encoded) {
   return points;
 }
 
-/// Legacy Google Directions API wrapper for road-following routes (Track
-/// Case's rider->case polyline). This project already calls this exact
-/// endpoint successfully from transit_progress_page.dart's
-/// `fetchDirectionsRoute`/`_verifyArrivalViaDirections` — reusing the same
-/// endpoint and decode logic here rather than migrating to the newer Routes
-/// API, since there's no evidence Routes API has been enabled for this
-/// project (only Places API/Places API (New) were confirmed enabled) and
-/// the legacy endpoint already works elsewhere in this app.
+/// Road-following routes for Track Case (reporter) and the staff Track
+/// Case page: the rider -> current stop polyline. Tries the legacy
+/// Directions API, then the Routes API (all newer Google Cloud projects
+/// have only that one) — the same order as [fetchDirectionsRoute].
 ///
 /// Caches the last successful route in memory, keyed by a "meaningfully
 /// different" check on origin/destination (not exact equality — small GPS
@@ -179,13 +245,33 @@ class DirectionsRepository {
         _cachedResult = fresh;
         _log(
           'road route accepted: polylineAdded=true, points=${fresh.polylinePoints.length}, '
-          'distanceKm=${fresh.distanceKm.toStringAsFixed(2)}, durationSec=${fresh.duration?.inSeconds}',
+              'distanceKm=${fresh.distanceKm.toStringAsFixed(2)}, durationSec=${fresh.duration?.inSeconds}',
         );
         return fresh;
       }
     } catch (e) {
-      // fall through to cache/straight-line below
+      // fall through to the Routes API, then cache/straight-line below
       _log('Directions API call threw: $e');
+    }
+
+    // Newer Google Cloud projects only have the Routes API (the legacy
+    // Directions API can't be enabled for them), so try it before giving
+    // up on a road route.
+    final viaRoutes = await _fetchRoutesApi(origin, destination);
+    if (viaRoutes != null && viaRoutes.points.length >= 2) {
+      final fresh = RouteResult(
+        polylinePoints: viaRoutes.points,
+        distanceKm: viaRoutes.distanceMeters / 1000,
+        duration: viaRoutes.durationSeconds == null
+            ? null
+            : Duration(seconds: viaRoutes.durationSeconds!),
+        isRoadFollowing: true,
+      );
+      _cachedOrigin = origin;
+      _cachedDestination = destination;
+      _cachedResult = fresh;
+      _log('road route accepted from the Routes API: points=${fresh.polylinePoints.length}');
+      return fresh;
     }
 
     // API failed, timed out, or returned no usable route — an existing
@@ -198,7 +284,7 @@ class DirectionsRepository {
 
     _log(
       'falling back to straight-line polyline: polylineAdded=true, isRoadFollowing=false '
-      '(road route unavailable — see prior log line for HTTP/API result)',
+          '(road route unavailable — see prior log line for HTTP/API result)',
     );
     return RouteResult(
       polylinePoints: [origin, destination],
@@ -214,9 +300,9 @@ class DirectionsRepository {
   }
 
   Future<RouteResult?> _fetchFromDirectionsApi(
-    LatLng origin,
-    LatLng destination,
-  ) async {
+      LatLng origin,
+      LatLng destination,
+      ) async {
     MapsConfig.logDirectionsKeySourceOnce();
 
     final uri = Uri.https(_baseUrl, '/maps/api/directions/json', {
@@ -291,11 +377,11 @@ class DirectionsRepository {
       distanceKm: distanceMeters != null
           ? distanceMeters / 1000
           : haversineDistanceKm(
-              origin.latitude,
-              origin.longitude,
-              destination.latitude,
-              destination.longitude,
-            ),
+        origin.latitude,
+        origin.longitude,
+        destination.latitude,
+        destination.longitude,
+      ),
       duration: durationSeconds != null
           ? Duration(seconds: durationSeconds)
           : null,

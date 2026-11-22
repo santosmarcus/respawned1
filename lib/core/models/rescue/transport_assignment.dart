@@ -173,6 +173,17 @@ class TransporterNoLongerOnlineException implements Exception {
   String toString() => 'This transporter is no longer online. Please select another.';
 }
 
+/// Thrown by createAssignmentOffer when the transporter has no phone number
+/// or isn't sharing a location: both are required to be offered a case.
+class TransporterNotReachableException implements Exception {
+  const TransporterNotReachableException();
+
+  @override
+  String toString() =>
+      "This transporter hasn't shared a phone number and location, so they can't be offered a case. "
+      'Please select another.';
+}
+
 /// Thrown by [RescueCaseRepository.createAssignmentOffer] (inside its
 /// transaction) when the case's `currentAssignmentId` pointer resolves to a
 /// genuinely active (pending/accepted) assignment — carries enough of that

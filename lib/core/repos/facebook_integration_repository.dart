@@ -1,6 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:cloud_functions/cloud_functions.dart';
 
+import 'package:respawnd1/core/models/organization/adoption_promotion_schedule.dart';
 import 'package:respawnd1/core/models/organization/facebook_integration.dart';
 
 /// A Facebook error the backend already classified (see
@@ -113,16 +114,80 @@ class FacebookIntegrationRepository {
     return _call('facebookDisconnectPage', {'organizationId': organizationId}, (_) {});
   }
 
+  /// Posts to the organization's connected Page: [items] are the records with
+  /// the photos to attach (each with its own description), [message] the
+  /// post text, [link] the profile link for a post with no photos.
   Future<({String postId, String postUrl})> publishAnimalRecords({
     required String organizationId,
-    required List<String> animalRecordIds,
+    required List<FacebookShareItem> items,
     String? message,
+    String? link,
   }) {
     return _call('facebookPublishAnimalRecords', {
       'organizationId': organizationId,
-      'animalRecordIds': animalRecordIds,
+      'items': [for (final i in items) i.toMap()],
       if (message != null && message.isNotEmpty) 'message': message,
+      'link': ?link,
     }, (data) => (postId: data['postId'] as String? ?? '', postUrl: data['postUrl'] as String? ?? ''));
+  }
+
+  /// Posts one campaign or volunteer event to the organization's connected
+  /// Page: [message] as the post text, with the record's own cover photo
+  /// when [includePhoto] (the backend reads the photo from the record).
+  Future<({String postId, String postUrl})> publishRecordPost({
+    required String organizationId,
+    required FacebookRecordKind kind,
+    required String recordId,
+    required String message,
+    required bool includePhoto,
+  }) {
+    return _call('facebookPublishRecordPost', {
+      'organizationId': organizationId,
+      'kind': kind.name,
+      'recordId': recordId,
+      'message': message,
+      'includePhoto': includePhoto,
+    }, (data) => (postId: data['postId'] as String? ?? '', postUrl: data['postUrl'] as String? ?? ''));
+  }
+
+  /// The adoption post schedule (functions/adoption_promotion.js). Emits
+  /// [AdoptionPromotionSchedule.initial] while no Admin has set one.
+  Stream<AdoptionPromotionSchedule> streamPromotionSchedule(String organizationId) {
+    return _db
+        .collection('organizations')
+        .doc(organizationId)
+        .collection('integrations')
+        .doc('facebookPromotion')
+        .snapshots()
+        .map((doc) => AdoptionPromotionSchedule.fromMap(doc.data()));
+  }
+
+  /// Admin only (enforced by the callable).
+  Future<void> savePromotionSchedule({
+    required String organizationId,
+    required AdoptionPromotionSchedule schedule,
+  }) {
+    return _call('facebookSaveAdoptionPromotion', {
+      'organizationId': organizationId,
+      'schedule': schedule.toCallableMap(),
+    }, (_) {});
+  }
+
+  /// Animals open for adoption, most in need of a post first, with the
+  /// suggested picks and a draft caption. Needs the facebookPublish
+  /// permission (enforced by the callable).
+  Future<PromotionSuggestions> fetchPromotionSuggestions(String organizationId) {
+    return _call('facebookAdoptionPromotionSuggestions', {'organizationId': organizationId}, (data) {
+      return PromotionSuggestions(
+        animals: (data['animals'] as List? ?? const [])
+            .map((a) => PromotionCandidate.fromMap(_asStringKeyedMap(a)))
+            .where((a) => a.id.isNotEmpty)
+            .toList(),
+        suggestedIds: (data['suggestedIds'] as List? ?? const []).whereType<String>().toList(),
+        caption: data['caption'] as String? ?? '',
+        animalsPerPost: (data['animalsPerPost'] as num?)?.toInt() ?? 3,
+      );
+    });
   }
 
   /// Owner/Admin only (enforced by the callable). Lets a Member publish to
@@ -148,4 +213,24 @@ class FacebookIntegrationRepository {
       connectionStatus: 'connected',
     );
   }
+}
+
+/// Records facebookPublishRecordPost can share (functions/facebook_share_rules.js
+/// RECORD_KINDS); the name is sent as-is.
+/// `referral`: a case referred by shared link (functions/facebook_share_rules.js RECORD_KINDS).
+enum FacebookRecordKind { campaign, event, referral }
+
+/// One record in a Facebook post and the photos to attach for it, in order.
+class FacebookShareItem {
+  const FacebookShareItem({required this.animalId, required this.photos});
+
+  final String animalId;
+  final List<({String url, String caption})> photos;
+
+  Map<String, dynamic> toMap() => {
+        'animalId': animalId,
+        'photos': [
+          for (final p in photos) {'url': p.url, if (p.caption.trim().isNotEmpty) 'caption': p.caption.trim()},
+        ],
+      };
 }

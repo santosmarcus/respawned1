@@ -5,12 +5,14 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:respawnd1/features/rescue/widgets/case_report_details.dart';
 import 'package:respawnd1/core/utils/case_access.dart';
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/core/repos/rescue_case_repository.dart';
 import 'package:respawnd1/core/utils/rescue_risk.dart';
 import 'package:respawnd1/core/widgets/rescue_risk_banner.dart';
 import 'package:respawnd1/features/pettransporter/transit_progress_page.dart';
+import 'package:respawnd1/features/pettransporter/transporter_eligibility.dart';
 import 'package:respawnd1/core/widgets/reason_picker.dart';
 import 'package:respawnd1/core/widgets/app_messages.dart';
 import 'package:respawnd1/core/repos/rescue_case/rescue_case_store.dart';
@@ -39,6 +41,9 @@ class RescueRequest extends StatefulWidget {
 }
 
 class _RescueRequestState extends State<RescueRequest> {
+  // Created once: a stream made inside build() was re-subscribed on every
+  // setState (the case doc re-read each time).
+  late final Stream<DocumentSnapshot<Map<String, dynamic>>> _caseStream = watchCaseOrPublic(widget.caseId);
   bool _isAccepting = false;
   bool _isDeclining = false;
   bool _riskAcknowledged = false;
@@ -63,6 +68,18 @@ class _RescueRequestState extends State<RescueRequest> {
     setState(() => _isAccepting = true);
 
     try {
+      // Only verified transporters (and approved rescue volunteers) may
+      // take a transit. firestore.rules enforces the same.
+      final blockReason = await transitBlockReason();
+      if (blockReason != null) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            appSnackBar(blockReason, kind: AppMessageKind.error),
+          );
+        }
+        return;
+      }
+
       final uid = FirebaseAuth.instance.currentUser!.uid;
       final userDoc = await FirebaseFirestore.instance
           .collection('users')
@@ -126,7 +143,7 @@ class _RescueRequestState extends State<RescueRequest> {
             'status': 'accepted',
             'assignedVolunteerId': uid,
             'assignedVolunteerName':
-                riderName.isEmpty ? (widget.data['assignedVolunteerName'] ?? '') : riderName,
+            riderName.isEmpty ? (widget.data['assignedVolunteerName'] ?? '') : riderName,
           },
         );
       }
@@ -249,7 +266,7 @@ class _RescueRequestState extends State<RescueRequest> {
     // blank flash, then always prefers the live doc.
     return StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
       // Full report once the rider may read it; the public copy before.
-      stream: watchCaseOrPublic(widget.caseId),
+      stream: _caseStream,
       builder: (context, snapshot) {
         final d = snapshot.data?.data() ?? widget.data;
         return _buildScaffold(context, d);
@@ -273,7 +290,6 @@ class _RescueRequestState extends State<RescueRequest> {
     final dropoffAddress = (rawDropoffAddress == null || rawDropoffAddress.isEmpty)
         ? 'Clinic not yet assigned'
         : rawDropoffAddress;
-    final condition = d['condition'] ?? '';
     final photoUrls = List<String>.from(d['photoUrls'] ?? []);
     final highRiskAnimals = highRiskAnimalsIn(
       animals: d['animals'] as List?,
@@ -464,26 +480,17 @@ class _RescueRequestState extends State<RescueRequest> {
 
                   const SizedBox(height: 24),
 
-                  _AnimalGroupSection(caseId: widget.caseId, data: d),
-
-                  const SizedBox(height: 8),
-
-                  if (condition.toString().isNotEmpty)
-                    Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Icon(Icons.message_outlined,
-                            size: 16, color: AppColors.textPrimary),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: Text(
-                            'Found in $condition',
-                            style: GoogleFonts.zain(
-                                fontSize: 12, color: AppColors.textSecondary),
-                          ),
-                        ),
-                      ],
-                    ),
+                  // Everything the reporter entered on the rescue form, laid
+                  // out for this report's rescue type — the same section as
+                  // Track Case and the staff Rescue Details. Two or more
+                  // animals show as collapsed cards.
+                  Text('Case Details',
+                      style: GoogleFonts.zain(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                          color: AppColors.textPrimary)),
+                  const SizedBox(height: 10),
+                  CaseReportDetails(caseId: widget.caseId, data: d),
                 ],
               ),
             ),
@@ -628,167 +635,6 @@ class _RescueRequestState extends State<RescueRequest> {
             ),
           ],
         ),
-      ),
-    );
-  }
-}
-
-// Restores every animal's own detail block from the rescue form's
-// `animals[]` array for the transporter's own request screen — same
-// pattern as case_summary_page.dart's and track_case_page.dart's own
-// _AnimalGroupSection, so all three surfaces (reporter's Track Case, the
-// post-completion summary, and this transporter request) always agree on
-// the same latest rescue-form data for every animal in the case.
-class _AnimalGroupSection extends StatelessWidget {
-  final String caseId;
-  final Map<String, dynamic> data;
-  const _AnimalGroupSection({required this.caseId, required this.data});
-
-  Map<String, dynamic> _animalMap(Map raw) => {
-    'animalType': raw['species'],
-    'breed': raw['breed'],
-    'sex': raw['sex'],
-    'size': raw['size'],
-    'colorMarkings': raw['colorMarkings'],
-  };
-
-  @override
-  Widget build(BuildContext context) {
-    final animals = data['animals'] as List?;
-    if (animals != null && animals.isNotEmpty) {
-      final total = animals.length;
-      return Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            total > 1 ? '$total Animals' : 'Type of Animal',
-            style: GoogleFonts.zain(fontSize: 14, fontWeight: FontWeight.w600, color: AppColors.textPrimary),
-          ),
-          const SizedBox(height: 8),
-          for (var i = 0; i < animals.length; i++)
-            _AnimalDetailBlock(
-              data: _animalMap(animals[i] as Map),
-              index: i + 1,
-              total: total,
-            ),
-        ],
-      );
-    }
-
-    final groupId = data['groupId'] as String?;
-    if (groupId == null || groupId.isEmpty) {
-      return _AnimalDetailBlock(data: data, index: 1, total: 1, showHeading: true);
-    }
-
-    return FutureBuilder<QuerySnapshot<Map<String, dynamic>>>(
-      future: FirebaseFirestore.instance
-          .collection('publicCases')
-          .where('groupId', isEqualTo: groupId)
-          .get(),
-      builder: (context, snapshot) {
-        if (!snapshot.hasData) {
-          return _AnimalDetailBlock(data: data, index: 1, total: 1, showHeading: true);
-        }
-        final docs = snapshot.data!.docs;
-        final total = docs.length;
-        if (total <= 1) {
-          return _AnimalDetailBlock(data: data, index: 1, total: 1, showHeading: true);
-        }
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              '$total Animals',
-              style: GoogleFonts.zain(fontSize: 14, fontWeight: FontWeight.w600, color: AppColors.textPrimary),
-            ),
-            const SizedBox(height: 8),
-            for (var i = 0; i < docs.length; i++)
-              _AnimalDetailBlock(
-                data: docs[i].data(),
-                index: i + 1,
-                total: total,
-              ),
-          ],
-        );
-      },
-    );
-  }
-}
-
-class _AnimalDetailBlock extends StatelessWidget {
-  final Map<String, dynamic> data;
-  final int index;
-  final int total;
-  // Only used for the single-animal fallback case, where the section
-  // above doesn't already render its own "Type of Animal" heading.
-  final bool showHeading;
-  const _AnimalDetailBlock({
-    required this.data,
-    required this.index,
-    required this.total,
-    this.showHeading = false,
-  });
-
-  List<Widget> _fields() => [
-    _fieldRow('Species', data['animalType']),
-    _fieldRow('Breed / Mixed', data['breed']),
-    _fieldRow('Sex', data['sex']),
-    _fieldRow('Size', data['size']),
-    _fieldRow('Color / Distinguishing Markings', data['colorMarkings']),
-  ];
-
-  Widget _fieldRow(String label, dynamic value) {
-    final v = (value as String?)?.trim();
-    if (v == null || v.isEmpty) return const SizedBox.shrink();
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 4),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          SizedBox(
-            width: 150,
-            child: Text(label, style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary)),
-          ),
-          Expanded(
-            child: Text(v, style: GoogleFonts.zain(fontSize: 13, color: AppColors.textPrimary)),
-          ),
-        ],
-      ),
-    );
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    if (total <= 1) {
-      return Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          if (showHeading) ...[
-            Text('Type of Animal',
-                style: GoogleFonts.zain(fontSize: 14, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
-            const SizedBox(height: 8),
-          ],
-          ..._fields(),
-        ],
-      );
-    }
-
-    return Container(
-      margin: const EdgeInsets.only(bottom: 8),
-      padding: const EdgeInsets.all(10),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: AppColors.slaterspwn),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text('Animal $index of $total',
-              style: GoogleFonts.zain(fontSize: 12, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
-          const SizedBox(height: 4),
-          ..._fields(),
-        ],
       ),
     );
   }

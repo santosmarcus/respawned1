@@ -16,7 +16,8 @@ enum OrgPermission {
   financeManage('Manage money',
       'Record, allocate and refund donations; approve expenses; settle payments; general expenses and staff pay.',
       OrgPermissionGroup.money),
-  volunteers('Volunteers, events & transporters', 'Events, volunteer applications and transporter verification.',
+  volunteers('Events, rescue volunteers & transporters',
+      'Events and their volunteers, external rescue volunteers and transporter verification.',
       OrgPermissionGroup.other),
   insights('Analytics & audit', 'Dashboard analytics, reports and the audit log.', OrgPermissionGroup.other),
   facebookPublish('Post to Facebook', 'Share animal records to the organization\'s Facebook Page.',
@@ -48,31 +49,17 @@ enum OrgPermissionGroup {
   final String label;
 }
 
-/// Starting points an Admin picks for a Staff member; changing any box makes
-/// the member [custom].
+/// The one default Staff permission set, and [custom] for any member whose
+/// boxes differ from it. Carers were merged into Staff, and money
+/// permissions (campaigns, donations, managing money) and Facebook posting
+/// are never in the default: an Admin ticks them by hand.
 enum OrgPreset {
-  fullStaff('Full staff', {
+  staff('Default', {
     OrgPermission.rescue,
     OrgPermission.animals,
     OrgPermission.care,
     OrgPermission.adoptions,
-    OrgPermission.campaigns,
-    OrgPermission.financeView,
     OrgPermission.volunteers,
-    OrgPermission.insights,
-  }),
-  rescueCoordinator('Rescue coordinator', {
-    OrgPermission.rescue,
-    OrgPermission.animals,
-    OrgPermission.care,
-    OrgPermission.insights,
-  }),
-  animalCare('Animal care', {OrgPermission.care}),
-  adoptionsOfficer('Adoptions officer', {OrgPermission.adoptions, OrgPermission.animals, OrgPermission.care}),
-  treasurer('Treasurer', {
-    OrgPermission.campaigns,
-    OrgPermission.financeView,
-    OrgPermission.financeManage,
     OrgPermission.insights,
   }),
   custom('Custom', {});
@@ -82,10 +69,10 @@ enum OrgPreset {
   final String label;
   final Set<OrgPermission> permissions;
 
-  /// The presets an Admin can choose (everything but [custom]).
+  /// The named sets (everything but [custom]).
   static List<OrgPreset> get choices => values.where((p) => p != custom).toList();
 
-  /// The preset with exactly these permissions, or [custom].
+  /// [staff] when these are exactly the default permissions, else [custom].
   static OrgPreset matching(Set<OrgPermission> perms) {
     for (final p in choices) {
       if (p.permissions.length == perms.length && p.permissions.containsAll(perms)) return p;
@@ -110,19 +97,74 @@ Set<OrgPermission> normalizePermissions(Iterable<OrgPermission> perms) {
 
 /// A Staff member's permissions from their members doc, with the same legacy
 /// fallback as functions/org_access.js and firestore.rules: an explicit
-/// `permissions` list wins; role 'carer' is Animal care; any other Staff
-/// (or no members doc) is Full staff, plus Facebook posting when the old
+/// `permissions` list wins; any other Staff, the old role 'carer' and no
+/// members doc get the default set, plus Facebook posting when the old
 /// `facebookPublisher` flag is set. Unknown keys are ignored.
 Set<OrgPermission> staffPermissionsFrom(Map<String, dynamic>? member) {
   final raw = member?['permissions'];
   if (raw is List) {
     return normalizePermissions(raw.map((k) => OrgPermission.fromKey(k as String?)).whereType<OrgPermission>());
   }
-  if (member?['role'] == 'carer') return {...OrgPreset.animalCare.permissions};
   return {
-    ...OrgPreset.fullStaff.permissions,
+    ...OrgPreset.staff.permissions,
     if (member?['facebookPublisher'] == true) OrgPermission.facebookPublish,
   };
+}
+
+/// How a Staff member is described in the app: "Staff" with the default
+/// set, "Staff · Custom access" otherwise.
+String staffTitle(OrgPreset? preset) =>
+    preset == null || preset == OrgPreset.staff ? 'Staff' : 'Staff · Custom access';
+
+/// What kind of organization: a shelter or rescue group, or an independent
+/// rescuer (one person or a small team) with fewer modules, a member cap and
+/// case capacity. `organizations/{id}.kind`; missing means [shelter].
+enum OrgKind {
+  shelter,
+  independent;
+
+  static OrgKind fromName(String? name) => name == 'independent' ? independent : shelter;
+}
+
+/// Limits for independent rescuers. Mirrors `independent` in
+/// functions/org_permissions.json.
+class IndependentRescuer {
+  const IndependentRescuer._();
+
+  /// The most a system admin may turn on for an independent rescuer.
+  static const allowed = {
+    OrgPermission.rescue,
+    OrgPermission.animals,
+    OrgPermission.care,
+    OrgPermission.adoptions,
+    OrgPermission.insights,
+  };
+
+  /// What an independent rescuer has until a system admin changes it.
+  static const defaults = {OrgPermission.rescue, OrgPermission.animals, OrgPermission.care};
+
+  static const memberCap = 5;
+  static const maxActiveCases = 3;
+  static const maxAnimalsInCare = 5;
+  static const minRadiusKm = 1.0;
+  static const maxRadiusKm = 5.0;
+  static const defaultRadiusKm = 3.0;
+
+  /// How long shelters alone see a new non-critical report.
+  static const headStartMinutes = 15;
+}
+
+/// The permissions an organization has at all, from its document: every
+/// permission for a shelter; for an independent rescuer its
+/// `enabledPermissions` (set by a system admin), else the defaults, never
+/// more than [IndependentRescuer.allowed].
+Set<OrgPermission> orgEnabledPermissions(Map<String, dynamic>? org) {
+  if (OrgKind.fromName(org?['kind'] as String?) != OrgKind.independent) return OrgPermission.values.toSet();
+  final raw = org?['enabledPermissions'];
+  final listed = raw is List
+      ? raw.map((k) => OrgPermission.fromKey(k as String?)).whereType<OrgPermission>().toSet()
+      : IndependentRescuer.defaults;
+  return listed.intersection(IndependentRescuer.allowed);
 }
 
 /// Permissions in the stored order (the enum order), for writes and display.

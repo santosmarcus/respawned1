@@ -6,6 +6,9 @@ import 'package:respawnd1/features/admin/rescue/widgets/referral_share_flow.dart
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/core/models/rescue/referral.dart';
 import 'package:respawnd1/core/models/rescue/referral_type.dart';
+import 'package:respawnd1/core/models/rescue/rescue_case.dart';
+import 'package:respawnd1/core/widgets/app_messages.dart';
+import 'package:respawnd1/features/admin/facebook/facebook_record_post_page.dart';
 import 'package:respawnd1/features/admin/rescue/state/rescue_reports_providers.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/section_card.dart';
 
@@ -13,20 +16,25 @@ import 'package:respawnd1/features/admin/rescue/widgets/section_card.dart';
 /// document ever created for this case, newest first.
 class ReferralHistorySection extends ConsumerWidget {
   final String caseId;
-  const ReferralHistorySection({super.key, required this.caseId});
+
+  /// The case, for posting a shared-link referral to the Facebook Page.
+  final RescueCase? rescueCase;
+  const ReferralHistorySection({super.key, required this.caseId, this.rescueCase});
 
   String _statusLabel(ReferralStatus status) => switch (status) {
         ReferralStatus.referredPending => 'Pending',
         ReferralStatus.accepted => 'Accepted',
         ReferralStatus.declined => 'Declined',
         ReferralStatus.expired => 'No answer (returned)',
+        ReferralStatus.withdrawn => 'Withdrawn',
         ReferralStatus.notified => 'Notified',
       };
 
   String _targetLabel(Referral r) => switch (r.type) {
         ReferralType.anotherOrganization => r.targetOrgName ?? 'Another organization',
         ReferralType.rescueVolunteer => r.targetVolunteerName ?? 'Rescue volunteer',
-        ReferralType.localGovernmentUnit => r.barangay ?? 'LGU/Barangay',
+        // Shared-link referrals name nobody until someone answers.
+        ReferralType.localGovernmentUnit => r.barangay ?? r.lastResponse?.name ?? 'a shared link',
       };
 
   String _dateLabel(DateTime? d) {
@@ -97,6 +105,25 @@ class ReferralHistorySection extends ConsumerWidget {
                     currentIncludeReporter: share?.includeReporter ?? false,
                   ),
                 ),
+                // A public Page post never carries the reporter, so it needs
+                // a link without them (an open one is reused).
+                if (rescueCase != null && r.type == ReferralType.localGovernmentUnit)
+                  Tooltip(
+                    message: linkOpen && share.includeReporter
+                        ? "This link includes the reporter. Share a link without them to post publicly."
+                        : 'Post to the Facebook Page',
+                    child: TextButton.icon(
+                      style: TextButton.styleFrom(
+                        visualDensity: VisualDensity.compact,
+                        foregroundColor: AppColors.textPrimary,
+                      ),
+                      icon: const Icon(Icons.facebook, size: 16),
+                      label: Text('Facebook', style: GoogleFonts.zain(fontSize: 13)),
+                      onPressed: linkOpen && share.includeReporter
+                          ? null
+                          : () => _postToFacebook(context, r, linkOpen ? share.url : null),
+                    ),
+                  ),
                 if (linkOpen)
                   TextButton(
                     style: TextButton.styleFrom(
@@ -111,6 +138,18 @@ class ReferralHistorySection extends ConsumerWidget {
         ],
       ),
     );
+  }
+
+  Future<void> _postToFacebook(BuildContext context, Referral r, String? openUrl) async {
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      final url = openUrl ??
+          await ReferralShareService().createLink(caseId: caseId, referralId: r.id, includeReporter: false);
+      if (!context.mounted) return;
+      await openReferralFacebookShare(context, rescueCase!, url);
+    } catch (e) {
+      messenger.showSnackBar(appSnackBar(ReferralShareService.errorMessage(e), kind: AppMessageKind.error));
+    }
   }
 
   @override

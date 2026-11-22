@@ -8,7 +8,9 @@ import 'package:respawnd1/core/repos/animal_collar_tag_repository.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:respawnd1/app_theme.dart';
+import 'package:respawnd1/core/models/photo_captions.dart';
 import 'package:respawnd1/core/models/rescue/animal_characteristics.dart';
+import 'package:respawnd1/core/widgets/photo_caption_sheet.dart';
 import 'package:respawnd1/core/models/rescue/rescue_status.dart';
 import 'package:respawnd1/core/models/rescue/vaccination_record.dart';
 import 'package:respawnd1/core/utils/adoption_readiness.dart';
@@ -92,12 +94,18 @@ class _CreateAnimalRecordPageState extends State<CreateAnimalRecordPage> {
   // _createRecord's validation, gated on `!widget.isEditing`.
   final _picker = ImagePicker();
   final List<XFile> _pickedImages = [];
-  // Edit mode only — already-uploaded photos, individually removable;
+  // Already-uploaded photos (the record's own when editing, the case's
+  // when created from intake), individually removable;
   // newly picked images are uploaded and appended alongside whatever
   // remains of this list on Save.
   late final List<String> _existingPhotoUrls = List<String>.from(
     widget.existingData?['photoUrls'] ?? const [],
   );
+  // Per-photo descriptions: existing photos keyed by URL, newly picked ones
+  // by the picked file until they're uploaded.
+  late final Map<String, String> _existingCaptions =
+      Map<String, String>.of(parsePhotoCaptions(widget.existingData?['photoCaptions']));
+  final Map<XFile, String> _pickedCaptions = {};
   bool _isUploadingImages = false;
   String? _imageError;
   // Scrolled/focused into view when submission fails the image check.
@@ -158,9 +166,21 @@ class _CreateAnimalRecordPageState extends State<CreateAnimalRecordPage> {
   String? _selectedSize;
   String? _selectedCoatLength;
   // Off for new records: listing an animal goes through the adoption
-  // readiness check (_confirmAdoptionReadiness), never by default.
+  // readiness gate (_onAdoptableChanged), never by default.
   bool _isAdoptable = false;
   bool _isLoading = false;
+
+  // Adoption readiness facts that live outside this form (open treatment
+  // episode, vaccinations subcollection). Loaded once for an existing
+  // record; a new record has neither. See _readinessChecks.
+  bool _inActiveTreatment = false;
+  int? _vaccineCount;
+  int _overdueVaccineCount = 0;
+  Future<void>? _readinessFactsLoad;
+  bool _readinessFactsLoaded = false;
+
+  /// Set when staff override unmet readiness items to list the animal.
+  String? _readinessOverrideReason;
 
   // Preventive Care — unchecked when unknown, never inferred. Vaccinated
   // was removed from creation entirely (spec: vaccines are recorded after
@@ -431,6 +451,31 @@ class _CreateAnimalRecordPageState extends State<CreateAnimalRecordPage> {
       _prefill();
     }
     _breedController.text = _selectedBreed ?? '';
+    _loadReadinessFacts();
+    _loadRescuingOrgName();
+  }
+
+  /// Name shown and saved as "Rescued by" when the prefill doesn't carry one:
+  /// the owning organization (the linked case's, else the creator's).
+  String? _rescuingOrgName;
+
+  Future<void> _loadRescuingOrgName() async {
+    try {
+      final uid = FirebaseAuth.instance.currentUser?.uid ?? '';
+      final orgId = await _resolveOwningOrganizationId(uid);
+      if (orgId == null) return;
+      final org = await FirebaseFirestore.instance.collection('organizations').doc(orgId).get();
+      final name = (org.data()?['name'] as String?)?.trim();
+      if (name != null && name.isNotEmpty && mounted) setState(() => _rescuingOrgName = name);
+    } catch (_) {
+      // Display-only; leave it blank rather than block the form.
+    }
+  }
+
+  String get _rescuedByLabel {
+    final prefill = (widget.prefillData?['rescuedBy'] as String?)?.trim();
+    if (prefill != null && prefill.isNotEmpty) return prefill;
+    return _rescuingOrgName ?? '';
   }
 
   /// Parses a saved `age` string like "2 years" (or legacy free-text like
@@ -523,7 +568,7 @@ class _CreateAnimalRecordPageState extends State<CreateAnimalRecordPage> {
   }
 
   /// Prefills whatever the source rescue report/case already captured.
-  /// Species/breed/sex/size/color/description/image come straight from the
+  /// Species/breed/sex/size and the case's photos come straight from the
   /// report — never invented. Fields the report never asked about (name,
   /// age, coat length, vaccination/sterilization status, temperament,
   /// etc.) are deliberately left blank/unchecked here, matching whatever
@@ -557,16 +602,13 @@ class _CreateAnimalRecordPageState extends State<CreateAnimalRecordPage> {
       if (match != null) _selectedSize = match;
     }
 
-    // Report breed/"condition"/color-markings text folded into the
-    // description so nothing captured at report time is lost, even though
-    // this form has no dedicated breed/color field of its own.
-    final descriptionParts = <String>[
-      if ((d['description'] as String?)?.isNotEmpty ?? false)
-        d['description'] as String,
-      if ((d['colorMarkings'] as String?)?.isNotEmpty ?? false)
-        'Color/markings: ${d['colorMarkings']}',
-    ];
-    _descriptionController.text = descriptionParts.join('\n');
+    // The description is left for staff to write (it used to be filled
+    // with the report's condition text). The case's photos come in as
+    // removable thumbnails.
+    final photos = d['photoUrls'];
+    if (photos is List) {
+      _existingPhotoUrls.addAll(photos.whereType<String>().where((u) => u.isNotEmpty));
+    }
 
     // This record came from the rescue workflow — "Rescued" is implied,
     // not something the org has to remember to tick.
@@ -655,7 +697,35 @@ class _CreateAnimalRecordPageState extends State<CreateAnimalRecordPage> {
     }
   }
 
-  void _removeImage(int index) => setState(() => _pickedImages.removeAt(index));
+  void _removeImage(int index) => setState(() => _pickedCaptions.remove(_pickedImages.removeAt(index)));
+
+  Future<void> _editExistingCaption(String url) async {
+    final text = await showPhotoCaptionSheet(
+      context,
+      image: Image.network(url, fit: BoxFit.cover),
+      initialValue: _existingCaptions[url] ?? '',
+    );
+    if (text == null || !mounted) return;
+    setState(() => text.isEmpty ? _existingCaptions.remove(url) : _existingCaptions[url] = text);
+  }
+
+  Future<void> _editPickedCaption(XFile file) async {
+    final text = await showPhotoCaptionSheet(
+      context,
+      image: Image.file(File(file.path), fit: BoxFit.cover),
+      initialValue: _pickedCaptions[file] ?? '',
+    );
+    if (text == null || !mounted) return;
+    setState(() => text.isEmpty ? _pickedCaptions.remove(file) : _pickedCaptions[file] = text);
+  }
+
+  /// Every photo's description by URL, once the picked photos have
+  /// [uploadedUrls] (same order as [_pickedImages]).
+  Map<String, String> _captionsFor(List<String> uploadedUrls) => {
+        ..._existingCaptions,
+        for (var i = 0; i < uploadedUrls.length && i < _pickedImages.length; i++)
+          uploadedUrls[i]: ?_pickedCaptions[_pickedImages[i]],
+      };
 
   Future<String> _uploadImage(XFile file, String storagePath) async {
     final ref = FirebaseStorage.instance.ref(storagePath);
@@ -663,53 +733,143 @@ class _CreateAnimalRecordPageState extends State<CreateAnimalRecordPage> {
     return ref.getDownloadURL();
   }
 
-  /// Runs the adoption readiness checklist against the live record (open
-  /// treatment episode, vaccine records) plus this form's values. Returns
-  /// the confirmed checklist to store, or null if staff cancelled or the
-  /// animal can't be listed yet.
-  Future<Map<String, dynamic>?> _confirmAdoptionReadiness() async {
-    final db = FirebaseFirestore.instance;
-    var inActiveTreatment = false;
-    var vaccineCount = 0;
-    var overdue = 0;
-    final animalId = widget.existingAnimalId;
-    if (widget.isEditing && animalId != null) {
-      final currentCaseId = widget.existingData?['currentCaseId'] as String?;
-      if (currentCaseId != null && currentCaseId.isNotEmpty) {
-        final caseSnap = await db.collection('cases').doc(currentCaseId).get();
-        inActiveTreatment = caseSnap.exists &&
-            !RescueStatus.fromFirestoreValue(caseSnap.data()?['status'] as String?).isTerminal;
-      }
-      final vaccines = await db.collection('animals').doc(animalId).collection('vaccinations').get();
-      final records = vaccines.docs.map((d) => VaccinationRecord.fromFirestore(d, animalId)).toList();
-      vaccineCount = records.length;
-      overdue = records.where((r) => r.status == VaccineStatus.overdue).length;
-    }
-    final checks = assessAdoptionReadiness(ReadinessInput(
-      inActiveTreatment: inActiveTreatment,
-      temperament: [for (final e in _temperament.entries) if (e.value) e.key],
-      vaccineCount: vaccineCount,
-      overdueVaccineCount: overdue,
+  /// Loads the readiness facts this form doesn't hold: whether the animal
+  /// is still in an active treatment episode, and its vaccine records.
+  /// Runs once; later calls wait for the same load.
+  Future<void> _loadReadinessFacts() => _readinessFactsLoad ??= () async {
+        final animalId = widget.existingAnimalId;
+        if (!widget.isEditing || animalId == null) {
+          // Nothing to fetch. Runs synchronously from initState, so no
+          // setState here.
+          _vaccineCount = 0;
+          _readinessFactsLoaded = true;
+          return;
+        }
+        final db = FirebaseFirestore.instance;
+        try {
+          final currentCaseId = widget.existingData?['currentCaseId'] as String?;
+          if (currentCaseId != null && currentCaseId.isNotEmpty) {
+            final caseSnap = await db.collection('cases').doc(currentCaseId).get();
+            _inActiveTreatment = caseSnap.exists &&
+                !RescueStatus.fromFirestoreValue(caseSnap.data()?['status'] as String?).isTerminal;
+          }
+          final vaccines = await db.collection('animals').doc(animalId).collection('vaccinations').get();
+          final records = vaccines.docs.map((d) => VaccinationRecord.fromFirestore(d, animalId)).toList();
+          _vaccineCount = records.length;
+          _overdueVaccineCount = records.where((r) => r.status == VaccineStatus.overdue).length;
+        } catch (_) {
+          // Unreadable: treatment falls back to the record's currentCaseId
+          // and vaccines to its legacy flag, so the gate still works.
+          _inActiveTreatment = (widget.existingData?['currentCaseId'] as String? ?? '').isNotEmpty;
+        }
+        if (mounted) setState(() => _readinessFactsLoaded = true);
+      }();
+
+  /// The readiness checklist from this form's current values plus the
+  /// loaded facts. Re-evaluated on every build, so ticking Dewormed or
+  /// adding a photo updates the Adoptable switch straight away.
+  List<ReadinessCheck> get _readinessChecks {
+    final existing = widget.existingData;
+    final checkup = existing?['lastVetCheckup'];
+    final vaccinated = existing?['vaccinated'];
+    final temperament = [for (final e in _temperament.entries) if (e.value) e.key];
+    final otherTraits = [
+      for (final e in [..._compatibility.entries, ..._training.entries]) if (e.value) e.key,
+    ];
+    return assessAdoptionReadiness(ReadinessInput(
+      inActiveTreatment: _inActiveTreatment,
+      vaccineCount: _vaccineCount,
+      overdueVaccineCount: _overdueVaccineCount,
+      vaccinated: vaccinated is bool ? vaccinated : null,
+      dewormed: _dewormed,
       spayedNeutered: _spayedNeutered,
-      currentMedications: widget.existingData?['currentMedications'] as String?,
-      chronicConditions: widget.existingData?['chronicConditions'] as String?,
-      specialNeeds: _selectedSpecialNeedsTypes,
+      lastVetCheckup: checkup is Timestamp ? checkup.toDate() : null,
+      temperament: temperament.isNotEmpty ? temperament : otherTraits,
+      photoCount: _existingPhotoUrls.length + _pickedImages.length,
     ));
-    if (!mounted) return null;
-    final name = FirebaseAuth.instance.currentUser?.displayName?.trim();
-    final animalName = _nameController.text.trim();
-    return showAdoptionReadinessDialog(
-      context,
-      animalName: animalName.isEmpty ? 'this animal' : animalName,
-      checks: checks,
-      confirmedBy: (name != null && name.isNotEmpty) ? name : 'Admin Staff',
-    );
+  }
+
+  String get _animalDisplayName {
+    final name = _nameController.text.trim();
+    return name.isEmpty ? 'this animal' : name;
+  }
+
+  /// Only a new listing goes through the gate: switching an already
+  /// adoptable record off and back on just restores it.
+  bool get _wasAdoptable => widget.isEditing && widget.existingData?['adoptionStatus'] == 'adoptable';
+
+  /// Whether the saved record has a registered QR or NFC collar tag (read
+  /// fresh, since a tag may have been added after this page opened). A new,
+  /// unsaved record never has one.
+  Future<bool> _hasRegisteredCollarTag() async {
+    final id = widget.existingAnimalId;
+    if (!widget.isEditing || id == null || id.isEmpty) return false;
+    try {
+      final snap = await FirebaseFirestore.instance.collection('animals').doc(id).get();
+      return await AnimalRecordRepository().hasRegisteredCollarTag(id, snap.data() ?? const {});
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// The Adoptable switch. Off always works. On works straight away when
+  /// every readiness item is met; otherwise it opens the checklist sheet,
+  /// and only an override with a reason turns it on.
+  Future<void> _onAdoptableChanged(bool value) async {
+    if (!value) {
+      setState(() {
+        _isAdoptable = false;
+        _readinessOverrideReason = null;
+      });
+      return;
+    }
+    if (_wasAdoptable) {
+      setState(() => _isAdoptable = true);
+      return;
+    }
+    // A registered collar tag (QR or NFC) is required to be adoptable, on
+    // top of the readiness checklist and not overridable (firestore.rules
+    // enforces it too).
+    if (!await _hasRegisteredCollarTag()) {
+      if (!mounted) return;
+      await showDialog<void>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('Collar tag required'),
+          content: Text(widget.isEditing
+              ? '$_animalDisplayName needs a registered QR or NFC collar tag before it can be listed as '
+                  'adoptable. Add one in the animal record under Management, then try again.'
+              : 'Save this record first, then add a QR or NFC collar tag under Management. '
+                  'A registered tag is required before an animal can be listed as adoptable.'),
+          actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('OK'))],
+        ),
+      );
+      return;
+    }
+    if (!mounted) return;
+    await _loadReadinessFacts();
+    if (!mounted) return;
+    final checks = _readinessChecks;
+    if (readinessAllMet(checks)) {
+      setState(() {
+        _isAdoptable = true;
+        _readinessOverrideReason = null;
+      });
+      return;
+    }
+    final reason = await showAdoptionReadinessSheet(context, animalName: _animalDisplayName, checks: checks);
+    if (reason == null || !mounted) return;
+    setState(() {
+      _isAdoptable = true;
+      _readinessOverrideReason = reason;
+    });
   }
 
   Future<void> _createRecord() async {
     if (_isLoading) return; // guards against a duplicate Finish/Save tap
     // Image required for brand-new records only — a legacy record already
     // open for editing is never blocked just because it has no photo yet.
+    // From intake, the case's photos are already in the list.
     final missingImage =
         !widget.isEditing &&
         _existingPhotoUrls.isEmpty &&
@@ -750,17 +910,32 @@ class _CreateAnimalRecordPageState extends State<CreateAnimalRecordPage> {
       return;
     }
 
-    // Becoming adoptable needs the readiness checklist first; cancelling it
-    // leaves the form open with nothing saved.
+    // Becoming adoptable stores the readiness checklist. Re-evaluated here
+    // in case a field changed after the switch was turned on: if an item
+    // is now unmet and wasn't overridden, the sheet opens again, and
+    // closing it leaves the form open with nothing saved.
     Map<String, dynamic>? readiness;
     if (_becameAdoptableThisSave) {
       setState(() => _isLoading = true);
       try {
-        readiness = await _confirmAdoptionReadiness();
+        await _loadReadinessFacts();
       } finally {
         if (mounted) setState(() => _isLoading = false);
       }
-      if (readiness == null) return;
+      if (!mounted) return;
+      final checks = _readinessChecks;
+      if (!readinessAllMet(checks) && _readinessOverrideReason == null) {
+        final reason = await showAdoptionReadinessSheet(context, animalName: _animalDisplayName, checks: checks);
+        if (reason == null || !mounted) return;
+        setState(() => _readinessOverrideReason = reason);
+      }
+      final name = FirebaseAuth.instance.currentUser?.displayName?.trim();
+      readiness = adoptionReadinessRecord(
+        checks: checks,
+        confirmedBy: (name != null && name.isNotEmpty) ? name : 'Admin Staff',
+        confirmedAt: FieldValue.serverTimestamp(),
+        overrideReason: _readinessOverrideReason,
+      );
     }
 
     setState(() {
@@ -923,20 +1098,26 @@ class _CreateAnimalRecordPageState extends State<CreateAnimalRecordPage> {
         'rescueBackground': selectedBackground,
         'tags': tags,
         'adoptionStatus': _isAdoptable ? 'adoptable' : 'not_ready',
+        // The litter reported with this animal at intake (new records only).
+        if (!widget.isEditing && widget.prefillData?['litter'] is Map)
+          'litterAtIntake': widget.prefillData!['litter'],
         'adoptionReadiness': ?readiness,
         // Analytics gap 3: when the animal was confirmed ready, so
         // Analytics can show discharge → ready and ready → adopted.
         if (readiness != null) 'readyForAdoptionAt': FieldValue.serverTimestamp(),
       };
 
+      final allPhotoUrls = [..._existingPhotoUrls, ...uploadedUrls];
+      final photoCaptions = photoCaptionsField(allPhotoUrls, _captionsFor(uploadedUrls));
+
       if (widget.isEditing) {
         await docRef.update({
           ...sharedFields,
-          'photoUrls': [..._existingPhotoUrls, ...uploadedUrls],
+          'photoUrls': allPhotoUrls,
+          'photoCaptions': photoCaptions,
           'updatedAt': FieldValue.serverTimestamp(),
         });
       } else {
-        final fallbackPhotoUrl = widget.prefillData?['photoUrl'] as String?;
         final organizationId = await _resolveOwningOrganizationId(uid);
         await docRef.set({
           ...sharedFields,
@@ -945,11 +1126,10 @@ class _CreateAnimalRecordPageState extends State<CreateAnimalRecordPage> {
           'linkedCaseId': widget.linkedCaseId ?? '',
           if (widget.sourceAnimalIndex != null)
             'sourceAnimalIndex': widget.sourceAnimalIndex,
-          'rescuedBy': widget.prefillData?['rescuedBy'] ?? 'Loved by the Gapz',
+          'rescuedBy': _rescuedByLabel,
           'intakeStaffId': uid,
-          'photoUrls': uploadedUrls.isNotEmpty
-              ? uploadedUrls
-              : (fallbackPhotoUrl != null ? [fallbackPhotoUrl] : []),
+          'photoUrls': allPhotoUrls,
+          if (photoCaptions.isNotEmpty) 'photoCaptions': photoCaptions,
           'treatmentLog': [],
           'createdAt': FieldValue.serverTimestamp(),
           'updatedAt': FieldValue.serverTimestamp(),
@@ -970,15 +1150,49 @@ class _CreateAnimalRecordPageState extends State<CreateAnimalRecordPage> {
       // keeps it in step with changes made elsewhere). Non-fatal: the
       // record is saved either way.
       try {
+        // A new record gets its QR code registered (animalTags) straight
+        // away, so the tag can be printed and the animal can be listed as
+        // adoptable once ready. NFC needs a chip, so it is added from
+        // Management > Add NFC Tag.
+        if (!widget.isEditing) {
+          await AnimalRecordRepository().ensureQrTag(
+            animalId: docRef.id,
+            existing: null,
+            actorId: uid,
+            actorName: FirebaseAuth.instance.currentUser?.displayName,
+            actorEmail: FirebaseAuth.instance.currentUser?.email,
+          );
+        }
         await AnimalCollarTagRepository().sync(docRef.id);
       } catch (e) {
-        debugPrint('Collar tag sync failed for ${docRef.id}: $e');
+        debugPrint('Collar tag setup failed for ${docRef.id}: $e');
       }
 
       final actorDisplayName = FirebaseAuth.instance.currentUser?.displayName
           ?.trim();
       final actorEmail = FirebaseAuth.instance.currentUser?.email;
       final logRepo = AnimalRecordRepository();
+      if (readiness != null && readiness['overridden'] == true) {
+        final unmet = [for (final c in unmetReadiness(_readinessChecks)) c.label];
+        await logRepo.logManagementEvent(
+          animalId: docRef.id,
+          eventType: 'adoption_readiness_override',
+          action: 'Adoption readiness overridden',
+          description: 'Marked adoptable with unmet items (${unmet.join(', ')}). '
+              'Reason: ${readiness['overrideReason']}',
+          actorId: uid,
+          actorName: (actorDisplayName?.isNotEmpty ?? false)
+              ? actorDisplayName
+              : 'Admin Staff',
+          actorEmail: actorEmail,
+          newValues: {
+            'adoptionStatus': 'adoptable',
+            'unmet': readiness['unmet'],
+            'overrideReason': readiness['overrideReason'],
+          },
+          sourceModule: 'animalRecords',
+        );
+      }
       if (widget.isEditing) {
         final prevSpecialNeedsTypes =
             (widget.existingData?['specialNeedsTypes'] as List?)
@@ -1150,6 +1364,8 @@ class _CreateAnimalRecordPageState extends State<CreateAnimalRecordPage> {
                 for (var i = 0; i < _existingPhotoUrls.length; i++)
                   _ExistingImageThumb(
                     url: _existingPhotoUrls[i],
+                    hasCaption: _existingCaptions.containsKey(_existingPhotoUrls[i]),
+                    onTap: _isLoading ? null : () => _editExistingCaption(_existingPhotoUrls[i]),
                     onRemove: _isLoading
                         ? null
                         : () => setState(() => _existingPhotoUrls.removeAt(i)),
@@ -1157,6 +1373,8 @@ class _CreateAnimalRecordPageState extends State<CreateAnimalRecordPage> {
                 for (var i = 0; i < _pickedImages.length; i++)
                   _PickedImageThumb(
                     file: _pickedImages[i],
+                    hasCaption: _pickedCaptions.containsKey(_pickedImages[i]),
+                    onTap: _isLoading ? null : () => _editPickedCaption(_pickedImages[i]),
                     onRemove: _isLoading ? null : () => _removeImage(i),
                   ),
                 GestureDetector(
@@ -1183,6 +1401,13 @@ class _CreateAnimalRecordPageState extends State<CreateAnimalRecordPage> {
                 ),
               ],
             ),
+            if (_existingPhotoUrls.isNotEmpty || _pickedImages.isNotEmpty) ...[
+              const SizedBox(height: 6),
+              Text(
+                'Tap a photo to add a description. It shows under the photo on the public profile and on Facebook posts.',
+                style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary),
+              ),
+            ],
             if (_isUploadingImages) ...[
               const SizedBox(height: 8),
               Row(
@@ -1566,8 +1791,7 @@ class _CreateAnimalRecordPageState extends State<CreateAnimalRecordPage> {
             // Rescued by (autofill, read-only)
             _FieldLabel('Rescued by'),
             Text(
-              (widget.prefillData?['rescuedBy'] as String?) ??
-                  'Loved by the Gapz',
+              _rescuedByLabel.isEmpty ? '—' : _rescuedByLabel,
               style: GoogleFonts.zain(
                 fontSize: 14,
                 color: AppColors.textSecondary,
@@ -1588,15 +1812,38 @@ class _CreateAnimalRecordPageState extends State<CreateAnimalRecordPage> {
 
             _FieldLabel('Adoptable'),
             const SizedBox(height: 4),
-            Switch(
-              value: _isAdoptable,
-              onChanged: (v) => setState(() => _isAdoptable = v),
-              activeThumbColor: AppColors.greenrspwn,
-            ),
-            if (_becameAdoptableThisSave)
+            Builder(builder: (context) {
+              final unmet = unmetReadiness(_readinessChecks);
+              // Looks locked (but stays tappable, to open the checklist)
+              // while any readiness item is unmet.
+              final locked = !_isAdoptable && !_wasAdoptable && _readinessFactsLoaded && unmet.isNotEmpty;
+              return Row(
+                children: [
+                  Switch(
+                    value: _isAdoptable,
+                    onChanged: _isLoading ? null : _onAdoptableChanged,
+                    activeThumbColor: AppColors.greenrspwn,
+                    thumbIcon: locked
+                        ? const WidgetStatePropertyAll(Icon(Icons.lock, size: 14, color: AppColors.textSecondary))
+                        : null,
+                    inactiveTrackColor: locked ? AppColors.slaterspwn : null,
+                    trackOutlineColor: locked ? const WidgetStatePropertyAll(AppColors.slaterspwn) : null,
+                  ),
+                  const SizedBox(width: 8),
+                  if (locked)
+                    Expanded(
+                      child: Text(
+                        '${unmet.length} readiness item${unmet.length == 1 ? '' : 's'} not met. Tap to review.',
+                        style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary),
+                      ),
+                    ),
+                ],
+              );
+            }),
+            if (_isAdoptable && _readinessOverrideReason != null)
               Text(
-                'You\'ll confirm health, behavior, vaccines, spay/neuter and continuing care before it\'s listed.',
-                style: GoogleFonts.zain(fontSize: 11, color: AppColors.textSecondary, fontStyle: FontStyle.italic),
+                'Readiness overridden: $_readinessOverrideReason',
+                style: GoogleFonts.zain(fontSize: 11, color: AppColors.error, fontStyle: FontStyle.italic),
               ),
             const SizedBox(height: 16),
 
@@ -1890,8 +2137,10 @@ class _SpeciesCheck extends StatelessWidget {
 
 class _ExistingImageThumb extends StatelessWidget {
   final String url;
+  final bool hasCaption;
+  final VoidCallback? onTap;
   final VoidCallback? onRemove;
-  const _ExistingImageThumb({required this.url, required this.onRemove});
+  const _ExistingImageThumb({required this.url, required this.hasCaption, required this.onTap, required this.onRemove});
 
   @override
   Widget build(BuildContext context) {
@@ -1901,7 +2150,9 @@ class _ExistingImageThumb extends StatelessWidget {
       child: Stack(
         clipBehavior: Clip.none,
         children: [
-          ClipRRect(
+          GestureDetector(
+            onTap: onTap,
+            child: ClipRRect(
             borderRadius: BorderRadius.circular(8),
             child: Image.network(
               url,
@@ -1919,6 +2170,8 @@ class _ExistingImageThumb extends StatelessWidget {
               ),
             ),
           ),
+          ),
+          _CaptionBadge(hasCaption: hasCaption),
           if (onRemove != null)
             Positioned(
               top: -6,
@@ -1943,8 +2196,10 @@ class _ExistingImageThumb extends StatelessWidget {
 
 class _PickedImageThumb extends StatelessWidget {
   final XFile file;
+  final bool hasCaption;
+  final VoidCallback? onTap;
   final VoidCallback? onRemove;
-  const _PickedImageThumb({required this.file, required this.onRemove});
+  const _PickedImageThumb({required this.file, required this.hasCaption, required this.onTap, required this.onRemove});
 
   @override
   Widget build(BuildContext context) {
@@ -1954,15 +2209,19 @@ class _PickedImageThumb extends StatelessWidget {
       child: Stack(
         clipBehavior: Clip.none,
         children: [
-          ClipRRect(
-            borderRadius: BorderRadius.circular(8),
-            child: Image.file(
-              File(file.path),
-              width: 80,
-              height: 80,
-              fit: BoxFit.cover,
+          GestureDetector(
+            onTap: onTap,
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(8),
+              child: Image.file(
+                File(file.path),
+                width: 80,
+                height: 80,
+                fit: BoxFit.cover,
+              ),
             ),
           ),
+          _CaptionBadge(hasCaption: hasCaption),
           if (onRemove != null)
             Positioned(
               top: -6,
@@ -1980,6 +2239,35 @@ class _PickedImageThumb extends StatelessWidget {
               ),
             ),
         ],
+      ),
+    );
+  }
+}
+
+/// Bottom-left marker on an image thumbnail: a filled note when the photo has
+/// a description, an outlined one inviting a tap when it doesn't.
+class _CaptionBadge extends StatelessWidget {
+  final bool hasCaption;
+  const _CaptionBadge({required this.hasCaption});
+
+  @override
+  Widget build(BuildContext context) {
+    return Positioned(
+      left: 4,
+      bottom: 4,
+      child: IgnorePointer(
+        child: Container(
+          padding: const EdgeInsets.all(3),
+          decoration: BoxDecoration(
+            color: hasCaption ? AppColors.yellowrspwn : Colors.black.withValues(alpha: 0.45),
+            borderRadius: BorderRadius.circular(6),
+          ),
+          child: Icon(
+            hasCaption ? Icons.notes : Icons.edit_note,
+            size: 14,
+            color: hasCaption ? AppColors.textPrimary : Colors.white,
+          ),
+        ),
       ),
     );
   }

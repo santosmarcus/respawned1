@@ -1,24 +1,23 @@
+import 'package:respawnd1/core/utils/user_autofill.dart';
 import 'package:respawnd1/core/utils/photo_metadata.dart';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:respawnd1/features/generalhome/notifications_screen.dart';
-import 'package:respawnd1/features/generalhome/user_profile.dart';
 import 'package:respawnd1/app_theme.dart';
-import 'package:respawnd1/features/generalhome/home_screen.dart';
 import 'package:respawnd1/features/rescue/track_case_page.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:geolocator/geolocator.dart';
-import 'package:flutter_nfc_kit/flutter_nfc_kit.dart';
+import 'package:respawnd1/features/admin/collarTags/nfc_service.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:respawnd1/core/constants/app.links.dart';
-import 'package:respawnd1/features/collartag/scan_tag_flow.dart';
-import 'package:respawnd1/features/collartag/pet_found_chat.dart';
 import 'package:respawnd1/features/collartag/collar_id_tag_screen.dart';
-import 'package:respawnd1/core/services/collar_tag_nfc.dart';
+import 'package:respawnd1/features/collartag/scan_tag_flow.dart';
+import 'package:respawnd1/features/collartag/animal_tag_scan.dart';
+import 'package:respawnd1/features/collartag/pet_found_chat.dart';
 import 'package:respawnd1/core/models/rescue/report_verification.dart';
 import 'package:respawnd1/features/rescue/rescue_form_controller.dart';
-import 'package:respawnd1/features/rescue/rescue_form_options.dart';
+import 'package:respawnd1/core/utils/case_id.dart';
+import 'package:respawnd1/features/rescue/widgets/litter_report_link.dart';
 import 'package:respawnd1/features/rescue/services/rescue_geocoding_service.dart';
 import 'package:respawnd1/features/rescue/services/rescue_report_service.dart';
 import 'package:respawnd1/features/rescue/widgets/lost_pet_fields.dart';
@@ -41,7 +40,11 @@ export 'package:respawnd1/features/rescue/widgets/qr_scanner_page.dart'
     show QRScannerPage;
 
 class RescuePage extends StatefulWidget {
-  const RescuePage({super.key});
+  const RescuePage({super.key, this.litterLink});
+
+  /// Opens the form for puppies from a litter on another report, already
+  /// filled in with that many puppies (LitterReportLink).
+  final LitterReportLink? litterLink;
 
   @override
   State<RescuePage> createState() => _RescuePageState();
@@ -86,11 +89,25 @@ class _RescuePageState extends State<RescuePage> {
   @override
   void initState() {
     super.initState();
+    if (widget.litterLink case final link?) _form.startLitterReport(link);
     _fetchCurrentLocation();
+    _prefillContact();
+  }
+
+  /// The reporter's own mobile number in the Lost Pet owner/finder contact
+  /// fields, so they don't have to type what they gave at sign-up.
+  Future<void> _prefillContact() async {
+    final me = await UserAutofill.load();
+    if (me == null || !mounted) return;
+    setState(() {
+      fillIfEmpty(_form.ownerContactController, me.phone);
+      fillIfEmpty(_form.finderContactController, me.phone);
+    });
   }
 
   @override
   void dispose() {
+    _nfcService.stopSession();
     _mapController?.dispose();
     _form.dispose();
     super.dispose();
@@ -271,10 +288,8 @@ class _RescuePageState extends State<RescuePage> {
     );
 
     if (selected != null) {
-      setState(() {
-        _form.selectedRescueType = selected;
-        _form.selectedUrgency = urgencyForRescueType(selected);
-      });
+      // Urgency is assessed from the animals' answers, not the type.
+      setState(() => _form.selectedRescueType = selected);
     }
   }
 
@@ -395,35 +410,38 @@ class _RescuePageState extends State<RescuePage> {
     }
   }
 
-  Future<void> _scanNFC() async {
-    try {
-      final availability = await FlutterNfcKit.nfcAvailability;
-      if (availability != NFCAvailability.available) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            appSnackBar('NFC is not available on this device.', kind: AppMessageKind.error),
-          );
-        }
-        return;
-      }
+  final _nfcService = NfcService();
 
+  Future<void> _scanNFC() async {
+    if (!await _nfcService.isAvailable()) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          appSnackBar('Hold your device near the NFC tag…', duration: Duration(seconds: 4)),
+          appSnackBar('NFC is not available or is turned off on this device.',
+              kind: AppMessageKind.error),
         );
       }
+      return;
+    }
 
-      // Collar tag chips hold the tag link (CollarTagNfc.writeTag), the
-      // same link the QR code carries.
-      final value = await CollarTagNfc.readTag();
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        appSnackBar('Hold your device near the NFC tag…',
+            duration: const Duration(seconds: 15)),
+      );
+    }
 
+    try {
+      // Reads the link written on the chip (the same link as the QR code),
+      // not the chip's hardware serial number, which matches no collar tag.
+      final raw = await _nfcService.readTag(timeout: const Duration(seconds: 15));
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).hideCurrentSnackBar();
+      _handleScanResult(raw);
+    } on NfcCancelledException {
+      if (mounted) ScaffoldMessenger.of(context).hideCurrentSnackBar();
+    } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).hideCurrentSnackBar();
-        _handleScanResult(value);
-      }
-    } catch (e) {
-      await FlutterNfcKit.finish();
-      if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           appSnackBar('NFC scan failed: $e', kind: AppMessageKind.error),
         );
@@ -442,9 +460,14 @@ class _RescuePageState extends State<RescuePage> {
   }
 
   Future<void> _handleScanResult(String result) async {
-    setState(() => _form.scannedTagId = result);
-
+    // A shelter animal's collar tag (QR or NFC, same payload) opens that
+    // animal; anything else goes through the owner collar-tag lookup.
+    if (await openScannedAnimalTag(context, result)) return;
+    if (!mounted) return;
     final tagId = AppLinks.tagIdFromScan(result);
+    // The tag's id when the scan is a ResPAWnd tag link, not the whole link.
+    setState(() => _form.scannedTagId = tagId ?? result);
+
     if (tagId == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         appSnackBar('Tag scanned: $result', kind: AppMessageKind.success),
@@ -482,8 +505,9 @@ class _RescuePageState extends State<RescuePage> {
         return;
       }
 
-      // A tag that isn't marked lost has no rescue session: show its
-      // collar ID tag, the same view a QR or NFC scan opens elsewhere.
+      // A registered pet that isn't reported lost (or the owner scanning
+      // their own tag) has no scan chat: show its ID card with the owner's
+      // contact instead. This used to crash on the missing chat.
       if (!outcome.isLost || outcome.sessionId == null) {
         Navigator.push(
           context,
@@ -524,89 +548,120 @@ class _RescuePageState extends State<RescuePage> {
       backgroundColor: AppColors.background,
       appBar: AppBar(
         title: Text(
-          'Report a Stray',
-          style: Theme.of(context).textTheme.displayLarge,
+          _form.isPetSurrenderType
+              ? 'Surrender a Pet'
+              : _form.isLostPetType
+              ? 'Report a Lost or Found Pet'
+              : 'Report a Stray',
+          style: GoogleFonts.tiltWarp(fontSize: 20, color: AppColors.textPrimary),
         ),
         automaticallyImplyLeading: true,
         centerTitle: true,
-      ),
-      bottomNavigationBar: BottomNavigationBar(
-        currentIndex: 0,
-        items: const [
-          BottomNavigationBarItem(
-            icon: Icon(Icons.home_outlined),
-            activeIcon: Icon(Icons.home),
-            label: 'Home',
-          ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.notifications_outlined),
-            activeIcon: Icon(Icons.notifications),
-            label: 'Notifications',
-          ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.person_outline),
-            activeIcon: Icon(Icons.person),
-            label: 'My Profile',
-          ),
-        ],
-        onTap: (index) {
-          if (index == 0) {
-            Navigator.pushReplacement(
-              context,
-              MaterialPageRoute(builder: (context) => const HomeScreen()),
-            );
-          } else if (index == 1) {
-            Navigator.push(
-              context,
-              MaterialPageRoute(
-                builder: (context) => const NotificationsScreen(),
-              ),
-            );
-          } else if (index == 2) {
-            Navigator.push(
-              context,
-              MaterialPageRoute(builder: (context) => const UserProfile()),
-            );
-          }
-        },
       ),
       body: SingleChildScrollView(
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const SizedBox(height: 16),
-
-            RescueLocationSection(
-              pinnedLocation: _pinnedLocation,
-              hasResolvedLocation: _hasResolvedLocation,
-              pinnedAddress: _pinnedAddress,
-              loadingLocation: _loadingLocation,
-              addressController: _form.addressController,
-              onMapCreated: (ctrl) => _mapController = ctrl,
-              onMapTap: (pos) => _updatePin(pos, source: PinSource.map),
-              onLocateMe: _fetchCurrentLocation,
-              onSearch: _geocodeAddress,
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 4, 16, 14),
+              child: Text(
+                'Four short steps: where the animal is, the type of rescue, photos, and what you saw. '
+                    'Rescue reports go to our partner organizations; Pet Surrender and Lost Pet '
+                    'reports are shared with the community.',
+                style: GoogleFonts.zain(fontSize: 14, color: AppColors.textSecondary),
+              ),
             ),
 
-            const SizedBox(height: 20),
+            // A report for puppies from a litter on another report.
+            if (_form.litterLink case final link?)
+              Container(
+                width: double.infinity,
+                margin: const EdgeInsets.fromLTRB(16, 0, 16, 14),
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: AppColors.yellowrspwn.withValues(alpha: 0.2),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Text(
+                  'Reporting ${link.puppyCount} pupp${link.puppyCount == 1 ? 'y' : 'ies'} from the litter on '
+                  'report #${shortCaseId(link.parentCaseId)}. Describe each puppy on its own; this report '
+                  'stays linked to the mother\'s.',
+                  style: GoogleFonts.zain(fontSize: 13, color: AppColors.textPrimary),
+                ),
+              ),
 
-            // Include images and videos
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16),
+            RescueFormSection(
+              step: 1,
+              title: 'Location',
+              subtitle: 'Pin where the animal is right now.',
+              child: RescueLocationSection(
+                pinnedLocation: _pinnedLocation,
+                hasResolvedLocation: _hasResolvedLocation,
+                pinnedAddress: _pinnedAddress,
+                loadingLocation: _loadingLocation,
+                addressController: _form.addressController,
+                onMapCreated: (ctrl) => _mapController = ctrl,
+                onMapTap: (pos) => _updatePin(pos, source: PinSource.map),
+                onLocateMe: _fetchCurrentLocation,
+                onSearch: _geocodeAddress,
+              ),
+            ),
+
+            const SizedBox(height: 14),
+
+            // Rescue type comes before the photos: it decides which details
+            // (and how many photos) the rest of the form asks for.
+            RescueFormSection(
+              step: 2,
+              title: 'Rescue type',
+              subtitle: 'What kind of help does the animal need?',
+              child: InkWell(
+                onTap: _pickRescueType,
+                borderRadius: BorderRadius.circular(12),
+                child: Container(
+                  width: double.infinity,
+                  height: 48,
+                  padding: const EdgeInsets.symmetric(horizontal: 14),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: kRescueFieldBorder),
+                  ),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          _form.selectedRescueType ?? 'Select rescue type',
+                          style: GoogleFonts.zain(
+                            fontSize: 15,
+                            color: _form.selectedRescueType == null
+                                ? AppColors.textSecondary
+                                : AppColors.textPrimary,
+                          ),
+                        ),
+                      ),
+                      const Icon(
+                        Icons.keyboard_arrow_down,
+                        color: AppColors.textPrimary,
+                        size: 20,
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+
+            const SizedBox(height: 14),
+
+            RescueFormSection(
+              step: 3,
+              title: 'Photos and videos',
+              subtitle: _form.isLostPetType
+                  ? 'Actual photos or videos of the animal. At least 1 is required.'
+                  : 'Actual photos or videos of the animal. At least 2 are required.',
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  RescueFieldLabel('Include images and videos', required: true),
-                  const SizedBox(height: 4),
-                  Text(
-                    'Provide actual images or videos of the animal. '
-                        'At least 2 are required.',
-                    style: GoogleFonts.zain(
-                      fontSize: 11,
-                      color: AppColors.textSecondary,
-                    ),
-                  ),
-                  const SizedBox(height: 10),
                   Wrap(
                     spacing: 12,
                     runSpacing: 12,
@@ -619,84 +674,22 @@ class _RescuePageState extends State<RescuePage> {
                       ),
                     ),
                   ),
+                  const SizedBox(height: 14),
+                  // Scan NFC / QR
+                  ScanTagButton(onPressed: _showScanOptions),
                 ],
               ),
             ),
 
-            const SizedBox(height: 24),
+            const SizedBox(height: 14),
 
-            // Scan NFC / QR
-            ScanTagButton(onPressed: _showScanOptions),
-            const SizedBox(height: 24),
-
-            // Divider
-            const Divider(
-              height: 1,
-              thickness: 1,
-              indent: 16,
-              endIndent: 16,
-              color: AppColors.slaterspwn,
-            ),
-
-            const SizedBox(height: 20),
-
-            // Details Section
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16),
+            RescueFormSection(
+              step: 4,
+              title: 'Rescue details',
+              subtitle: 'Tell us about the animal and its current condition.',
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
-                    'Details:',
-                    style: GoogleFonts.tiltWarp(
-                      fontSize: 16,
-                      fontWeight: FontWeight.w300,
-                      color: AppColors.textPrimary,
-                    ),
-                  ),
-
-                  const SizedBox(height: 18),
-
-                  // Rescue Type
-                  RescueFieldLabel('Rescue Type', required: true),
-                  const SizedBox(height: 6),
-                  GestureDetector(
-                    onTap: _pickRescueType,
-                    child: Container(
-                      width: double.infinity,
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 14,
-                        vertical: 12,
-                      ),
-                      decoration: BoxDecoration(
-                        color: Colors.white,
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(color: AppColors.slaterspwn),
-                      ),
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Text(
-                            _form.selectedRescueType ?? 'Select',
-                            style: GoogleFonts.zain(
-                              fontSize: 14,
-                              color: _form.selectedRescueType == null
-                                  ? AppColors.textSecondary
-                                  : AppColors.textPrimary,
-                            ),
-                          ),
-                          const Icon(
-                            Icons.keyboard_arrow_down,
-                            color: AppColors.textPrimary,
-                            size: 20,
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-
-                  const SizedBox(height: 20),
-
                   if (_form.isPetSurrenderType) ...[
                     SurrenderFields(form: _form, onChanged: _onFormChanged),
                   ] else if (!_form.isLostPetType) ...[
@@ -706,52 +699,114 @@ class _RescuePageState extends State<RescuePage> {
                       form: _form,
                       pinnedAddress: _pinnedAddress,
                       onChanged: _onFormChanged,
+                      // A found animal that needs pickup or medical care is
+                      // a rescue report, not a lost-pet listing: switch the
+                      // form over, keeping the animals already entered.
+                      onSwitchToRescue: () => setState(
+                        () => _form.selectedRescueType = 'Injury',
+                      ),
                     ),
                   ],
                 ],
               ),
             ),
 
-            const SizedBox(height: 32),
+            const SizedBox(height: 20),
 
-            // Submit Button
+            // Declaration + notice, shown for every report type.
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16),
-              child: SizedBox(
-                width: double.infinity,
-                child: ElevatedButton(
-                  onPressed:
-                  (_isLoading ||
-                      (_form.isPetSurrenderType &&
-                          _form.isRescueOrgAcquisition))
-                      ? null
-                      : _handleSubmit,
-                  style: AppButtons.primary,
-                  child: _isLoading
-                      ? const SizedBox(
-                    height: 22,
-                    width: 22,
-                    child: CircularProgressIndicator(
-                      strokeWidth: 2.5,
-                      color: AppColors.textPrimary,
-                    ),
-                  )
-                      : Text(
-                    'Submit Report',
-                    style: GoogleFonts.tiltWarp(
-                      fontSize: 16,
-                      color: AppColors.textPrimary,
-                    ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _TruthfulnessDeclaration(
+                    isSurrender: _form.isPetSurrenderType,
+                    accepted: _form.truthfulnessDeclared,
+                    onChanged: (v) =>
+                        setState(() => _form.truthfulnessDeclared = v),
                   ),
-                ),
+                  const SizedBox(height: 16),
+                  _SubmissionNotice(
+                    message: _submissionNoticeText(),
+                    highlight: _form.isPetSurrenderType
+                        ? kSurrenderNoticeHighlight
+                        : null,
+                  ),
+                ],
               ),
             ),
 
-            const SizedBox(height: 32),
+            const SizedBox(height: 24),
           ],
         ),
       ),
+      // Pinned below the form so Submit is always in reach; anything still
+      // missing is pointed out when it is tapped.
+      bottomNavigationBar: Container(
+        decoration: BoxDecoration(
+          color: AppColors.background,
+          border: Border(top: BorderSide(color: AppColors.textPrimary.withValues(alpha: 0.12))),
+        ),
+        child: SafeArea(
+          top: false,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
+            child: SizedBox(
+              width: double.infinity,
+              child: ElevatedButton(
+                onPressed: (_isLoading || (_form.isPetSurrenderType && _form.isRescueOrgAcquisition))
+                    ? null
+                    : _handleSubmit,
+                style: AppButtons.primary,
+                child: _isLoading
+                    ? const SizedBox(
+                        height: 22,
+                        width: 22,
+                        child: CircularProgressIndicator(strokeWidth: 2.5, color: AppColors.textPrimary),
+                      )
+                    : Text(
+                        _form.isPetSurrenderType ? 'Submit Surrender' : 'Submit Report',
+                        style: GoogleFonts.tiltWarp(fontSize: 16, color: AppColors.textPrimary),
+                      ),
+              ),
+            ),
+          ),
+        ),
+      ),
     );
+  }
+
+  /// The notice above the Submit button, worded for the selected type.
+  String _submissionNoticeText() {
+    if (_form.isPetSurrenderType) {
+      return 'Thank you for thinking ahead for your pet. Your pet will be '
+          'listed in Community Adoption, where people looking to adopt can '
+          'contact you, and you choose who adopts. Until then, '
+          '$kSurrenderNoticeHighlight. Listing your pet does not guarantee a '
+          'quick adoption or rehoming, and you can withdraw your request at '
+          'any time while it is active.';
+    }
+    if (_form.isLostPetType) {
+      if (_form.isOwner == false) {
+        return 'Thank you for looking out for this animal. Your report is '
+            'shared with the community and matched against lost pet alerts so '
+            'its owner can find it. If the animal is hurt or in '
+            'danger, switch to a rescue report.';
+      }
+      return 'We are sorry your pet is missing, and we hope you are together '
+          'again soon. Your alert is shared with people nearby and matched '
+          'against found pet reports, so someone who sees your pet can '
+          'recognize it and reach you. Please keep '
+          'searching nearby, check with local shelters and your barangay, '
+          'and share your alert as widely as you can.';
+    }
+    return 'Our partner organizations review every report and will make '
+        'every effort to respond as quickly as possible. However, response '
+        'times depend on the availability of volunteers, transport, and '
+        'shelter space, so a rescue cannot be guaranteed. If it is safe to '
+        'do so, please stay near the animal, keep it in sight, and provide '
+        'water or shelter until help arrives. Your continued assistance can '
+        'make a critical difference.';
   }
 
   void _showError(String message) {
@@ -788,6 +843,12 @@ class _RescuePageState extends State<RescuePage> {
   }
 
   Future<void> _handleSubmit() async {
+    final declarationError = _form.validateDeclaration();
+    if (declarationError != null) {
+      _showError(declarationError);
+      return;
+    }
+
     if (_form.isLostPetType) {
       await _submitLostPetReport();
       return;
@@ -813,10 +874,18 @@ class _RescuePageState extends State<RescuePage> {
     }
     for (var i = 0; i < validAnimals.length; i++) {
       final entry = validAnimals[i];
-      if (!entry.hasCompleteAssessment) {
-        setState(() => entry.hasAssessmentError = true);
+      if (!entry.isAssessmentComplete(
+        isSurrender: _form.isPetSurrenderType,
+        requireVisibleSigns: _form.asksVisibleSigns,
+      )) {
+        setState(() {
+          entry.hasAssessmentError = true;
+          entry.expanded = true; // open it so the missing fields show
+        });
         _showError(
-          'Complete the Health & Behavior Assessment for Animal ${i + 1}.',
+          _form.isPetSurrenderType
+              ? 'Complete all details for Animal ${i + 1}.'
+              : 'Complete the Health & Behavior Assessment for Animal ${i + 1}.',
         );
         WidgetsBinding.instance.addPostFrameCallback((_) {
           final cardContext = entry.cardKey.currentContext;
@@ -849,6 +918,15 @@ class _RescuePageState extends State<RescuePage> {
         onProgress: _onUploadProgress,
       );
 
+      if (!mounted) return;
+      // A litter with puppies that need attention: offer their own report
+      // now (it stays linked to this one). Also offered later on Track Case.
+      final link = litterReportOffer(primaryCaseId, _form.validAnimals);
+      if (link != null && await confirmLitterReport(context, link)) {
+        if (!mounted) return;
+        Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => RescuePage(litterLink: link)));
+        return;
+      }
       if (mounted) {
         Navigator.pushReplacement(
           context,
@@ -878,7 +956,7 @@ class _RescuePageState extends State<RescuePage> {
     setState(() => _isLoading = true);
 
     try {
-      final matchCount = await _reportService.submitLostPetReport(
+      await _reportService.submitLostPetReport(
         form: _form,
         location: _pinnedLocation,
         pinnedAddress: _pinnedAddress,
@@ -905,13 +983,11 @@ class _RescuePageState extends State<RescuePage> {
               ),
             ),
             content: Text(
-              matchCount > 0
-                  ? 'We found $matchCount possible match(es). '
-                  'Open this report from your Activity feed and check the '
-                  'Possible Matches section once our team verifies them.'
-                  : "We'll notify you the moment a possible match comes in — "
-                  'check the Possible Matches section on this report from '
-                  'your Activity feed.',
+              "We're checking open reports for possible matches now. "
+                  "We'll notify you when a likely match comes in — you can "
+                  'also check the Possible Matches section on this report '
+                  'from your Activity feed.'
+                  '${_form.isOwner == true && _form.linkedCollarTag != null ? '\n\n${_form.linkedCollarTag!.name.isNotEmpty ? _form.linkedCollarTag!.name : 'Your pet'}\'s collar tag is now marked lost. Anyone who scans it, in the app or on the web, can message you.' : ''}',
               style: GoogleFonts.zain(
                 fontSize: 14,
                 color: AppColors.textSecondary,
@@ -922,11 +998,9 @@ class _RescuePageState extends State<RescuePage> {
                 width: double.infinity,
                 child: ElevatedButton(
                   onPressed: () {
-                    Navigator.pop(context);
-                    Navigator.pushReplacement(
-                      context,
-                      MaterialPageRoute(builder: (_) => const HomeScreen()),
-                    );
+                    // Back to the existing home shell rather than
+                    // stacking a second one on top of it.
+                    Navigator.of(context).popUntil((route) => route.isFirst);
                   },
                   style: AppButtons.primary,
                   child: Text(
@@ -948,5 +1022,170 @@ class _RescuePageState extends State<RescuePage> {
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
+  }
+}
+
+
+/// The bold part of the Pet Surrender notice above the Submit button.
+const String kSurrenderNoticeHighlight =
+    'please keep giving your pet food, shelter and care, as it stays in your '
+    'care until it is adopted';
+
+/// Checkbox declaring the report is truthful and accurate. Required before
+/// any report type can be submitted.
+class _TruthfulnessDeclaration extends StatelessWidget {
+  const _TruthfulnessDeclaration({
+    required this.isSurrender,
+    required this.accepted,
+    required this.onChanged,
+  });
+
+  /// Pet Surrender adds a declaration of ownership.
+  final bool isSurrender;
+  final bool accepted;
+  final ValueChanged<bool> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: () => onChanged(!accepted),
+      behavior: HitTestBehavior.opaque,
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            width: 20,
+            height: 20,
+            child: Checkbox(
+              value: accepted,
+              onChanged: (v) => onChanged(v ?? false),
+              activeColor: AppColors.textPrimary,
+              side: const BorderSide(color: AppColors.textPrimary, width: 1.5),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(2),
+              ),
+              materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text.rich(
+              TextSpan(
+                children: [
+                  TextSpan(
+                    text: 'Declaration of Accuracy. ',
+                    style: GoogleFonts.zain(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w700,
+                      color: AppColors.textPrimary,
+                    ),
+                  ),
+                  TextSpan(
+                    text:
+                    'I certify that the information, photos, and videos '
+                        'in this report are true and accurate to the best of '
+                        'my knowledge. ',
+                    style: GoogleFonts.zain(
+                      fontSize: 13,
+                      color: AppColors.textPrimary,
+                    ),
+                  ),
+                  if (isSurrender)
+                    TextSpan(
+                      text:
+                      'I further declare that I am the lawful owner of the '
+                          'animal(s) being surrendered and have the right to '
+                          'transfer their ownership. ',
+                      style: GoogleFonts.zain(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w700,
+                        color: AppColors.textPrimary,
+                      ),
+                    ),
+                  TextSpan(
+                    text:
+                    'I understand that false or misleading reports take '
+                        'rescue resources away from animals in genuine need '
+                        'and may result in this report being declined.',
+                    style: GoogleFonts.zain(
+                      fontSize: 13,
+                      color: AppColors.textPrimary,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Informational notice shown directly above the Submit button.
+class _SubmissionNotice extends StatelessWidget {
+  const _SubmissionNotice({required this.message, this.highlight});
+
+  final String message;
+
+  /// Part of [message] to show in bold, if any.
+  final String? highlight;
+
+  TextSpan _highlighted() {
+    final h = highlight;
+    final at = h == null ? -1 : message.indexOf(h);
+    if (h == null || at < 0) return TextSpan(text: message);
+    return TextSpan(
+      children: [
+        TextSpan(text: message.substring(0, at)),
+        TextSpan(
+          text: h,
+          style: const TextStyle(fontWeight: FontWeight.w700),
+        ),
+        TextSpan(text: message.substring(at + h.length)),
+      ],
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: AppColors.yellowrspwn.withValues(alpha: 0.2),
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Icon(Icons.info_outline, size: 18, color: AppColors.textPrimary),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Please note',
+                  style: GoogleFonts.zain(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w700,
+                    color: AppColors.textPrimary,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text.rich(
+                  _highlighted(),
+                  style: GoogleFonts.zain(
+                    fontSize: 12.5,
+                    color: AppColors.textPrimary,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
   }
 }

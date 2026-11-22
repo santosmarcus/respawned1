@@ -35,6 +35,10 @@
       {
         "source": "/referral/**",
         "destination": "/referral/index.html"
+      },
+      {
+        "source": "/animal/**",
+        "function": "publicAnimalPage"
       }
     ],
     "headers": [

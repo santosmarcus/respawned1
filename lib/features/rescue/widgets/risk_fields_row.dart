@@ -35,14 +35,14 @@ class RiskFieldsRow extends StatelessWidget {
     return LayoutBuilder(
       builder: (context, constraints) {
         final bite = RiskDropdown(
-          label: 'Bite Risk',
+          label: 'Might it bite?',
           hintText: 'Select',
           value: entry.biteRisk,
           options: kBiteRiskLevels,
           onChanged: (v) => _set(() => entry.biteRisk = v),
         );
         final escape = RiskDropdown(
-          label: 'Escape Risk',
+          label: 'Might it run away?',
           hintText: 'Select',
           value: entry.escapeRisk,
           options: kEscapeRiskLevels,

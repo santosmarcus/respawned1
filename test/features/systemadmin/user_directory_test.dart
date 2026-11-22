@@ -45,10 +45,28 @@ void main() {
     expect(accountTypeLabelOf(kSystemAdminRole), 'System admin');
   });
 
+  test('rescue volunteers\' teams land in the volunteers tab, not Organization', () {
+    const ids = {'vol1'};
+    expect(groupOf(user('a', role: 'organization', org: 'vol1'), volunteerOrgIds: ids), AccountGroup.volunteers);
+    expect(groupOf(user('a', role: 'organization_member', org: 'vol1'), volunteerOrgIds: ids), AccountGroup.volunteers);
+    expect(groupOf(user('a', role: 'organization', org: 'shelter1'), volunteerOrgIds: ids), AccountGroup.organization);
+    // Signed up as a rescue volunteer, team not created yet.
+    const signup = DirectoryUser(uid: 's', name: 'Sol', role: 'organization', signupKind: 'independent');
+    expect(groupOf(signup), AccountGroup.volunteers);
+    expect(signup.accountTypeLabel, 'Rescue volunteer');
+    expect(unlinkedOrganizationAccounts([signup, user('o', role: 'organization')]).map((u) => u.uid), ['o']);
+    expect(
+      unlinkedOrganizationAccounts([signup, user('o', role: 'organization')], group: AccountGroup.volunteers)
+          .map((u) => u.uid),
+      ['s'],
+    );
+    expect(DirectoryUser.fromMap('x', {'role': 'organization', 'signupKind': 'independent'}).isRescueVolunteerSignup, isTrue);
+  });
+
   test('transporter status labels', () {
     expect(transporterStatusLabel('approved'), 'Verified');
     expect(transporterStatusLabel('pending'), 'Waiting for organization review');
-    expect(transporterStatusLabel('rejected'), 'Not approved');
+    expect(transporterStatusLabel('rejected'), 'Rejected');
     expect(transporterStatusLabel(''), 'Documents not submitted');
   });
 
@@ -84,16 +102,16 @@ void main() {
       usersById: users,
     );
 
-    test('owner first, then admins, staff, carers, linked accounts, inactive last', () {
-      expect(roster.map((e) => e.uid), ['owner', 'staff', 'ghost', 'carer', 'linked', 'gone']);
+    test('owner first, then admins, staff (former carers included), linked accounts, inactive last', () {
+      expect(roster.map((e) => e.uid), ['owner', 'carer', 'staff', 'ghost', 'linked', 'gone']);
     });
 
     test('labels the role there', () {
       final byUid = {for (final e in roster) e.uid: e};
       expect(byUid['owner']!.roleLabel, 'Owner · Admin');
-      // A legacy carer reads as Staff with the Animal care preset.
+      // A legacy carer reads as Staff with the default set (carers were merged into Staff).
       expect(byUid['carer']!.role, OrgRole.staff);
-      expect(byUid['carer']!.roleLabel, 'Staff · Animal care');
+      expect(byUid['carer']!.roleLabel, 'Staff');
       expect(byUid['linked']!.roleLabel, 'Linked account');
       expect(byUid['gone']!.inactive, isTrue);
       // A members doc with no profile is still listed.

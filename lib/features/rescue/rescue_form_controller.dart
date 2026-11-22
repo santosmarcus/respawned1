@@ -2,7 +2,11 @@
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 
+import 'package:respawnd1/core/models/rescue/org_involvement.dart';
+import 'package:respawnd1/core/utils/animal_health_assessment.dart';
+import 'package:respawnd1/core/utils/urgency_assessment.dart';
 import 'package:respawnd1/core/utils/validators.dart';
+import 'package:respawnd1/features/collartag/collar_tag_data_model.dart';
 import 'package:respawnd1/features/rescue/rescue_form_options.dart';
 
 /// One media slot (photo or video) picked for the report.
@@ -19,12 +23,127 @@ class RescueMediaItem {
 
 /// One animal in a (possibly multi-animal) report.
 class FoundAnimalEntry {
-  String? species; // 'Dog' | 'Cat'
+  String? _species; // 'Dog' | 'Cat'
+  String? get species => _species;
+
+  /// Litter questions are dog-only: switching to another species drops them.
+  set species(String? value) {
+    _species = value;
+    if (!asksLitterDetails) _clearLitter();
+  }
   String? breed; // one of breedOptionsFor(species), or kOthersBreedLabel
   final TextEditingController breedOtherController = TextEditingController();
   final TextEditingController colorController = TextEditingController();
-  String? sex;
+  String? _sex;
   String? size;
+
+  String? get sex => _sex;
+
+  /// Sets the sex and clears the female-only answers when it is no longer
+  /// Female, so a report never carries a litter/pregnancy answer that
+  /// contradicts the animal's sex.
+  set sex(String? value) {
+    _sex = value;
+    if (!sexAllowsPregnancyQuestions(value)) {
+      hasLitter = null;
+      suspectedPregnancy = null;
+    }
+  }
+
+  // Female-only (kLitterOptions / kSuspectedPregnancyOptions). Reporter
+  // observations: a suspected pregnancy is never treated as confirmed.
+  String? _hasLitter;
+  String? suspectedPregnancy;
+
+  String? get hasLitter => _hasLitter;
+
+  /// Anything but Yes drops the litter details (count, places, condition).
+  set hasLitter(String? value) {
+    _hasLitter = value;
+    if (!asksLitterDetails) _clearLitter();
+  }
+
+  // ---- Litter: a female dog that has a litter ([asksLitterDetails]) ------
+  final TextEditingController litterCountController = TextEditingController();
+  String? litterLocation; // kLitterLocationOptions
+  /// One per known group when the puppies are split up.
+  final List<TextEditingController> litterGroupControllers = [];
+  String? litterCondition; // kLitterConditionOptions
+  final TextEditingController litterNotesController = TextEditingController();
+  final List<XFile> litterPhotos = [];
+  /// How many puppies need their own rescue report (sick, injured, weak).
+  final TextEditingController puppiesNeedingAttentionController = TextEditingController();
+
+  /// Only for a female dog the reporter says has a litter. Not asked for
+  /// cats, other sexes, or a suspected pregnancy without a litter.
+  bool get asksLitterDetails =>
+      _species == 'Dog' && sexAllowsPregnancyQuestions(_sex) && _hasLitter == 'Yes';
+
+  int? get litterCount => int.tryParse(litterCountController.text.trim());
+  int? get puppiesNeedingAttention => int.tryParse(puppiesNeedingAttentionController.text.trim());
+  bool get litterNeedsAttention => asksLitterDetails && litterConditionNeedsAttention(litterCondition);
+
+  /// What is still missing or wrong in the litter details, or null.
+  String? get litterError {
+    if (!asksLitterDetails) return null;
+    final count = litterCount;
+    if (count == null || count < 1) return 'Enter how many puppies are in the litter (at least 1).';
+    if (count > kMaxLitterSize) return 'Enter a litter size of $kMaxLitterSize puppies or fewer.';
+    if (litterLocation == null) return 'Say where the puppies are.';
+    if (litterCondition == null) return 'Say how the puppies look.';
+    if (litterNeedsAttention) {
+      final n = puppiesNeedingAttention;
+      if (n == null || n < 1 || n > count) {
+        return 'Enter how many puppies need attention (1 to $count).';
+      }
+    }
+    return null;
+  }
+
+  void _clearLitter() {
+    litterCountController.clear();
+    litterLocation = null;
+    for (final c in litterGroupControllers) {
+      c.dispose();
+    }
+    litterGroupControllers.clear();
+    litterCondition = null;
+    litterNotesController.clear();
+    litterPhotos.clear();
+    puppiesNeedingAttentionController.clear();
+  }
+
+  /// The litter as saved on the report's animals[] entry (photos are added
+  /// after upload, as `litterPhotoUrls` on the case). Null when not asked.
+  Map<String, dynamic>? get litterMap {
+    if (!asksLitterDetails) return null;
+    return {
+      'count': litterCount,
+      'location': litterLocation,
+      if (litterLocationIsSplit(litterLocation))
+        'groupLocations': [
+          for (final c in litterGroupControllers)
+            if (c.text.trim().isNotEmpty) c.text.trim(),
+        ],
+      'condition': litterCondition,
+      if (litterNotesController.text.trim().isNotEmpty) 'notes': litterNotesController.text.trim(),
+      if (litterNeedsAttention) 'puppiesNeedingAttention': puppiesNeedingAttention,
+    };
+  }
+
+  // Visible injury and whether the reporter's photos show it (the app
+  // does not analyze photos itself).
+  String? _injury;
+  String? injuryVisibleInPhotos;
+
+  String? get injury => _injury;
+  set injury(String? value) {
+    _injury = value;
+    if (!asksInjuryPhotos) injuryVisibleInPhotos = null;
+  }
+
+  bool get asksInjuryPhotos =>
+      _injury != null && _injury != kInjuryNone && _injury != kNotAssessedOption;
 
   // Health & Behavior Assessment — per animal, never applied across other
   // animals in the same multi-animal report; each entry owns its own
@@ -42,12 +161,29 @@ class FoundAnimalEntry {
   // list (see EnvironmentSafetySection).
   final Set<String> environmentSafety = {};
   final TextEditingController environmentSafetyOtherController =
-      TextEditingController();
+  TextEditingController();
 
   // Per-animal safety risk — never applied across other animals in the
   // same multi-animal report; each entry owns its own values.
   String? biteRisk;
   String? escapeRisk;
+
+  // Injury, Illness and Neglect or Abuse — asked per animal inside its
+  // card (see visibleSignsOptionsFor).
+  final Set<String> visibleSigns = {};
+  String? needsMedical;
+
+  // Pet Surrender only — asked per animal inside its card.
+  final TextEditingController ageController = TextEditingController();
+  final TextEditingController stayDurationController = TextEditingController();
+  String? acquisitionSource;
+  String? vaccination;
+  String? spayNeuter;
+  final Set<String> compatibility = {};
+
+  /// Came from another rescue org: the surrender flow stops and the owner
+  /// is redirected back to that org instead.
+  bool get isRescueOrgAcquisition => acquisitionSource == 'Rescue Org';
 
   // Scroll target + error-highlight flag for this animal's card — set on a
   // failed submit so the form can scroll to and visually flag exactly
@@ -56,22 +192,81 @@ class FoundAnimalEntry {
   final GlobalKey cardKey = GlobalKey();
   bool hasAssessmentError = false;
 
-  bool get hasCompleteAssessment =>
-      bodyCondition != null &&
-      mobility != null &&
-      alertness != null &&
-      eyesNoseMouth != null &&
-      skinAndCoat != null &&
-      appetiteHydration != null &&
-      behavior.isNotEmpty &&
-      environmentSafety.isNotEmpty &&
-      biteRisk != null &&
-      escapeRisk != null;
+  /// Whether this animal's card is open. Every card can be collapsed from
+  /// its header; adding another animal collapses the ones already filled.
+  /// Answers live here, so collapsing never resets them.
+  bool expanded = true;
+
+  bool get hasCompleteAssessment => isAssessmentComplete();
+
+  /// Whether every field in this animal's card is answered. On Pet
+  /// Surrender ([isSurrender]) Environment and Safety is hidden (the owner
+  /// has the pet at home) and the surrender questions are required instead.
+  bool isAssessmentComplete({
+    bool isSurrender = false,
+    bool requireVisibleSigns = false,
+  }) =>
+      (!requireVisibleSigns ||
+          (visibleSigns.isNotEmpty && needsMedical != null)) &&
+          // Visible injury feeds the urgency assessment; not asked on a
+          // surrender (no urgency).
+          (isSurrender ||
+              (injury != null &&
+                  (!asksInjuryPhotos || injuryVisibleInPhotos != null))) &&
+          (!sexAllowsPregnancyQuestions(sex) ||
+              (hasLitter != null && suspectedPregnancy != null)) &&
+          litterError == null &&
+          bodyCondition != null &&
+          mobility != null &&
+          alertness != null &&
+          eyesNoseMouth != null &&
+          skinAndCoat != null &&
+          appetiteHydration != null &&
+          behavior.isNotEmpty &&
+          biteRisk != null &&
+          escapeRisk != null &&
+          (isSurrender ? hasSurrenderDetails : environmentSafety.isNotEmpty);
+
+  bool get hasSurrenderDetails =>
+      ageController.text.trim().isNotEmpty &&
+          stayDurationController.text.trim().isNotEmpty &&
+          acquisitionSource != null &&
+          vaccination != null &&
+          spayNeuter != null &&
+          compatibility.isNotEmpty;
+
+  /// This animal's answers for the urgency assessment.
+  AnimalUrgencyInput get urgencyInput => AnimalUrgencyInput(
+        injury: injury,
+        injuryVisibleInPhotos: injuryVisibleInPhotos,
+        bodyCondition: bodyCondition,
+        mobility: mobility,
+        alertness: alertness,
+        eyesNoseMouth: eyesNoseMouth,
+        skinAndCoat: skinAndCoat,
+        appetiteHydration: appetiteHydration,
+        behavior: behavior,
+        environmentSafety: environmentSafety,
+        biteRisk: biteRisk,
+        sex: sex,
+        hasLitter: hasLitter,
+        suspectedPregnancy: suspectedPregnancy,
+        visibleSigns: visibleSigns,
+        needsMedical: needsMedical,
+      );
 
   void dispose() {
     breedOtherController.dispose();
     colorController.dispose();
     environmentSafetyOtherController.dispose();
+    ageController.dispose();
+    litterCountController.dispose();
+    litterNotesController.dispose();
+    puppiesNeedingAttentionController.dispose();
+    for (final c in litterGroupControllers) {
+      c.dispose();
+    }
+    stayDurationController.dispose();
   }
 
   String get speciesText => species ?? '';
@@ -81,6 +276,28 @@ class FoundAnimalEntry {
         ? breedOtherController.text.trim()
         : breed!;
   }
+}
+
+/// A rescue report for puppies from a litter reported on another case
+/// (LitterDetailsFields → "report these puppies separately"). Saved as
+/// `litterOf` on the new case; the mother's case lists it in
+/// `litterReportCaseIds`.
+class LitterReportLink {
+  const LitterReportLink({
+    required this.parentCaseId,
+    required this.motherIndex,
+    required this.puppyCount,
+  });
+
+  final String parentCaseId;
+
+  /// The mother's index in the parent case's animals[].
+  final int motherIndex;
+
+  /// How many puppies need their own report (pre-filled as animals).
+  final int puppyCount;
+
+  Map<String, dynamic> toMap() => {'caseId': parentCaseId, 'animalIndex': motherIndex, 'puppyCount': puppyCount};
 }
 
 /// All user-entered state of the Report a Stray form, plus the form's
@@ -96,12 +313,33 @@ class RescueFormController {
   final TextEditingController witnessNameController = TextEditingController();
   final TextEditingController witnessNumberController = TextEditingController();
   final TextEditingController accessInstructionsController =
-      TextEditingController();
+  TextEditingController();
   final TextEditingController bestTimeContactController =
-      TextEditingController();
+  TextEditingController();
 
-  String? selectedUrgency;
   String? selectedRescueType;
+
+  /// Set when this report is for puppies from a litter on another report.
+  LitterReportLink? litterLink;
+
+  /// Starts a puppy report: [link.puppyCount] small dogs, already filled
+  /// in, under the Illness type (the reporter can change both).
+  void startLitterReport(LitterReportLink link) {
+    litterLink = link;
+    selectedRescueType = 'Illness';
+    for (final a in foundAnimals) {
+      a.dispose();
+    }
+    foundAnimals
+      ..clear()
+      ..addAll([
+        for (var i = 0; i < link.puppyCount; i++)
+          FoundAnimalEntry()
+            ..species = 'Dog'
+            ..size = 'Small'
+            ..expanded = i == 0,
+      ]);
+  }
   String? coordinateChoice;
   String? adoptionChoice;
   // Only asked/answered when adoptionChoice == 'yes' — resets to false if
@@ -126,15 +364,58 @@ class RescueFormController {
   final TextEditingController petNameController = TextEditingController();
   String? lostBreed;
   final TextEditingController lostBreedOtherController =
-      TextEditingController();
+  TextEditingController();
   final TextEditingController lostColorController = TextEditingController();
   DateTime? lastSeenDate;
   TimeOfDay? lastSeenTime;
   final TextEditingController rewardAmountController = TextEditingController();
   final TextEditingController ownerContactController = TextEditingController();
   String? lostSex;
+  /// Old reports only: the owner form's former Temperament question, now
+  /// covered by [lostAnimal]'s Behavior and Bite Risk.
   String? temperament;
   bool offerReward = false;
+
+  /// The lost pet's Health & Behavior Assessment and Bite Risk, as the
+  /// owner knows them (same fields and choices as a found animal's card).
+  final FoundAnimalEntry lostAnimal = FoundAnimalEntry();
+
+  /// The owner's registered collar-tag pet this lost report is for, if they
+  /// picked one. Submitting marks that tag lost and links the report to it
+  /// (CollarTagLostFound.linkLostReport).
+  CollarTagData? linkedCollarTag;
+
+  /// The tag's photo stands in for the report's photo when none is added.
+  bool get hasLinkedTagPhoto => linkedCollarTag?.petImageUrl?.isNotEmpty == true;
+
+  /// Fills the owner's fields from a registered collar tag.
+  void applyCollarTag(CollarTagData tag) {
+    linkedCollarTag = tag;
+    if (tag.name.trim().isNotEmpty) petNameController.text = tag.name.trim();
+    final (species, breed) = CollarTagLostFound.speciesAndBreed(tag.breed);
+    if (species != null) {
+      selectedAnimalType = species;
+      if (breed.isEmpty) {
+        lostBreed = null;
+      } else if (breedOptionsFor(species).contains(breed)) {
+        lostBreed = breed;
+      } else {
+        lostBreed = kOthersBreedLabel;
+        lostBreedOtherController.text = breed;
+      }
+    }
+    lostSex = switch (tag.sex.trim().toUpperCase()) {
+      'M' || 'MALE' => 'Male',
+      'F' || 'FEMALE' => 'Female',
+      _ => lostSex,
+    };
+    if (tag.colorMarkings.trim().isNotEmpty) {
+      lostColorController.text = tag.colorMarkings.trim();
+    }
+    if (tag.ownerMobile.trim().isNotEmpty) {
+      ownerContactController.text = tag.ownerMobile.trim();
+    }
+  }
 
   String get lostBreedText {
     if (lostBreed == null) return '';
@@ -144,36 +425,109 @@ class RescueFormController {
   }
 
   // Pet Surrender — its own distinct question set (see SurrenderFields).
-  final TextEditingController surrenderDurationController =
-      TextEditingController();
-  final TextEditingController surrenderAgeController = TextEditingController();
+  // Age, stay, acquisition, vaccination, spay/neuter and compatibility are
+  // asked per animal (FoundAnimalEntry).
   String? surrenderReason;
   final TextEditingController surrenderReasonOtherController =
-      TextEditingController();
+  TextEditingController();
   final TextEditingController surrenderExplanationController =
-      TextEditingController();
-  String? petAcquisitionSource;
+  TextEditingController();
+  String? surrenderTimeline;
+
+  /// Optional photos of vaccination cards or vet records (Pet Surrender).
+  final List<XFile> vetRecordPhotos = [];
+
+  /// The reporter's declaration that the report is truthful and accurate.
+  /// Required before any report type is submitted.
+  bool truthfulnessDeclared = false;
 
   // Only these reasons need the reporter to explain what's actually wrong
   // and what they've already tried — a plain checkbox reason isn't enough
   // for staff to assess these two specifically.
   bool get surrenderNeedsExplanation =>
       surrenderReason == 'Medical issues (pet)' ||
-      surrenderReason == 'Behavioral issues';
+          surrenderReason == 'Behavioral issues';
 
   // Once the pet came from another rescue org, this flow is meant to stop
   // here and redirect the owner back to that org rather than collect a
   // full surrender case for this one.
-  bool get isRescueOrgAcquisition => petAcquisitionSource == 'Rescue Org';
+  bool get isRescueOrgAcquisition =>
+      foundAnimals.any((a) => a.isRescueOrgAcquisition);
 
   // Finder-side: one card per animal found (supports a multi-animal group case)
   final List<FoundAnimalEntry> foundAnimals = [FoundAnimalEntry()];
   final TextEditingController finderContactController = TextEditingController();
   String? animalStatus; // 'with_finder' | 'still_roaming' | 'brought_to_vet'
-  bool finderNeedsRescue = false;
 
-  bool get isLostPetType => selectedRescueType == 'Lost Pet';
-  bool get isPetSurrenderType => selectedRescueType == 'Pet Surrender';
+  // Abandonment — follow-up questions (see AbandonmentFields).
+  String? abandonmentDuration;
+  String? abandonmentLocation;
+  final TextEditingController abandonmentLocationOtherController =
+  TextEditingController();
+  String? abandonmentFoodWater;
+  String? abandonmentCanProvideFood;
+  String? abandonmentWitness;
+  final TextEditingController abandonmentWitnessDetailsController =
+  TextEditingController();
+  String? abandonmentBelongings;
+  final TextEditingController abandonmentBelongingsDetailsController =
+  TextEditingController();
+
+  bool get isAbandonmentType => selectedRescueType == kAbandonmentType;
+
+  // Neglect or Abuse — follow-up questions (see NeglectAbuseFields).
+  final Set<String> neglectObserved = {};
+  final TextEditingController neglectObservedOtherController =
+  TextEditingController();
+  String? neglectHappeningNow;
+  String? neglectOwnerKnown;
+  final TextEditingController neglectOwnerDetailsController =
+  TextEditingController();
+  String? neglectFrequency;
+  String? neglectReportedToAuthorities;
+  final TextEditingController neglectReportReferenceController =
+  TextEditingController();
+  String? neglectWillingWitness;
+
+  bool get isNeglectAbuseType => selectedRescueType == kNeglectAbuseType;
+
+  /// Neglect or Abuse: kAbusePathOrgAssistance | kAbusePathIndependent.
+  String? abuseReportPath;
+  bool get isIndependentAbuseReport =>
+      isNeglectAbuseType && abuseReportPath == kAbusePathIndependent;
+
+  /// The organization's expected role in this report.
+  OrgInvolvement get orgInvolvement => orgInvolvementFor(
+        rescueType: selectedRescueType,
+        abuseReportPath: abuseReportPath,
+      );
+
+  /// Whether this report asks the organization to coordinate (shelter
+  /// coordination, witnesses, adoption interest).
+  bool get asksOrgCoordination =>
+      orgInvolvement == OrgInvolvement.orgAssist && !isLostPetType;
+
+  /// Live urgency assessment from the animals' answers; null for report
+  /// types that carry no urgency (Pet Surrender, Lost Pet) and before any
+  /// animal has a species.
+  UrgencyAssessment? get urgencyAssessment {
+    if (selectedRescueType == null || !orgInvolvement.ratesUrgency) return null;
+    final animals = validAnimals;
+    if (animals.isEmpty) return null;
+    return assessCaseUrgency([for (final a in animals) a.urgencyInput]);
+  }
+
+  /// Injury, Illness and Neglect or Abuse ask each animal's visible signs
+  /// and whether it needs immediate medical attention.
+  bool get asksVisibleSigns =>
+      visibleSignsOptionsFor(selectedRescueType) != null;
+
+  /// Only asked when the animal may be without food or water.
+  bool get asksAbandonmentCanProvideFood =>
+      abandonmentFoodWater != null && abandonmentFoodWater != 'Yes';
+
+  bool get isLostPetType => selectedRescueType == kRescueTypeLostPet;
+  bool get isPetSurrenderType => selectedRescueType == kRescueTypePetSurrender;
 
   final List<RescueMediaItem?> mediaFiles = [null, null, null, null];
   final List<double?> uploadProgress = [null, null, null, null];
@@ -187,8 +541,8 @@ class RescueFormController {
   /// The typed search address if any, otherwise the map pin's address.
   String resolvedAddress(String pinnedAddress) =>
       addressController.text.trim().isEmpty
-      ? pinnedAddress
-      : addressController.text.trim();
+          ? pinnedAddress
+          : addressController.text.trim();
 
   /// Required-field checks for a stray / surrender report, in the same
   /// order as before. Returns the message to show, or null when valid.
@@ -201,12 +555,9 @@ class RescueFormController {
 
     if (isPetSurrenderType) {
       if (condition.isEmpty ||
-          selectedUrgency == null ||
           valid.isEmpty ||
-          surrenderDurationController.text.trim().isEmpty ||
-          surrenderAgeController.text.trim().isEmpty ||
           surrenderReason == null ||
-          petAcquisitionSource == null) {
+          surrenderTimeline == null) {
         return 'Please fill in all required fields.';
       }
       if (surrenderReason == 'Other (please specify)' &&
@@ -217,23 +568,55 @@ class RescueFormController {
           surrenderExplanationController.text.trim().isEmpty) {
         return 'Please explain the issue and what you\'ve tried.';
       }
+    } else if (isNeglectAbuseType && abuseReportPath == null) {
+      return 'Please choose how you want to handle this report.';
     } else if (condition.isEmpty ||
         selectedRescueType == null ||
-        selectedUrgency == null ||
         valid.isEmpty ||
         onSiteChoice == null ||
-        coordinateChoice == null ||
-        adoptionChoice == null) {
+        (asksOrgCoordination &&
+            (coordinateChoice == null || adoptionChoice == null))) {
       return 'Please fill in all required fields.';
     }
 
-    if (!isPetSurrenderType &&
+    if (isAbandonmentType &&
+        (abandonmentDuration == null ||
+            abandonmentLocation == null ||
+            abandonmentFoodWater == null ||
+            (asksAbandonmentCanProvideFood &&
+                abandonmentCanProvideFood == null) ||
+            abandonmentWitness == null ||
+            abandonmentBelongings == null)) {
+      return 'Please fill in all required fields.';
+    }
+    if (isNeglectAbuseType) {
+      if (neglectObserved.isEmpty ||
+          neglectHappeningNow == null ||
+          neglectOwnerKnown == null ||
+          neglectFrequency == null ||
+          neglectReportedToAuthorities == null ||
+          neglectWillingWitness == null) {
+        return 'Please fill in all required fields.';
+      }
+      if (neglectObserved.contains(kNeglectObservedOther) &&
+          neglectObservedOtherController.text.trim().isEmpty) {
+        return 'Please describe what you are seeing.';
+      }
+    }
+
+    if (isAbandonmentType &&
+        abandonmentLocation == kAbandonmentLocationOther &&
+        abandonmentLocationOtherController.text.trim().isEmpty) {
+      return 'Please specify where the animal was left.';
+    }
+
+    if (asksOrgCoordination &&
         adoptionChoice == 'yes' &&
         !adoptionCommitmentAccepted) {
       return 'Please agree to the adoption-interest terms before submitting.';
     }
 
-    if (!isPetSurrenderType && coordinateChoice == 'no') {
+    if (asksOrgCoordination && coordinateChoice == 'no') {
       final witnessNameError = AppValidators.name(
         witnessNameController.text,
         fieldName: 'Witness name',
@@ -247,6 +630,13 @@ class RescueFormController {
     return null;
   }
 
+  /// The truthfulness declaration every report type must accept before
+  /// it is submitted. Returns the message to show, or null when accepted.
+  String? validateDeclaration() => truthfulnessDeclared
+      ? null
+      : 'Please confirm that the information you provided is truthful and '
+      'accurate.';
+
   /// Required-field checks for a Lost Pet report (owner or finder side), in
   /// the same order as before. Returns the message to show, or null.
   String? validateLostPetReport() {
@@ -254,7 +644,8 @@ class RescueFormController {
       return 'Please tell us whether you are the owner.';
     }
 
-    if (filledMediaCount < 1) {
+    // An owner who picked a registered pet can use its collar-tag photo.
+    if (filledMediaCount < 1 && !(isOwner == true && hasLinkedTagPhoto)) {
       return 'Please add at least 1 photo.';
     }
 
@@ -281,11 +672,11 @@ class RescueFormController {
       }
     } else {
       final hasEmptySpecies = foundAnimals.any((a) => a.speciesText.isEmpty);
+      // No free-text condition on the finder side: each animal's Health &
+      // Behavior Assessment (in its card) describes its condition.
       if (hasEmptySpecies ||
-          conditionController.text.trim().isEmpty ||
           animalStatus == null ||
-          finderContactController.text.trim().isEmpty ||
-          (finderNeedsRescue && selectedUrgency == null)) {
+          finderContactController.text.trim().isEmpty) {
         return 'Please fill in all required fields.';
       }
 
@@ -310,12 +701,17 @@ class RescueFormController {
     rewardAmountController.dispose();
     ownerContactController.dispose();
     finderContactController.dispose();
-    surrenderDurationController.dispose();
-    surrenderAgeController.dispose();
     surrenderReasonOtherController.dispose();
+    abandonmentWitnessDetailsController.dispose();
+    abandonmentLocationOtherController.dispose();
+    neglectObservedOtherController.dispose();
+    neglectOwnerDetailsController.dispose();
+    neglectReportReferenceController.dispose();
+    abandonmentBelongingsDetailsController.dispose();
     surrenderExplanationController.dispose();
     for (final a in foundAnimals) {
       a.dispose();
     }
+    lostAnimal.dispose();
   }
 }

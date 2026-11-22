@@ -49,6 +49,8 @@ class ClinicAssignmentRepository {
         'vetClinicLng': clinicLng,
         'vetClinicPhone': clinicPhone,
         'vetClinicSelectedAt': Timestamp.now(),
+        // Picking a clinic means the clinic route again (see sendToShelter).
+        'transportDestination': FieldValue.delete(),
         if (availabilityStatus != null) ...{
           'clinicAvailabilityStatus': availabilityStatus,
           'clinicAvailabilityCheckedAt': Timestamp.now(),
@@ -72,6 +74,59 @@ class ClinicAssignmentRepository {
       actorUid: actorUid,
       actorName: actorName,
       details: {'clinicPlaceId': clinicPlaceId, 'clinicName': clinicName},
+    );
+  }
+
+  /// Direct to shelter: the transporter takes the animal from pickup
+  /// straight to the organization's shelter, with no clinic leg
+  /// (TransitCaseService.submitPickupVerification). The shelter pin is
+  /// snapshotted onto the case like the post-treatment shelter leg does.
+  /// Like [assignClinic], this is the "destination saved -> ready to
+  /// assign" step.
+  Future<void> sendToShelter({
+    required String caseId,
+    required String shelterName,
+    String? shelterAddress,
+    required double shelterLat,
+    required double shelterLng,
+    required String actorUid,
+    required String actorName,
+  }) async {
+    await _store.recordAction(
+      caseId: caseId,
+      statusLine: 'Going straight to the shelter: $shelterName.',
+      fields: {
+        'transportDestination': 'shelter',
+        'shelterName': shelterName,
+        'shelterAddress': shelterAddress,
+        'shelterLat': shelterLat,
+        'shelterLng': shelterLng,
+        'shelterLocationMissing': FieldValue.delete(),
+        'status': RescueStatus.awaitingAssignment.firestoreValue,
+      },
+      action: 'destination_shelter',
+      actorUid: actorUid,
+      actorName: actorName,
+      details: {'shelterName': shelterName},
+    );
+  }
+
+  /// Back to the clinic route after [sendToShelter], keeping the clinic
+  /// already saved on the case.
+  Future<void> useClinicDestination({
+    required String caseId,
+    required String clinicName,
+    required String actorUid,
+    required String actorName,
+  }) async {
+    await _store.recordAction(
+      caseId: caseId,
+      statusLine: 'Going to the clinic first: $clinicName.',
+      fields: {'transportDestination': FieldValue.delete()},
+      action: 'destination_clinic',
+      actorUid: actorUid,
+      actorName: actorName,
+      details: {'clinicName': clinicName},
     );
   }
 
@@ -108,6 +163,7 @@ class ClinicAssignmentRepository {
         'vetClinicLng': clinicLng,
         'vetClinicPhone': clinicPhone,
         'vetClinicSelectedAt': Timestamp.now(),
+        'transportDestination': FieldValue.delete(),
         if (availabilityStatus != null) ...{
           'clinicAvailabilityStatus': availabilityStatus,
           'clinicAvailabilityCheckedAt': Timestamp.now(),

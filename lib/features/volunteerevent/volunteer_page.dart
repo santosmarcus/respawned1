@@ -5,16 +5,15 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:respawnd1/core/models/volunteer/volunteer_event.dart';
 import 'package:respawnd1/core/repos/volunteer_event_repository.dart';
 import 'package:respawnd1/core/widgets/event_cover_image.dart';
-import 'package:respawnd1/features/generalhome/notifications_screen.dart';
-import 'package:respawnd1/features/generalhome/user_profile.dart';
 import 'package:respawnd1/app_theme.dart';
-import 'package:respawnd1/features/generalhome/home_screen.dart';
 import 'event_detail_page.dart';
-import 'volunteer_application_screen.dart';
 
 export 'package:respawnd1/core/models/volunteer/volunteer_event.dart' show VolunteerEvent;
 
-// VolunteerPage
+/// The home screen's Events page: every organization's volunteer events.
+/// Signing up for an event makes the user an event volunteer for it; the
+/// organization's own rescue volunteers (external `rescue_volunteer`
+/// accounts) are a separate thing managed on the admin side.
 class VolunteerPage extends StatefulWidget {
   const VolunteerPage({super.key});
 
@@ -31,6 +30,8 @@ class _VolunteerPageState extends State<VolunteerPage> {
   Set<String> _favoriteIds = {};
   bool _loading = true;
   bool _loadFailed = false;
+  bool _savedOnly = false;
+  bool _hideFull = false;
   StreamSubscription<List<VolunteerEvent>>? _eventsSub;
 
   @override
@@ -49,13 +50,7 @@ class _VolunteerPageState extends State<VolunteerPage> {
   // Events stream live from `events`; the viewer's joined/favorite ids are
   // read once and refreshed when returning from an event.
   Future<void> _load() async {
-    try {
-      final mine = await _repo.loadMyEventIds();
-      _joinedIds = mine.joined;
-      _favoriteIds = mine.favorites;
-    } catch (_) {
-      // Lists still render; joined/favorite markers just won't show.
-    }
+    await _loadMine();
     _eventsSub ??= _repo.streamAllEvents().listen(
       (events) {
         if (!mounted) return;
@@ -75,6 +70,83 @@ class _VolunteerPageState extends State<VolunteerPage> {
       },
     );
     if (mounted) setState(_applyViewerState);
+  }
+
+  Future<void> _loadMine() async {
+    try {
+      final mine = await _repo.loadMyEventIds();
+      _joinedIds = mine.joined;
+      _favoriteIds = mine.favorites;
+    } catch (_) {
+      // Lists still render; joined/favorite markers just won't show.
+    }
+  }
+
+  /// Pull to refresh: events are live already; this re-reads the viewer's
+  /// own sign-ups and saved events.
+  Future<void> _refresh() async {
+    await _loadMine();
+    if (mounted) setState(_applyViewerState);
+  }
+
+  bool get _filtering => _savedOnly || _hideFull;
+
+  Future<void> _openFilters() async {
+    await showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: AppColors.background,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (sheetContext) => StatefulBuilder(
+        builder: (sheetContext, setSheet) {
+          void update(VoidCallback change) {
+            setState(change);
+            setSheet(() {});
+          }
+
+          return SafeArea(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('Filter events', style: GoogleFonts.tiltWarp(fontSize: 18, color: AppColors.textPrimary)),
+                  SwitchListTile(
+                    contentPadding: EdgeInsets.zero,
+                    value: _savedOnly,
+                    activeThumbColor: AppColors.greenrspwn,
+                    onChanged: (v) => update(() => _savedOnly = v),
+                    title: Text('Saved events only', style: GoogleFonts.zain(fontSize: 15, color: AppColors.textPrimary)),
+                    subtitle: Text('Events you tapped the heart on.',
+                        style: GoogleFonts.zain(fontSize: 12.5, color: AppColors.textSecondary)),
+                  ),
+                  SwitchListTile(
+                    contentPadding: EdgeInsets.zero,
+                    value: _hideFull,
+                    activeThumbColor: AppColors.greenrspwn,
+                    onChanged: (v) => update(() => _hideFull = v),
+                    title: Text('Hide full events', style: GoogleFonts.zain(fontSize: 15, color: AppColors.textPrimary)),
+                    subtitle: Text('Only show events with spots left.',
+                        style: GoogleFonts.zain(fontSize: 12.5, color: AppColors.textSecondary)),
+                  ),
+                  if (_filtering)
+                    Align(
+                      alignment: Alignment.centerRight,
+                      child: TextButton(
+                        onPressed: () => update(() {
+                          _savedOnly = false;
+                          _hideFull = false;
+                        }),
+                        child: Text('Clear filters', style: GoogleFonts.zain(fontSize: 15, color: AppColors.textPrimary)),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          );
+        },
+      ),
+    );
   }
 
   void _applyViewerState() {
@@ -101,10 +173,21 @@ class _VolunteerPageState extends State<VolunteerPage> {
 
   // Filtered lists. Cancelled events only stay visible to people who joined
   // them, so they can see the cancellation.
-  List<VolunteerEvent> get _upcoming =>
-      _events.where((e) => !e.joined && !e.isCancelled && !e.isPast && _matchesSearch(e)).toList();
+  List<VolunteerEvent> get _upcoming => _events
+      .where((e) =>
+          !e.joined &&
+          !e.isCancelled &&
+          !e.isPast &&
+          _matchesSearch(e) &&
+          (!_savedOnly || e.favorited) &&
+          (!_hideFull || !e.isFull))
+      .toList();
 
   List<VolunteerEvent> get _joined => _events.where((e) => e.joined && !e.isPast).toList();
+
+  /// Events the viewer signed up for that are over, most recent first.
+  List<VolunteerEvent> get _pastJoined =>
+      _events.where((e) => e.joined && e.isPast).toList()..sort((a, b) => b.startAt.compareTo(a.startAt));
 
 
   // Build
@@ -119,53 +202,13 @@ class _VolunteerPageState extends State<VolunteerPage> {
         automaticallyImplyLeading: true,
         centerTitle: true,
         title: Text(
-          'Volunteer',
+          'Events',
           style: GoogleFonts.tiltWarp(
             fontSize: 28,
             fontWeight: FontWeight.bold,
             color: AppColors.textPrimary,
           ),
         ),
-      ),
-      bottomNavigationBar: BottomNavigationBar(
-        currentIndex: 0,
-        items: const [
-          BottomNavigationBarItem(
-            icon: Icon(Icons.home_outlined),
-            activeIcon: Icon(Icons.home),
-            label: 'Home',
-          ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.notifications_outlined),
-            activeIcon: Icon(Icons.notifications),
-            label: 'Notifications',
-          ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.person_outline),
-            activeIcon: Icon(Icons.person),
-            label: 'My Profile',
-          ),
-        ],
-        onTap: (index) {
-          if (index == 0) {
-            Navigator.pushReplacement(
-              context,
-              MaterialPageRoute(builder: (context) => const HomeScreen()),
-            );
-          }
-          else if (index == 1) {
-            Navigator.push(
-              context,
-              MaterialPageRoute(builder: (context) => const NotificationsScreen()),
-            );
-          }
-          else if (index == 2) {
-            Navigator.push(
-              context,
-              MaterialPageRoute(builder: (context) => const UserProfile()),
-            );
-          }
-        },
       ),
       body: _loading
           ? const Center(
@@ -175,15 +218,16 @@ class _VolunteerPageState extends State<VolunteerPage> {
           child: Text('Could not load events.',
               style: GoogleFonts.zain(
                   fontSize: 14, color: AppColors.textSecondary)))
-          : SingleChildScrollView(
+          : RefreshIndicator(
+        color: AppColors.greenrspwn,
+        onRefresh: _refresh,
+        child: SingleChildScrollView(
+        physics: const AlwaysScrollableScrollPhysics(),
         padding: const EdgeInsets.symmetric(horizontal: 16),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const SizedBox(height: 8),
-
-            const VolunteerApplicationBanner(),
-            const SizedBox(height: 12),
 
             // Search bar
             Row(
@@ -217,11 +261,16 @@ class _VolunteerPageState extends State<VolunteerPage> {
                   ),
                 ),
                 const SizedBox(width: 10),
-                SizedBox(
-                  width: 44,
-                  height: 44,
-                  child: const Icon(Icons.tune,
-                      color: AppColors.textPrimary, size: 20),
+                Badge(
+                  isLabelVisible: _filtering,
+                  smallSize: 8,
+                  backgroundColor: AppColors.greenrspwn,
+                  child: IconButton(
+                    tooltip: 'Filter',
+                    onPressed: _openFilters,
+                    icon: const Icon(Icons.tune,
+                        color: AppColors.textPrimary, size: 20),
+                  ),
                 ),
               ],
             ),
@@ -255,7 +304,10 @@ class _VolunteerPageState extends State<VolunteerPage> {
               Center(
                 child: Padding(
                   padding: const EdgeInsets.symmetric(vertical: 40),
-                  child: Text('No upcoming events found.',
+                  child: Text(
+                      _filtering || _searchQuery.isNotEmpty
+                          ? 'No events match your search or filters.'
+                          : 'No upcoming events yet. Check back soon!',
                       style: GoogleFonts.zain(
                           fontSize: 14,
                           color: AppColors.textSecondary)),
@@ -271,9 +323,30 @@ class _VolunteerPageState extends State<VolunteerPage> {
                 ),
               )),
 
+            // Past sign-ups, so volunteers can look back at what they joined.
+            if (_pastJoined.isNotEmpty) ...[
+              const SizedBox(height: 8),
+              Text('Past events you joined',
+                  style: GoogleFonts.tiltWarp(
+                      fontSize: 16, color: AppColors.textPrimary)),
+              const SizedBox(height: 10),
+              ..._pastJoined.take(5).map((event) => Padding(
+                padding: const EdgeInsets.only(bottom: 12),
+                child: Opacity(
+                  opacity: 0.7,
+                  child: _EventCard(
+                    event: event,
+                    onFavorite: () => _toggleFavorite(event),
+                    onTap: () => _openDetail(event),
+                  ),
+                ),
+              )),
+            ],
+
             const SizedBox(height: 24),
           ],
         ),
+      ),
       ),
     );
   }
@@ -364,6 +437,12 @@ class _EventCard extends StatelessWidget {
                                 fontSize: 12,
                                 fontWeight: FontWeight.w700,
                                 color: AppColors.error))
+                      else if (event.joined && !event.isPast)
+                        Text("You're going",
+                            style: GoogleFonts.zain(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w700,
+                                color: AppColors.success))
                       else if (event.isFull && !event.joined)
                         Text('Full',
                             style: GoogleFonts.zain(

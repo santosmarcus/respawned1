@@ -3,8 +3,6 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:respawnd1/app_theme.dart';
-import 'package:respawnd1/features/generalhome/notifications_screen.dart';
-import 'package:respawnd1/features/generalhome/user_profile.dart';
 
 import 'organization_model.dart';
 import 'organization_profile_page.dart';
@@ -96,42 +94,6 @@ class _OrganizationsListPageState extends State<OrganizationsListPage> {
             color: AppColors.textPrimary,
           ),
         ),
-      ),
-      bottomNavigationBar: BottomNavigationBar(
-        currentIndex: 0,
-        items: const [
-          BottomNavigationBarItem(
-            icon: Icon(Icons.home_outlined),
-            activeIcon: Icon(Icons.home),
-            label: 'Home',
-          ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.notifications_outlined),
-            activeIcon: Icon(Icons.notifications),
-            label: 'Notifications',
-          ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.person_outline),
-            activeIcon: Icon(Icons.person),
-            label: 'My Profile',
-          ),
-        ],
-        onTap: (index) {
-          if (index == 0) {
-            Navigator.popUntil(context, (route) => route.isFirst);
-          } else if (index == 1) {
-            Navigator.push(
-              context,
-              MaterialPageRoute(
-                  builder: (context) => const NotificationsScreen()),
-            );
-          } else if (index == 2) {
-            Navigator.push(
-              context,
-              MaterialPageRoute(builder: (context) => const UserProfile()),
-            );
-          }
-        },
       ),
       body: Column(
         crossAxisAlignment: CrossAxisAlignment.start,

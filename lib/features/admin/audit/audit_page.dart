@@ -1,3 +1,4 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -62,7 +63,8 @@ class _AuditPageState extends ConsumerState<AuditPage> {
       if (!mounted) return;
       setState(() {
         _organizationId = orgId;
-        _allowed = capabilities.canViewAudits;
+        // Every member of the admin shell reads the audit log.
+        _allowed = capabilities.isActive && !capabilities.isCareOnly;
         _loading = false;
       });
     } catch (_) {
@@ -219,27 +221,38 @@ class _AuditCategoryTabState extends ConsumerState<_AuditCategoryTab> {
   }
 }
 
-class _AuditRowTile extends StatefulWidget {
+/// A staff member's display name from `users/{uid}`, for logs written
+/// without one. Cached per uid for the page's lifetime.
+final _auditActorNameProvider = FutureProvider.family<String?, String>((ref, uid) async {
+  try {
+    final data = (await FirebaseFirestore.instance.collection('users').doc(uid).get()).data();
+    final name = '${data?['firstName'] ?? ''} ${data?['lastName'] ?? ''}'.trim();
+    if (name.isNotEmpty) return name;
+    final display = (data?['displayName'] as String?)?.trim();
+    return (display == null || display.isEmpty) ? null : display;
+  } catch (_) {
+    return null;
+  }
+});
+
+class _AuditRowTile extends ConsumerStatefulWidget {
   final AuditDisplayRow row;
   const _AuditRowTile({required this.row});
 
   @override
-  State<_AuditRowTile> createState() => _AuditRowTileState();
+  ConsumerState<_AuditRowTile> createState() => _AuditRowTileState();
 }
 
-class _AuditRowTileState extends State<_AuditRowTile> {
+class _AuditRowTileState extends ConsumerState<_AuditRowTile> {
   bool _expanded = false;
 
-  String? get _actorLine {
+  String? get _resolvedName {
     final r = widget.row;
-    final name = r.actorName?.trim();
-    final email = r.actorEmail?.trim();
-    final hasName = name != null && name.isNotEmpty;
-    final hasEmail = email != null && email.isNotEmpty;
-    if (hasName && hasEmail) return '$name · $email';
-    if (hasName) return name;
-    if (hasEmail) return email;
-    return null;
+    final stored = r.actorName?.trim();
+    if (stored != null && stored.isNotEmpty) return stored;
+    final uid = r.actorUid;
+    if (uid == null || uid.isEmpty) return null;
+    return ref.watch(_auditActorNameProvider(uid)).value;
   }
 
   @override
@@ -256,11 +269,22 @@ class _AuditRowTileState extends State<_AuditRowTile> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(r.action, style: GoogleFonts.zain(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
+                  // "<Who> — <what they did>": who acted leads the row.
+                  Text.rich(
+                    TextSpan(children: [
+                      TextSpan(
+                        text: _resolvedName ?? (r.actorEmail?.isNotEmpty == true ? r.actorEmail! : 'System'),
+                        style: const TextStyle(fontWeight: FontWeight.w800),
+                      ),
+                      const TextSpan(text: '  ·  '),
+                      TextSpan(text: r.action),
+                    ]),
+                    style: GoogleFonts.zain(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.textPrimary),
+                  ),
                   if ((r.description ?? '').isNotEmpty)
                     Text(r.description!, style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary)),
-                  if (_actorLine != null)
-                    Text(_actorLine!, style: GoogleFonts.zain(fontSize: 11, color: AppColors.textSecondary)),
+                  if (_resolvedName != null && (r.actorEmail ?? '').isNotEmpty)
+                    Text(r.actorEmail!, style: GoogleFonts.zain(fontSize: 11, color: AppColors.textSecondary)),
                   if ((r.targetLabel ?? '').isNotEmpty)
                     Text(r.targetLabel!, style: GoogleFonts.zain(fontSize: 11, color: AppColors.textSecondary)),
                 ],

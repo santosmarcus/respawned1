@@ -66,3 +66,17 @@ test('lapsed claims are deleted after 48 hours', () => {
 test('the case status list stays within one Firestore in query', () => {
   assert.ok(r.DIGEST_CASE_STATUSES.length <= 30);
 });
+
+test('surrenders and reporter-led reports in review are left out of the digest', () => {
+  const {digestCounts} = require('./dashboard_digest_rules');
+  const c = digestCounts({
+    nowMs: 0,
+    cases: [
+      {status: 'pending', urgency: 'Critical', orgInvolvement: 'independent_report'},
+      {status: 'pending', orgInvolvement: 'not_org_facilitated'},
+      {status: 'pending', urgency: 'Critical'},
+    ],
+  });
+  assert.strictEqual(c.criticalReview, 1);
+  assert.strictEqual(c.review, 0);
+});

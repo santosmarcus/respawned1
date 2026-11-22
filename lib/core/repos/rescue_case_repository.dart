@@ -5,7 +5,6 @@ import 'package:respawnd1/core/models/rescue/closure_reason.dart';
 import 'package:respawnd1/core/models/rescue/community_report.dart';
 import 'package:respawnd1/core/models/rescue/expense.dart';
 import 'package:respawnd1/core/models/rescue/referral.dart';
-import 'package:respawnd1/core/models/rescue/referral_type.dart';
 import 'package:respawnd1/core/models/rescue/rejection_reason.dart';
 import 'package:respawnd1/core/models/rescue/pet_transporter.dart';
 import 'package:respawnd1/core/models/rescue/rescue_case.dart';
@@ -147,10 +146,6 @@ class RescueCaseRepository {
   Stream<List<Expense>> streamExpenses(String caseId) =>
       expenses.streamExpenses(caseId);
 
-  /// Delegates to [RescueCaseQueryRepository.streamCompletedAnimalRecordIndexes].
-  Stream<Set<int>> streamCompletedAnimalRecordIndexes(String caseId) =>
-      queries.streamCompletedAnimalRecordIndexes(caseId);
-
   /// Delegates to [RescueCaseQueryRepository.streamReports].
   Stream<List<RescueReport>> streamReports(String caseId) =>
       queries.streamReports(caseId);
@@ -238,12 +233,27 @@ class RescueCaseRepository {
     required String caseId,
     required String actorUid,
     required String actorName,
+    bool byChoice = false,
     String? note,
   }) => transport.startOrganizationTransport(
     caseId: caseId,
+    byChoice: byChoice,
     actorUid: actorUid,
     actorName: actorName,
     note: note,
+  );
+
+  /// Delegates to [TransportAssignmentRepository.stopOrganizationTransport].
+  Future<void> stopOrganizationTransport({
+    required String caseId,
+    required String actorUid,
+    required String actorName,
+    String? reason,
+  }) => transport.stopOrganizationTransport(
+    caseId: caseId,
+    actorUid: actorUid,
+    actorName: actorName,
+    reason: reason,
   );
 
   /// Delegates to [TransportAssignmentRepository.confirmOrganizationTransportArrived].
@@ -255,6 +265,19 @@ class RescueCaseRepository {
     caseId: caseId,
     actorUid: actorUid,
     actorName: actorName,
+  );
+
+  /// Delegates to [TransportAssignmentRepository.confirmOrganizationTransportAtShelter].
+  Future<void> confirmOrganizationTransportAtShelter({
+    required String caseId,
+    required String actorUid,
+    required String actorName,
+    required List<Map<String, dynamic>> animals,
+  }) => transport.confirmOrganizationTransportAtShelter(
+    caseId: caseId,
+    actorUid: actorUid,
+    actorName: actorName,
+    animals: animals,
   );
 
   /// Delegates to [TransportAssignmentRepository.returnToAssignmentAfterTransitEnded].
@@ -413,33 +436,34 @@ class RescueCaseRepository {
     required String actorName,
   }) => referrals.declineReferral(caseId: caseId, reason: reason, actorUid: actorUid, actorName: actorName);
 
-  /// Delegates to [CaseReferralRepository.referToLgu].
-  Future<String> referToLgu({
+  /// Delegates to [CaseReferralRepository.withdraw].
+  Future<void> withdrawReferral({
     required String caseId,
-    required String barangay,
-    required LguReferralReason reason,
-    required String explanation,
-    bool attachReportMedia = true,
+    required String reason,
     required String actorUid,
     required String actorName,
-  }) => referrals.referToLgu(
-    caseId: caseId,
-    barangay: barangay,
-    reason: reason,
-    explanation: explanation,
-    attachReportMedia: attachReportMedia,
-    actorUid: actorUid,
-    actorName: actorName,
-  );
+  }) => referrals.withdraw(caseId: caseId, reason: reason, actorUid: actorUid, actorName: actorName);
+
+  /// Delegates to [CaseReferralRepository.referByLink].
+  Future<String> referByLink({
+    required String caseId,
+    String note = '',
+    required String actorUid,
+    required String actorName,
+  }) => referrals.referByLink(caseId: caseId, note: note, actorUid: actorUid, actorName: actorName);
 
   /// Delegates to [CaseReferralRepository.referToVolunteer].
   Future<String> referToVolunteer({
     required String caseId,
+    required String targetOrgId,
+    required String targetOrgName,
     String? note,
     required String actorUid,
     required String actorName,
   }) => referrals.referToVolunteer(
     caseId: caseId,
+    targetOrgId: targetOrgId,
+    targetOrgName: targetOrgName,
     note: note,
     actorUid: actorUid,
     actorName: actorName,
@@ -470,6 +494,38 @@ class RescueCaseRepository {
     actorName: actorName,
     availabilityStatus: availabilityStatus,
     closedWarningAcknowledged: closedWarningAcknowledged,
+  );
+
+  /// Delegates to [ClinicAssignmentRepository.sendToShelter].
+  Future<void> sendToShelter({
+    required String caseId,
+    required String shelterName,
+    String? shelterAddress,
+    required double shelterLat,
+    required double shelterLng,
+    required String actorUid,
+    required String actorName,
+  }) => clinics.sendToShelter(
+    caseId: caseId,
+    shelterName: shelterName,
+    shelterAddress: shelterAddress,
+    shelterLat: shelterLat,
+    shelterLng: shelterLng,
+    actorUid: actorUid,
+    actorName: actorName,
+  );
+
+  /// Delegates to [ClinicAssignmentRepository.useClinicDestination].
+  Future<void> useClinicDestination({
+    required String caseId,
+    required String clinicName,
+    required String actorUid,
+    required String actorName,
+  }) => clinics.useClinicDestination(
+    caseId: caseId,
+    clinicName: clinicName,
+    actorUid: actorUid,
+    actorName: actorName,
   );
 
   /// Delegates to [ClinicAssignmentRepository.changeClinic].

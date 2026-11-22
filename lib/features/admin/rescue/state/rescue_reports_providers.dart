@@ -1,10 +1,12 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:respawnd1/core/models/organization/adoption_promotion_schedule.dart';
 
 import 'package:respawnd1/core/models/organization/organization_capabilities.dart';
 import 'package:respawnd1/core/models/rescue/activity_log_entry.dart';
 import 'package:respawnd1/core/models/rescue/community_report.dart';
+import 'package:respawnd1/core/models/rescue/org_involvement.dart';
 import 'package:respawnd1/core/models/rescue/expense.dart';
 import 'package:respawnd1/core/models/rescue/pet_transporter.dart';
 import 'package:respawnd1/core/models/rescue/referral.dart';
@@ -22,6 +24,7 @@ import 'package:respawnd1/core/models/organization/facebook_integration.dart';
 import 'package:respawnd1/core/repos/facebook_integration_repository.dart';
 import 'package:respawnd1/core/repos/organization_directory_repository.dart';
 import 'package:respawnd1/core/repos/rescue_case_repository.dart';
+import 'package:respawnd1/features/admin/animals/state/animal_records_providers.dart';
 import 'package:respawnd1/core/repos/saved_clinics_repository.dart';
 
 // ---- Repositories -----------------------------------------------------
@@ -105,7 +108,8 @@ final pendingOrganizationReviewCountProvider = StreamProvider.autoDispose<int>((
       .collection('organizations')
       .where('verificationStatus', isEqualTo: 'pending')
       .snapshots()
-      .map((s) => s.size);
+      // Rescue volunteers (kind 'independent') are reviewed from Volunteers.
+      .map((s) => s.docs.where((d) => d.data()['kind'] != 'independent').length);
 });
 
 /// Which organization the signed-in account is linked to — reuses
@@ -153,6 +157,12 @@ final facebookIntegrationRepositoryProvider = Provider<FacebookIntegrationReposi
 final organizationFacebookIntegrationProvider =
     StreamProvider.family.autoDispose<FacebookIntegration?, String>((ref, organizationId) {
   return ref.watch(facebookIntegrationRepositoryProvider).streamIntegration(organizationId);
+});
+
+/// The organization's adoption post schedule (Facebook Page reminders).
+final organizationAdoptionPromotionProvider =
+    StreamProvider.family.autoDispose<AdoptionPromotionSchedule, String>((ref, organizationId) {
+  return ref.watch(facebookIntegrationRepositoryProvider).streamPromotionSchedule(organizationId);
 });
 
 // ---- Case list / detail streams ---------------------------------------
@@ -254,6 +264,12 @@ final rescueVolunteersProvider = StreamProvider<List<PetTransporter>>((ref) {
   return ref.watch(rescueCaseRepositoryProvider).streamRescueVolunteers();
 });
 
+/// Approved rescue volunteers (organizations with kind 'independent'): the
+/// Rescue Volunteers directory and the dashboard's volunteer count.
+final approvedRescueVolunteersProvider = StreamProvider.autoDispose<List<RescueVolunteerListing>>((ref) {
+  return OrganizationDirectoryRepository().watchRescueVolunteers();
+});
+
 /// Chronological treatment history for a case (subcollection, with legacy
 /// array-field fallback — see streamTreatmentLogs's own doc comment).
 final treatmentLogsProvider = StreamProvider.family<List<TreatmentLogEntry>, String>((ref, caseId) {
@@ -269,8 +285,14 @@ final expensesProvider = StreamProvider.family<List<Expense>, String>((ref, case
 /// Which animal-array indexes already have a created animal record —
 /// drives the Intake Details "N of M records created" progress and the
 /// multi-animal creation flow's duplicate prevention.
+/// Org-scoped (AnimalRecordRepository.streamRecordsForCase): firestore.rules
+/// deny a staff list query on `animals` that doesn't filter on
+/// organizationId, which made "Create Animal Records" fail with
+/// permission-denied.
 final completedAnimalRecordIndexesProvider = StreamProvider.family<Set<int>, String>((ref, caseId) {
-  return ref.watch(rescueCaseRepositoryProvider).streamCompletedAnimalRecordIndexes(caseId);
+  return ref.watch(animalRecordRepositoryProvider).streamRecordsForCase(caseId).map(
+        (records) => records.map((r) => r.sourceAnimalIndex).whereType<int>().toSet(),
+      );
 });
 
 /// Display-ready transporter details (vehicle/plate/photo/phone) for a
@@ -345,7 +367,17 @@ enum RescuePipelineTab {
         // tab intentionally shows only true rejections, not those other
         // terminal buckets.
         RescuePipelineTab.rejected => const [RescueStatus.rejected],
-        RescuePipelineTab.closed => const [RescueStatus.cancelled],
+        // Everything that has left this organization's hands: closed
+        // through Close Case (cancelled), finished (completed, including
+        // the literal 'closed' a deceased/community-claimed case gets), and
+        // referred away (still reopenable from Rescue Details with
+        // "Withdraw referral & reopen", or by itself after 48 hours with
+        // no answer for an organization referral).
+        RescuePipelineTab.closed => const [
+            RescueStatus.cancelled,
+            RescueStatus.completed,
+            RescueStatus.referred,
+          ],
       };
 }
 
@@ -360,37 +392,58 @@ enum RescuePipelineTab {
 /// exactly [casesByStatusesProvider]'s own result. De-duplicates by case
 /// id so a case matching both queries (e.g. status already flipped to
 /// 'intake' AND still carrying the stage tag) is never listed twice.
+/// Const so casesByStatusesProvider keeps one listener (see
+/// RescuePipelineTab.statuses).
+const List<RescueStatus> _referredOnly = [RescueStatus.referred];
+
 final casesForTabProvider =
     Provider.autoDispose.family<AsyncValue<List<RescueCase>>, RescuePipelineTab>((ref, tab) {
   final byStatus = ref.watch(casesByStatusesProvider(tab.statuses));
+  // A case referred by shared link stays pending under Review until
+  // someone takes it (RescueCase.isPendingLinkReferral), then shows under
+  // Closed like any other referral.
+  if (tab == RescuePipelineTab.closed) {
+    return byStatus.whenData((list) => list.where((c) => !c.isPendingLinkReferral).toList());
+  }
+  if (tab == RescuePipelineTab.review) {
+    final referred = ref.watch(casesByStatusesProvider(_referredOnly));
+    if (byStatus.hasError) return byStatus;
+    if (!byStatus.hasValue) return const AsyncValue.loading();
+    final pending = (referred.asData?.value ?? const <RescueCase>[]).where((c) => c.isPendingLinkReferral);
+    return AsyncValue.data([...byStatus.value!, ...pending]);
+  }
   if (tab != RescuePipelineTab.intake) return byStatus;
 
   final byStage = ref.watch(casesByActiveStageProvider('intake'));
-  if (byStatus.isLoading || byStage.isLoading) return const AsyncValue.loading();
   if (byStatus.hasError) return byStatus;
   if (byStage.hasError) return byStage;
+  // hasValue, not isLoading: a reload (e.g. returning to the dashboard)
+  // keeps showing the previous list instead of collapsing to a spinner.
+  if (!byStatus.hasValue || !byStage.hasValue) return const AsyncValue.loading();
 
   final merged = <String, RescueCase>{};
-  for (final c in byStatus.asData?.value ?? const <RescueCase>[]) {
+  for (final c in byStatus.value ?? const <RescueCase>[]) {
     merged[c.id] = c;
   }
-  for (final c in byStage.asData?.value ?? const <RescueCase>[]) {
+  for (final c in byStage.value ?? const <RescueCase>[]) {
     merged[c.id] = c;
   }
   return AsyncValue.data(merged.values.toList());
 });
 
 /// Extra statuses reachable only through the status filter (not one of the
-/// pipeline tabs above) — referral/duplicate/terminal states. Rejected and
-/// Cancelled are deliberately NOT listed here anymore now that each has
-/// its own pipeline tab (RescuePipelineTab.rejected / .closed) — keeping
-/// them in both places would just make the filter-sheet override
-/// redundant with the tab.
+/// pipeline tabs above) — duplicate/merge states. Rejected, Cancelled,
+/// Completed and Referred are deliberately NOT listed here now that the
+/// Rejected and Closed tabs cover them — keeping them in both places would
+/// just make the filter-sheet override redundant with the tab.
 const List<RescueStatus> kSecondaryStatuses = [
-  RescueStatus.referred,
   RescueStatus.possibleDuplicate,
   RescueStatus.merged,
-  RescueStatus.completed,
+  // Pet Surrenders: listed for Community Adoption, or withdrawn by the
+  // reporter. Never in a pipeline tab (the organization does not
+  // facilitate them); reachable here for reference.
+  RescueStatus.communityAdoption,
+  RescueStatus.withdrawn,
 ];
 
 class RescueFilters {
@@ -402,9 +455,12 @@ class RescueFilters {
   final String? locationQuery;
 
   /// When set, overrides the active pipeline tab's status list — lets the
-  /// filter bar reach referred/possibleDuplicate/merged/completed/cancelled
-  /// cases that the six quick tabs don't cover (rejected has its own tab).
+  /// filter bar narrow to one status, e.g. the possibleDuplicate/merged
+  /// cases that the pipeline tabs don't cover.
   final RescueStatus? statusOverride;
+
+  /// Organization assistance / reporter-led / not org-facilitated.
+  final OrgInvolvement? involvement;
 
   const RescueFilters({
     this.searchText = '',
@@ -414,6 +470,7 @@ class RescueFilters {
     this.toDate,
     this.locationQuery,
     this.statusOverride,
+    this.involvement,
   });
 
   bool get isEmpty =>
@@ -423,7 +480,8 @@ class RescueFilters {
       fromDate == null &&
       toDate == null &&
       (locationQuery == null || locationQuery!.isEmpty) &&
-      statusOverride == null;
+      statusOverride == null &&
+      involvement == null;
 
   RescueFilters copyWith({
     String? searchText,
@@ -438,6 +496,8 @@ class RescueFilters {
     bool clearLocationQuery = false,
     RescueStatus? statusOverride,
     bool clearStatusOverride = false,
+    OrgInvolvement? involvement,
+    bool clearInvolvement = false,
   }) {
     return RescueFilters(
       searchText: searchText ?? this.searchText,
@@ -447,6 +507,7 @@ class RescueFilters {
       toDate: clearDateRange ? null : (toDate ?? this.toDate),
       locationQuery: clearLocationQuery ? null : (locationQuery ?? this.locationQuery),
       statusOverride: clearStatusOverride ? null : (statusOverride ?? this.statusOverride),
+      involvement: clearInvolvement ? null : (involvement ?? this.involvement),
     );
   }
 
@@ -454,6 +515,7 @@ class RescueFilters {
   /// already handled server-side by the query the list screen issues).
   bool matches(RescueCase c) {
     if (urgency != null && UrgencyLevel.fromFirestoreValue(c.urgency) != urgency) return false;
+    if (involvement != null && c.orgInvolvement != involvement) return false;
     if (species != null && species!.isNotEmpty) {
       // Matches if ANY of the case's animals are that species — not just
       // the first/legacy one — so a "Dog ×2, Cat" case is found by both a
@@ -541,8 +603,8 @@ final effectiveStatusesProvider = Provider<List<RescueStatus>>((ref) {
 /// Cases for the effective status selection, with all client-side filters
 /// from [rescueFilterProvider] applied.
 ///
-/// The filter bar's explicit status override (referred/possibleDuplicate/
-/// merged/completed/cancelled — [kSecondaryStatuses], none of
+/// The filter bar's explicit status override (possibleDuplicate/merged —
+/// [kSecondaryStatuses], none of
 /// which are affected by per-animal stage splitting) still queries
 /// directly by status. Otherwise this follows the active pipeline tab via
 /// [casesForTabProvider], which is stage-aware for Intake (spec §7).

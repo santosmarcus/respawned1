@@ -4,13 +4,16 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/core/repos/auth_service.dart';
+import 'package:respawnd1/core/utils/transport_suitability.dart';
 import 'package:respawnd1/features/pettransporter/transporter_success_screen.dart';
 import 'package:respawnd1/core/widgets/app_messages.dart';
 import 'package:respawnd1/core/widgets/app_dialogs.dart';
+import 'package:respawnd1/features/account/account_page.dart';
 
 class _VehicleTypeOption {
   final String type;
@@ -54,6 +57,9 @@ class _TransporterVerificationScreenState
   File? _portrait;
   String? _vehicleType;
   final _licensePlateCtrl = TextEditingController();
+  // How many animals the vehicle carries safely (transporterVerification.
+  // maxAnimals): used to match transporters to multi-animal trips.
+  final _capacityCtrl = TextEditingController();
   File? _antiRabiesRecord;
 
   bool _submitting = false;
@@ -74,6 +80,7 @@ class _TransporterVerificationScreenState
     _nameCtrl.dispose();
     _mobileCtrl.dispose();
     _licensePlateCtrl.dispose();
+    _capacityCtrl.dispose();
     super.dispose();
   }
 
@@ -118,6 +125,12 @@ class _TransporterVerificationScreenState
       setState(() => _errorMessage = 'Please enter your license plate number.');
       return;
     }
+    final capacity = declaredAnimalCapacity(_capacityCtrl.text.trim());
+    if (capacity == null) {
+      setState(() => _errorMessage =
+          'Please enter how many animals your vehicle can carry safely (1 to $kMaxDeclaredAnimals).');
+      return;
+    }
 
     setState(() => _submitting = true);
 
@@ -140,6 +153,7 @@ class _TransporterVerificationScreenState
         'portraitUrl': portraitUrl,
         'vehicleType': _vehicleType,
         'licensePlate': _licensePlateCtrl.text.trim(),
+        'maxAnimals': capacity,
         'antiRabiesUrl': antiRabiesUrl,
         'status': 'pending',
         'submittedAt': FieldValue.serverTimestamp(),
@@ -228,6 +242,7 @@ class _TransporterVerificationScreenState
               : (canGoBack ? () => Navigator.pop(context) : _confirmSignOut),
         ),
         centerTitle: true,
+        actions: const [AccountButton()],
         title: Text('Identity Verification',
             style: GoogleFonts.tiltWarp(
                 fontSize: 20,
@@ -326,6 +341,29 @@ class _TransporterVerificationScreenState
                 controller: _licensePlateCtrl,
                 textCapitalization: TextCapitalization.characters,
                 decoration: const InputDecoration(hintText: 'e.g. ABC 1234'),
+              ),
+
+              const SizedBox(height: 20),
+
+              _fieldLabel('How many animals can your vehicle carry safely?'),
+              const SizedBox(height: 6),
+              TextFormField(
+                controller: _capacityCtrl,
+                keyboardType: TextInputType.number,
+                inputFormatters: [
+                  FilteringTextInputFormatter.digitsOnly,
+                  LengthLimitingTextInputFormatter(2),
+                ],
+                decoration: const InputDecoration(hintText: 'e.g. 2'),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                _vehicleType == kVehicleMotorcycle
+                    ? 'Count each animal in its own secure carrier. Motorcycles '
+                        'are only matched to single-animal trips.'
+                    : 'Count each animal in its own secure carrier or space. '
+                        'We use this to match you with trips that fit your vehicle.',
+                style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary),
               ),
 
               const SizedBox(height: 20),

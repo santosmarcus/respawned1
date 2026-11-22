@@ -5,6 +5,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/core/repos/organization_repository.dart';
 import 'package:respawnd1/features/adminhome/dashboard/adminhome_screen.dart';
+import 'package:respawnd1/features/organization/signup/organization_about_screen.dart';
 import 'package:respawnd1/features/organization/signup/organization_verification_screen.dart';
 
 /// Step 3 of the Organization signup flow (spec §5) — a live status view
@@ -27,6 +28,7 @@ class OrganizationVerificationPendingPage extends StatelessWidget {
         backgroundColor: AppColors.textPrimary,
         automaticallyImplyLeading: false,
         title: Text('Verification Status', style: GoogleFonts.tiltWarp(fontSize: 17, color: AppColors.background)),
+        actions: const [SignupLogOutButton()],
       ),
       body: StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
         stream: FirebaseFirestore.instance.collection('organizations').doc(organizationId).snapshots(),
@@ -112,7 +114,7 @@ class OrganizationVerificationPendingPage extends StatelessWidget {
                 textAlign: TextAlign.center, style: GoogleFonts.zain(fontSize: 14, color: AppColors.textSecondary)),
             const SizedBox(height: 24),
             ElevatedButton(
-              onPressed: () => Navigator.pushReplacement(
+              onPressed: () => Navigator.push(
                   context, MaterialPageRoute(builder: (_) => OrganizationVerificationScreen(organizationId: organizationId))),
               style: AppButtons.primary,
               child: Text('Update Documents', style: GoogleFonts.tiltWarp(fontSize: 15, color: AppColors.textPrimary)),
@@ -128,8 +130,10 @@ class OrganizationVerificationPendingPage extends StatelessWidget {
             Text('Verification documents have not been submitted', style: GoogleFonts.tiltWarp(fontSize: 16, color: AppColors.textPrimary), textAlign: TextAlign.center),
             const SizedBox(height: 20),
             ElevatedButton(
-              onPressed: () => Navigator.pushReplacement(
-                  context, MaterialPageRoute(builder: (_) => OrganizationVerificationScreen(organizationId: organizationId))),
+              // A draft was never submitted: start again from the details
+              // (prefilled from the draft), which leads on to the photos.
+              onPressed: () => Navigator.push(
+                  context, MaterialPageRoute(builder: (_) => const OrganizationAboutScreen())),
               style: AppButtons.primary,
               child: Text('Continue Verification', style: GoogleFonts.tiltWarp(fontSize: 15, color: AppColors.textPrimary)),
             ),

@@ -2,17 +2,19 @@
 //
 // Two roles. Admins (and the organization's owner) can do everything. Staff
 // can do what their `permissions` allow (organizations/{orgId}/members/{uid}),
-// set by an Admin through setMemberAccess (functions/org_members.js) from a
-// preset or ticked one by one. The permission and preset lists live in
+// set by an Admin through setMemberAccess (functions/org_members.js): the
+// default Staff set, plus or minus boxes ticked one by one (money
+// permissions are never in the default). The permission and default lists live in
 // org_permissions.json, shared with the app and copied into firestore.rules.
 //
 // Members docs written before permissions existed still work (legacy
 // fallback, the same in firestore.rules and the app):
 //   role 'admin'                → every permission
 //   `permissions` present       → that list
-//   role 'carer'                → Animal care
-//   any other staff / no doc    → Full staff (+ facebookPublish when the old
-//                                 facebookPublisher flag is set)
+//   any other staff / no doc    → the default Staff set (+ facebookPublish
+//                                 when the old facebookPublisher flag is set);
+//                                 role 'carer' too, since carers were merged
+//                                 into Staff
 // An account acts for the organization its users/{uid}.organizationId points
 // at, as firestore.rules does; a membership elsewhere grants nothing.
 
@@ -23,7 +25,52 @@ const PERMISSIONS = Object.freeze([...DEF.permissions]);
 const PRESETS = Object.freeze(Object.fromEntries(
     Object.entries(DEF.presets).map(([name, list]) => [name, Object.freeze([...list])])));
 const LEGACY = DEF.legacy;
+const INDEPENDENT = Object.freeze({...DEF.independent});
 const INACTIVE_STATUSES = ['inactive', 'removed', 'disabled'];
+
+/// An independent rescuer (organizations/{id}.kind == 'independent'): one
+/// person or a small team, with fewer modules and capacity limits.
+function isIndependent(org) {
+  return Boolean(org) && org.kind === 'independent';
+}
+
+/// The permissions an organization has at all: every one for a shelter; for
+/// an independent rescuer its enabledPermissions (set by a system admin),
+/// else the defaults, never more than INDEPENDENT.allowed.
+function orgEnabledPermissions(org) {
+  if (!isIndependent(org)) return [...PERMISSIONS];
+  const listed = Array.isArray(org.enabledPermissions) ? org.enabledPermissions : INDEPENDENT.defaults;
+  return PERMISSIONS.filter((k) => listed.includes(k) && INDEPENDENT.allowed.includes(k));
+}
+
+/// An independent rescuer's limits, with the defaults filled in.
+function independentLimits(org) {
+  const num = (v, d) => (typeof v === 'number' && v >= 0 ? v : d);
+  const o = org || {};
+  return {
+    memberCap: num(o.memberCap, INDEPENDENT.memberCap),
+    maxActiveCases: num(o.maxActiveCases, INDEPENDENT.maxActiveCases),
+    maxAnimalsInCare: num(o.maxAnimalsInCare, INDEPENDENT.maxAnimalsInCare),
+    activeCaseCount: num(o.activeCaseCount, 0),
+    animalsInCareCount: num(o.animalsInCareCount, 0),
+    memberCount: num(o.memberCount, 1),
+  };
+}
+
+/// Why an independent rescuer can't take one more case, or null if it can
+/// (always null for a shelter). Pure.
+function independentCaseRefusal(org) {
+  if (!isIndependent(org)) return null;
+  if (org.acceptingCases === false) return 'This rescuer is paused and not taking cases.';
+  const l = independentLimits(org);
+  if (l.activeCaseCount >= l.maxActiveCases) {
+    return `This rescuer already has ${l.activeCaseCount} active case(s), their limit.`;
+  }
+  if (l.animalsInCareCount >= l.maxAnimalsInCare) {
+    return `This rescuer already has ${l.animalsInCareCount} animal(s) in care, their limit.`;
+  }
+  return null;
+}
 
 function isActiveStatus(status) {
   return !INACTIVE_STATUSES.includes(status || 'active');
@@ -60,8 +107,7 @@ function memberPermissions(member) {
     if (known.includes('financeManage') && !known.includes('financeView')) known.push('financeView');
     return PERMISSIONS.filter((k) => known.includes(k));
   }
-  if (m.role === 'carer') return [...PRESETS[LEGACY.carer]];
-  const base = [...PRESETS[LEGACY.staff]];
+  const base = [...PRESETS[m.role === 'carer' ? LEGACY.carer : LEGACY.staff]];
   if (m.facebookPublisher === true) base.push('facebookPublish');
   return PERMISSIONS.filter((k) => base.includes(k));
 }
@@ -79,7 +125,8 @@ function effectiveAccess({uid, orgId, org, member, userOrgId}) {
   if (userOrgId !== orgId || !approved) return {...none, isOwner};
   if (!isOwner && member && !isActiveStatus(member.status)) return {...none};
   const isAdmin = isOwner || Boolean(member && member.role === 'admin');
-  const permissions = isAdmin ? [...PERMISSIONS] : memberPermissions(member);
+  const enabled = orgEnabledPermissions(org);
+  const permissions = (isAdmin ? [...PERMISSIONS] : memberPermissions(member)).filter((k) => enabled.includes(k));
   const set = new Set(permissions);
   return {
     active: true,
@@ -127,7 +174,9 @@ function selectAudience({ownerId, members, linkedUids = [], anyOf = [], adminsOn
 ///   memberUid, member: the members doc being changed (null if missing)
 ///   members: Map uid → members doc data of the whole organization
 ///   role: 'admin' | 'staff'; permissions: list (Staff only)
-function planAccessChange({ownerId, memberUid, member, members, role, permissions}) {
+///   org: the organization doc (an independent rescuer's Staff may only get
+///        what the organization has)
+function planAccessChange({ownerId, memberUid, member, members, role, permissions, org = null}) {
   if (!member) return {error: 'That person is not a member of this organization.'};
   if (role !== 'admin' && role !== 'staff') return {error: 'Role must be Admin or Staff.'};
   if (memberUid === ownerId && role !== 'admin') return {error: 'The owner is always an Admin.'};
@@ -138,6 +187,9 @@ function planAccessChange({ownerId, memberUid, member, members, role, permission
     } catch (e) {
       return {error: e.message};
     }
+    const enabled = orgEnabledPermissions(org);
+    const extra = perms.filter((k) => !enabled.includes(k));
+    if (extra.length) return {error: `This organization doesn't have: ${extra.join(', ')}.`};
   }
   const wasAdmin = member.role === 'admin';
   if (wasAdmin && role === 'staff') {
@@ -241,6 +293,11 @@ async function writeOrgAuditLog(db, FieldValue, {action, actorId, actorName, act
 module.exports = {
   PERMISSIONS,
   PRESETS,
+  INDEPENDENT,
+  isIndependent,
+  orgEnabledPermissions,
+  independentLimits,
+  independentCaseRefusal,
   isActiveStatus,
   normalizePerms,
   presetFor,

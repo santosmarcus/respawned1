@@ -5,12 +5,16 @@ import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/core/models/rescue/transporter_application.dart';
 import 'package:respawnd1/core/repos/transporter_application_repository.dart';
 import 'package:respawnd1/features/admin/volunteers/application_review.dart';
+import 'package:respawnd1/features/admin/widgets/admin_app_bar.dart';
 
 /// Staff review of pet transporter verification applications. Approving or
 /// rejecting also sets the transporter's `users/{uid}.isVerified` (see
 /// TransporterApplicationRepository.review).
 class TransporterApplicationsPage extends StatelessWidget {
-  const TransporterApplicationsPage({super.key});
+  const TransporterApplicationsPage({super.key, this.showBackButton = true, this.menuActions = const []});
+
+  final bool showBackButton;
+  final List<AdminMenuAction> menuActions;
 
   static TransporterApplicationStatus _status(ApplicationTab t) => switch (t) {
         ApplicationTab.pending => TransporterApplicationStatus.pending,
@@ -28,6 +32,8 @@ class TransporterApplicationsPage extends StatelessWidget {
       summarize: transporterSummary,
       approveMessage: (app) => '${app.name.isEmpty ? 'This applicant' : app.name} will be marked verified and can '
           'receive transport requests.',
+      showBackButton: showBackButton,
+      menuActions: menuActions,
       save: (app, approve, reviewer, note) =>
           repo.review(uid: app.uid, approve: approve, reviewerUid: reviewer, note: note),
     );
@@ -40,7 +46,10 @@ ApplicationSummary transporterSummary(TransporterApplication app) {
   return ApplicationSummary(
     name: app.name,
     phone: app.mobileNumber,
-    lines: [('Vehicle', vehicle), if (app.documents.isEmpty) ('Documents', 'None uploaded')],
+    lines: [
+      ('Vehicle', vehicle),
+      ('Carries safely', app.maxAnimals == null ? 'Not declared' : '${app.maxAnimals} animal${app.maxAnimals == 1 ? '' : 's'}'),
+      if (app.documents.isEmpty) ('Documents', 'None uploaded')],
     submittedAt: app.submittedAt,
     reviewedAt: app.status == TransporterApplicationStatus.pending ? null : app.reviewedAt,
     reviewNote: app.reviewNote,

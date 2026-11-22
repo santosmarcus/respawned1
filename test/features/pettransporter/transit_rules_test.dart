@@ -99,6 +99,13 @@ void main() {
     expect(statusAfterTreatmentAccepted({}).label, 'Treatment accepted. On the way to shelter.');
   });
 
+  test("an independent rescuer's case ends the trip at the clinic (no shelter leg)", () {
+    final next = statusAfterTreatmentAccepted({'ownerKind': 'independent', 'interestedToAdopt': 'yes'});
+    expect(next.status, 'in_treatment');
+    expect(next.completesTransit, isTrue);
+    expect(next.label, contains('rescuer will collect'));
+  });
+
   group('resolveEndReason', () {
     EndReasonOutcome resolve(
         String reason, {

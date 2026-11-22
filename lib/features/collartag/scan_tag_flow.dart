@@ -87,7 +87,9 @@ Future<TagScanOutcome> resolveScannedTagId(
   // explicitly marked 'lost' starts (or reuses) a session now.
   final isLost = tag.status == 'lost';
 
-  final sessionId = isLost
+  // The owner scanning their own lost pet's tag sees their ID card (with
+  // the finders' chats), not a chat with themselves.
+  final sessionId = isLost && !isOwner
       ? await _getOrCreateRescueSession(tagId, location: location)
       : null;
 
@@ -156,7 +158,7 @@ Future<void> startTagScan(BuildContext context) async {
       return;
     }
 
-    if (!outcome.isLost) {
+    if (!outcome.isLost || outcome.sessionId == null) {
       // Not lost: show the pet's regular collar ID tag. Finders get the
       // read-only card (no edit / mark-as-lost controls); the owner
       // scanning their own tag gets their normal card.

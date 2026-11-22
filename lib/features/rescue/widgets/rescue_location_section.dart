@@ -45,8 +45,7 @@ class RescueLocationSection extends StatelessWidget {
         Stack(
           children: [
             Container(
-              margin: const EdgeInsets.symmetric(horizontal: 16),
-              height: 300,
+              height: 240,
               decoration: BoxDecoration(
                 color: AppColors.slaterspwn,
                 borderRadius: BorderRadius.circular(20),
@@ -85,7 +84,7 @@ class RescueLocationSection extends StatelessWidget {
             // Locate-me button
             Positioned(
               bottom: 10,
-              right: 26,
+              right: 10,
               child: GestureDetector(
                 onTap: onLocateMe,
                 child: Container(
@@ -125,7 +124,7 @@ class RescueLocationSection extends StatelessWidget {
 
         // Address Search Bar
         Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16),
+          padding: EdgeInsets.zero,
           child: Container(
             decoration: BoxDecoration(
               color: AppColors.yellowrspwn,
@@ -177,7 +176,7 @@ class RescueLocationSection extends StatelessWidget {
 
         // Pinned location display
         Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16),
+          padding: EdgeInsets.zero,
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [

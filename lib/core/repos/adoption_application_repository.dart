@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
@@ -276,6 +278,20 @@ class AdoptionApplicationRepository {
   /// application's organization: the Audit page only lists entries of the
   /// staff member's own organization, so entries without it were never
   /// shown. Best effort, after the real write, never throws.
+  /// A plain update is applied to the local cache at once (every screen
+  /// shows it) and Firestore keeps it until the server takes it. Waits up to
+  /// [wait] for the server to confirm; past that it returns and lets the
+  /// write finish on its own instead of holding the screen. A rejection that
+  /// comes later is only logged.
+  Future<void> _localFirst(Future<void> write, String what, {Duration wait = const Duration(seconds: 8)}) async {
+    final tracked = write.then<bool>((_) => true);
+    try {
+      await tracked.timeout(wait);
+    } on TimeoutException {
+      unawaited(tracked.then((_) {}, onError: (Object e) => debugPrint('[AdoptionRepo] $what failed later: $e')));
+    }
+  }
+
   Future<void> _logStep({
     required String action,
     String? actorId,
@@ -289,7 +305,13 @@ class AdoptionApplicationRepository {
   }) async {
     String? organizationId;
     try {
-      organizationId = (await _adoptionDoc(targetId).get()).data()?['organizationId'] as String?;
+      // The cache has it whenever the page that called this is open; a
+      // server read here could sit waiting on a slow connection.
+      final doc = _adoptionDoc(targetId);
+      organizationId = ((await doc
+                  .get(const GetOptions(source: Source.cache))
+                  .catchError((_) => doc.get().timeout(const Duration(seconds: 8))))
+              .data())?['organizationId'] as String?;
     } catch (_) {
       // Logged without the organization rather than not at all.
     }
@@ -336,18 +358,36 @@ class AdoptionApplicationRepository {
   /// freshly-booked appointment) stay Pending until this runs; the user's
   /// own Book Appointment step only ever saves appointmentDate/Time/Type,
   /// it never sets status itself (see adoption_process.dart's
-  /// _saveAppointment).
+  /// _saveAppointment). Only a Pending application with an interview
+  /// booked can be confirmed. The applicant is told by
+  /// notifyAdopterOfInterviewConfirmed (functions/adoptions.js).
   Future<void> confirmInterview({
     required String applicationId,
+    required String actorUid,
     required String actorName,
   }) async {
-    await _adoptionDoc(applicationId).update({
-      'status': AdoptionStatus.interview.firestoreValue,
-      'statusHistory': FieldValue.arrayUnion([
-        {'status': 'Interview confirmed by organization.', 'timestamp': Timestamp.now()}
-      ]),
+    final ref = _adoptionDoc(applicationId);
+    await _db.runTransaction((tx) async {
+      final snap = await tx.get(ref);
+      final data = snap.data();
+      if (data == null) throw StateError('Application not found.');
+      if (AdoptionStatus.fromFirestoreValue(data['status'] as String?) != AdoptionStatus.pending) {
+        throw StateError('Only a pending application can be moved to Interview.');
+      }
+      if (data['appointmentDate'] == null) throw StateError('The applicant has not booked an interview yet.');
+      tx.update(ref, {
+        'status': AdoptionStatus.interview.firestoreValue,
+        'statusHistory': FieldValue.arrayUnion([
+          {'status': 'Interview confirmed by organization.', 'timestamp': Timestamp.now()}
+        ]),
+      });
     });
-    await _logStep(action: 'Interview confirmed', actorName: actorName, targetId: applicationId, newValues: const {'status': 'interview'});
+    await _logStep(
+        action: 'Interview confirmed',
+        actorId: actorUid,
+        actorName: actorName,
+        targetId: applicationId,
+        newValues: const {'status': 'interview'});
   }
 
   /// Admin-side interview reschedule — edits the SAME appointment fields
@@ -697,6 +737,26 @@ class AdoptionApplicationRepository {
     );
   }
 
+  /// Where a cleared reservation leaves the animal: 'adoptable' again
+  /// when it still has a registered collar tag (QR or NFC, animalTags),
+  /// otherwise 'not_ready', since firestore.rules only lets a tagged animal
+  /// become adoptable. Reads inside [tx] before any write.
+  Future<String> _statusAfterReservation(
+    Transaction tx,
+    DocumentSnapshot<Map<String, dynamic>> animalSnap,
+  ) async {
+    final data = animalSnap.data() ?? const {};
+    for (final field in const ['qrTagId', 'nfcTagId']) {
+      final code = (data[field] as String?)?.trim() ?? '';
+      if (code.isEmpty) continue;
+      final reg = await tx.get(_db.collection('animalTags').doc(code));
+      if (reg.exists && reg.data()?['animalId'] == animalSnap.id && reg.data()?['active'] == true) {
+        return 'adoptable';
+      }
+    }
+    return 'not_ready';
+  }
+
   /// Clears only the reservation that matches [applicationId] — never
   /// another applicant's. Returns the animal to 'adoptable'. The
   /// application itself is untouched (stays approved).
@@ -711,14 +771,20 @@ class AdoptionApplicationRepository {
       final animalSnap = await tx.get(animalRef);
       if (!animalSnap.exists) return;
       final animalData = animalSnap.data()!;
-      if (animalData['reservedApplicationId'] != applicationId) {
-        // Already unreserved, or reserved by a different application by
-        // now — nothing for this call to safely undo.
+      final reservedFor = animalData['reservedApplicationId'];
+      if (reservedFor != null && reservedFor != applicationId) {
+        // Never undo another applicant's reservation; say so instead of
+        // doing nothing silently.
+        throw StateError('This animal is reserved for a different applicant, so it was not unreserved.');
+      }
+      if (reservedFor == null) {
+        // Already unreserved: only clear this application's stale marker.
+        tx.update(appRef, {'reservedAt': FieldValue.delete()});
         return;
       }
 
       tx.update(animalRef, {
-        'adoptionStatus': 'adoptable',
+        'adoptionStatus': await _statusAfterReservation(tx, animalSnap),
         'reservedForUserId': FieldValue.delete(),
         'reservedApplicationId': FieldValue.delete(),
         'reservedAt': FieldValue.delete(),
@@ -824,7 +890,7 @@ class AdoptionApplicationRepository {
       if (animalData['reservedApplicationId'] != applicationId) return;
       if (animalData['adoptionStatus'] == 'adopted') return; // already released — do not reverse
       tx.update(animalRef, {
-        'adoptionStatus': 'adoptable',
+        'adoptionStatus': await _statusAfterReservation(tx, animalSnap),
         'reservedForUserId': FieldValue.delete(),
         'reservedApplicationId': FieldValue.delete(),
         'reservedAt': FieldValue.delete(),
@@ -894,19 +960,20 @@ class AdoptionApplicationRepository {
     required String url,
     required String actorName,
   }) async {
-    await _adoptionDoc(applicationId).update({
+    await _localFirst(_adoptionDoc(applicationId).update({
       'signedAgreementUrl': url,
       'signedAgreementAt': FieldValue.serverTimestamp(),
       'signedAgreementBy': actorName,
       'statusHistory': FieldValue.arrayUnion([
         {'status': 'Signed adoption agreement attached by $actorName.', 'timestamp': Timestamp.now()}
       ]),
-    });
+    }), 'attach signed agreement');
     await _logStep(action: 'Signed agreement attached', actorName: actorName, targetId: applicationId);
   }
 
   Future<void> setScheduledReleaseDate({required String applicationId, required DateTime date}) async {
-    await _adoptionDoc(applicationId).update({'scheduledReleaseDate': Timestamp.fromDate(date)});
+    await _localFirst(
+        _adoptionDoc(applicationId).update({'scheduledReleaseDate': Timestamp.fromDate(date)}), 'set release date');
   }
 
   /// Persists the draft schedule-rule configuration so it survives closing
@@ -918,10 +985,10 @@ class AdoptionApplicationRepository {
     required List<FollowUpScheduleRule> rules,
     required bool noFollowUpsPlanned,
   }) async {
-    await _adoptionDoc(applicationId).update({
+    await _localFirst(_adoptionDoc(applicationId).update({
       'followUpSchedules': rules.map((r) => r.toMap()).toList(),
       'noFollowUpsPlanned': noFollowUpsPlanned,
-    });
+    }), 'save follow-up draft');
   }
 
   /// The real Release + follow-up-generation transaction. Validates the

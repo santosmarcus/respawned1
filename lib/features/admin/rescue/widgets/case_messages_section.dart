@@ -5,12 +5,13 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/section_card.dart';
 import 'package:respawnd1/core/widgets/app_messages.dart';
+import 'package:respawnd1/core/repos/rescue_case/case_message_sender.dart';
 
 /// Case Messages (spec §4) — reuses the exact same `cases/{caseId}/messages`
 /// thread already read/written by the reporter-side track_case_page.dart
 /// and the admin-side _AdminTrackingTab in admin_track_case_page.dart
-/// (senderId 'admin' / senderName 'Loved by the Gapz' — same convention
-/// reused here). No second messaging collection: this widget is a
+/// (sender fields from [CaseMessageSender]: the organization's name, the
+/// staff uid). No second messaging collection: this widget is a
 /// self-contained, reusable read+write view over that one subcollection,
 /// so it can be dropped onto Rescue Details without duplicating the
 /// thread that already exists on Track Case.
@@ -47,8 +48,7 @@ class _CaseMessagesSectionState extends State<CaseMessagesSection> {
           .doc(widget.caseId)
           .collection('messages')
           .add({
-        'senderId': 'admin',
-        'senderName': 'Loved by the Gapz',
+        ...await CaseMessageSender.staffFields(),
         'text': text,
         'timestamp': FieldValue.serverTimestamp(),
       });

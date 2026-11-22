@@ -173,15 +173,26 @@ class _SponsorshipDetailState extends ConsumerState<SponsorshipDetail> {
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                   decoration: BoxDecoration(
-                    color: (sponsorship.isEnded ? Colors.grey : AppColors.greenrspwn).withValues(alpha: 0.15),
+                    color: (sponsorship.isEnded
+                            ? Colors.grey
+                            : sponsorship.isFullyFunded
+                                ? AppColors.lavenderrspwn
+                                : AppColors.greenrspwn)
+                        .withValues(alpha: 0.15),
                     borderRadius: BorderRadius.circular(20),
                   ),
                   child: Text(
-                    sponsorship.isEnded ? 'Ended' : 'Available',
+                    sponsorship.isEnded
+                        ? 'Ended'
+                        : sponsorship.isFullyFunded
+                            ? 'Fully Funded'
+                            : 'Open for Sponsorship',
                     style: GoogleFonts.zain(
                       fontSize: 14,
                       fontWeight: FontWeight.bold,
-                      color: sponsorship.isEnded ? AppColors.textPrimary.withValues(alpha: 0.6) : AppColors.greenrspwn,
+                      color: sponsorship.isEnded || sponsorship.isFullyFunded
+                          ? AppColors.textPrimary.withValues(alpha: 0.6)
+                          : AppColors.greenrspwn,
                     ),
                   ),
                 ),
@@ -240,7 +251,9 @@ class _SponsorshipDetailState extends ConsumerState<SponsorshipDetail> {
               const SizedBox(height: 24),
             ],
 
-            if (_activeSponsorship == null && !sponsorship.isEnded) ...[
+            // Fully funded: new sponsors wait until its funds run low again
+            // (people already sponsoring keep their sponsorship).
+            if (_activeSponsorship == null && !sponsorship.isEnded && !sponsorship.isFullyFunded) ...[
               Text('Monthly Sponsorship', style: GoogleFonts.tiltWarp(fontSize: 18, color: AppColors.textPrimary)),
               const SizedBox(height: 12),
               TextField(
@@ -277,6 +290,17 @@ class _SponsorshipDetailState extends ConsumerState<SponsorshipDetail> {
               // above (the summary opens from History).
                   : _activeSponsorship != null
                   ? const SizedBox.shrink()
+                  : sponsorship.isFullyFunded && !sponsorship.isEnded
+                  ? Container(
+                padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 12),
+                decoration: BoxDecoration(color: AppColors.textPrimary.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(30)),
+                child: Text(
+                  '${sponsorship.animalName ?? 'This animal'} is fully funded for now. '
+                  'Sponsorship reopens if its funds run low.',
+                  textAlign: TextAlign.center,
+                  style: GoogleFonts.zain(fontSize: 16, fontWeight: FontWeight.bold, color: AppColors.textPrimary.withValues(alpha: 0.6)),
+                ),
+              )
                   : sponsorship.isEnded
                   ? Container(
                 padding: const EdgeInsets.symmetric(vertical: 16),

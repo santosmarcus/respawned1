@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 import 'package:respawnd1/app_theme.dart';
+import 'package:respawnd1/core/models/rescue/org_involvement.dart';
 import 'package:respawnd1/core/models/rescue/rescue_status.dart';
 import 'package:respawnd1/features/admin/rescue/state/rescue_reports_providers.dart';
 import 'package:respawnd1/core/utils/app_date_format.dart';
@@ -38,6 +39,7 @@ class _RescueFilterSheetBody extends StatefulWidget {
 class _RescueFilterSheetBodyState extends State<_RescueFilterSheetBody> {
   late UrgencyLevel? _urgency = widget.current.urgency;
   late RescueStatus? _status = widget.current.statusOverride;
+  late OrgInvolvement? _involvement = widget.current.involvement;
   late final TextEditingController _species =
       TextEditingController(text: widget.current.species ?? '');
   late final TextEditingController _location =
@@ -114,6 +116,21 @@ class _RescueFilterSheetBodyState extends State<_RescueFilterSheetBody> {
                     _urgency == level,
                     () => setState(() => _urgency = level),
                   ),
+              ],
+            ),
+            const SizedBox(height: 18),
+
+            Text('Organization involvement',
+                style: GoogleFonts.zain(
+                    fontSize: 13, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 8,
+              runSpacing: 6,
+              children: [
+                _choiceChip('Any', _involvement == null, () => setState(() => _involvement = null)),
+                for (final inv in OrgInvolvement.values)
+                  _choiceChip(inv.label, _involvement == inv, () => setState(() => _involvement = inv)),
               ],
             ),
             const SizedBox(height: 18),
@@ -241,6 +258,8 @@ class _RescueFilterSheetBodyState extends State<_RescueFilterSheetBody> {
                           clearLocationQuery: _location.text.trim().isEmpty,
                           statusOverride: _status,
                           clearStatusOverride: _status == null,
+                          involvement: _involvement,
+                          clearInvolvement: _involvement == null,
                         ),
                       );
                       Navigator.pop(context);

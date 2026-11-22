@@ -2,9 +2,10 @@
 //
 // Every animal record has a collar tag at collarTags/animal-{animalId}: the
 // same document shape as a pet owner's tag (collar_tag_data_model.dart), so
-// the QR code (AppLinks.tagUrl), an NFC chip written with that link, the
-// in-app scanner and public/tag/index.html all open the same collar tag
-// view. The app creates the tag when the record is saved
+// it shows in the same collar tag view. Its QR code is the animal's
+// registered code (animalTags, qrTagId), the one printed on its tag and
+// written to its NFC chip, and scanning either opens this view. The app
+// creates the tag (and registers a QR code) when the record is saved
 // (AnimalCollarTagRepository.sync); this trigger keeps it in step with
 // every later change to the record, from any screen or function.
 //
@@ -65,6 +66,9 @@ function collarTagOf(animalId, data, org) {
     ownerMobile: str(o.contactNumber) || str(o.phone),
     ownerEmail: str(o.email),
     ownerFacebookLink: str(o.facebookUrl),
+    // The registered codes (animalTags) its QR tag and NFC chip carry.
+    animalQrCode: str(data.qrTagId),
+    animalNfcCode: str(data.nfcTagId),
     // Staff-issued tags need no QR approval.
     qrEnabled: true,
     archived: data.archived === true || data.status === 'deceased',

@@ -9,10 +9,10 @@ import 'package:respawnd1/core/utils/shelter_occupancy.dart';
 /// guesses Male as a default. Shared by the list card and the admin/user
 /// detail-page headers so gender reads identically everywhere it appears.
 IconData? genderIconFor(String sex) => switch (sex.toLowerCase()) {
-      'male' => Icons.male,
-      'female' => Icons.female,
-      _ => null,
-    };
+  'male' => Icons.male,
+  'female' => Icons.female,
+  _ => null,
+};
 
 /// One chip shown in an [AnimalRecordCard]'s chip row — label + color, used
 /// for both the admin's attention/status chips and the user's health tags.
@@ -29,18 +29,18 @@ class CardChip {
 /// compact list card, since this is a fact admin staff should see at a
 /// glance rather than something hidden behind "compact".
 Widget specialNeedsBadge() => Container(
-      margin: const EdgeInsets.only(top: 2),
-      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-      decoration: BoxDecoration(color: AppColors.pinkrspwn.withValues(alpha: 0.5), borderRadius: BorderRadius.circular(20)),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          const Icon(Icons.favorite, size: 10, color: AppColors.textPrimary),
-          const SizedBox(width: 3),
-          Text('Special Needs', style: GoogleFonts.zain(fontSize: 10, color: AppColors.textPrimary)),
-        ],
-      ),
-    );
+  margin: const EdgeInsets.only(top: 2),
+  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+  decoration: BoxDecoration(color: AppColors.pinkrspwn.withValues(alpha: 0.5), borderRadius: BorderRadius.circular(20)),
+  child: Row(
+    mainAxisSize: MainAxisSize.min,
+    children: [
+      const Icon(Icons.favorite, size: 10, color: AppColors.textPrimary),
+      const SizedBox(width: 3),
+      Text('Special Needs', style: GoogleFonts.zain(fontSize: 10, color: AppColors.textPrimary)),
+    ],
+  ),
+);
 
 /// "In Shelter" indicator — same shape/placement rule as [specialNeedsBadge]
 /// (icon + text, shown even in compact mode). Uses the shared [isInShelter]
@@ -48,18 +48,34 @@ Widget specialNeedsBadge() => Container(
 /// count; released/transferred/deceased/archived don't) so this card can
 /// never disagree with the list's own default-sort grouping.
 Widget inShelterBadge() => Container(
-      margin: const EdgeInsets.only(top: 2),
-      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-      decoration: BoxDecoration(color: AppColors.greenrspwn.withValues(alpha: 0.5), borderRadius: BorderRadius.circular(20)),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          const Icon(Icons.home_outlined, size: 10, color: AppColors.textPrimary),
-          const SizedBox(width: 3),
-          Text('In Shelter', style: GoogleFonts.zain(fontSize: 10, color: AppColors.textPrimary)),
-        ],
-      ),
-    );
+  margin: const EdgeInsets.only(top: 2),
+  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+  decoration: BoxDecoration(color: AppColors.greenrspwn.withValues(alpha: 0.5), borderRadius: BorderRadius.circular(20)),
+  child: Row(
+    mainAxisSize: MainAxisSize.min,
+    children: [
+      const Icon(Icons.home_outlined, size: 10, color: AppColors.textPrimary),
+      const SizedBox(width: 3),
+      Text('In Shelter', style: GoogleFonts.zain(fontSize: 10, color: AppColors.textPrimary)),
+    ],
+  ),
+);
+
+/// "Adopted" indicator, same shape as [inShelterBadge]: shown on admin
+/// cards (even compact) once the animal has been released to its adopter.
+Widget adoptedBadge() => Container(
+  margin: const EdgeInsets.only(top: 2),
+  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+  decoration: BoxDecoration(color: AppColors.lavenderrspwn.withValues(alpha: 0.6), borderRadius: BorderRadius.circular(20)),
+  child: Row(
+    mainAxisSize: MainAxisSize.min,
+    children: [
+      const Icon(Icons.volunteer_activism, size: 10, color: AppColors.textPrimary),
+      const SizedBox(width: 3),
+      Text('Adopted', style: GoogleFonts.zain(fontSize: 10, color: AppColors.textPrimary)),
+    ],
+  ),
+);
 
 /// Shared Animal Record list-card — the structural base for both the admin
 /// Animal Records list (`animal_record_page.dart`) and the user Adoption
@@ -99,6 +115,11 @@ class AnimalRecordCard extends StatelessWidget {
   /// chips, rather than a one-off style.
   final bool selected;
 
+  /// False for animals that aren't in a shelter at all — the Community
+  /// Adoption listing (community_profile.dart) reuses this card for
+  /// healthy strays reported by the community.
+  final bool showInShelterBadge;
+
   const AnimalRecordCard({
     super.key,
     required this.animal,
@@ -110,6 +131,7 @@ class AnimalRecordCard extends StatelessWidget {
     this.compact = false,
     this.onLongPress,
     this.selected = false,
+    this.showInShelterBadge = true,
   });
 
   @override
@@ -162,12 +184,12 @@ class AnimalRecordCard extends StatelessWidget {
               borderRadius: BorderRadius.circular(10),
               child: animal.photoUrls.isNotEmpty
                   ? Image.network(
-                      animal.photoUrls.first,
-                      width: 80,
-                      height: 80,
-                      fit: BoxFit.cover,
-                      errorBuilder: (_, _, _) => _photoPlaceholder(),
-                    )
+                animal.photoUrls.first,
+                width: 80,
+                height: 80,
+                fit: BoxFit.cover,
+                errorBuilder: (_, _, _) => _photoPlaceholder(),
+              )
                   : _photoPlaceholder(),
             ),
             const SizedBox(width: 12),
@@ -211,7 +233,10 @@ class AnimalRecordCard extends StatelessWidget {
                   if (animal.age.isNotEmpty)
                     Text(animal.age, style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary)),
                   if (animal.hasSpecialNeeds) specialNeedsBadge(),
-                  if (isInShelter(animal)) inShelterBadge(),
+                  if (showInShelterBadge && isInShelter(animal)) inShelterBadge(),
+                  // Admin list only: the user-facing list shows its own
+                  // public status pill instead.
+                  if (compact && animal.isAdopted) adoptedBadge(),
                   if (!compact && animal.description.isNotEmpty)
                     Text(
                       animal.description,
@@ -241,24 +266,24 @@ class AnimalRecordCard extends StatelessWidget {
   }
 
   Color _publicStatusColor(String status) => switch (status) {
-        'Reserved' => const Color(0xFFE0A83C),
-        'Adopted' => AppColors.slaterspwn,
-        'Not Available' => AppColors.slaterspwn,
-        _ => AppColors.greenrspwn,
-      };
+    'Reserved' => const Color(0xFFE0A83C),
+    'Adopted' => AppColors.slaterspwn,
+    'Not Available' => AppColors.slaterspwn,
+    _ => AppColors.greenrspwn,
+  };
 
   Widget _chip(String label, Color color) => Container(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-        decoration: BoxDecoration(color: color.withValues(alpha: 0.4), borderRadius: BorderRadius.circular(20)),
-        child: Text(label, style: GoogleFonts.zain(fontSize: 10, color: AppColors.textPrimary)),
-      );
+    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+    decoration: BoxDecoration(color: color.withValues(alpha: 0.4), borderRadius: BorderRadius.circular(20)),
+    child: Text(label, style: GoogleFonts.zain(fontSize: 10, color: AppColors.textPrimary)),
+  );
 
   Widget _photoPlaceholder() => Container(
-        width: 80,
-        height: 80,
-        decoration: BoxDecoration(color: AppColors.tearspwn, borderRadius: BorderRadius.circular(10)),
-        child: const Icon(Icons.pets, size: 32, color: AppColors.textSecondary),
-      );
+    width: 80,
+    height: 80,
+    decoration: BoxDecoration(color: AppColors.tearspwn, borderRadius: BorderRadius.circular(10)),
+    child: const Icon(Icons.pets, size: 32, color: AppColors.textSecondary),
+  );
 }
 
 /// Admin Animal Records grid-view card — the vertical counterpart to
@@ -347,10 +372,10 @@ class AnimalRecordGridTile extends StatelessWidget {
                         borderRadius: BorderRadius.circular(10),
                         child: animal.photoUrls.isNotEmpty
                             ? Image.network(
-                                animal.photoUrls.first,
-                                fit: BoxFit.cover,
-                                errorBuilder: (_, _, _) => _gridPlaceholder(),
-                              )
+                          animal.photoUrls.first,
+                          fit: BoxFit.cover,
+                          errorBuilder: (_, _, _) => _gridPlaceholder(),
+                        )
                             : _gridPlaceholder(),
                       ),
                     ),
@@ -387,13 +412,14 @@ class AnimalRecordGridTile extends StatelessWidget {
                     // rows) — sit side-by-side when both fit, only
                     // dropping to a second line when they genuinely don't,
                     // instead of always reserving two full rows of height.
-                    if (animal.hasSpecialNeeds || isInShelter(animal))
+                    if (animal.hasSpecialNeeds || isInShelter(animal) || animal.isAdopted)
                       Wrap(
                         spacing: 4,
                         runSpacing: 4,
                         children: [
                           if (animal.hasSpecialNeeds) specialNeedsBadge(),
                           if (isInShelter(animal)) inShelterBadge(),
+                          if (animal.isAdopted) adoptedBadge(),
                         ],
                       ),
                   ],
@@ -407,7 +433,7 @@ class AnimalRecordGridTile extends StatelessWidget {
   }
 
   Widget _gridPlaceholder() => Container(
-        color: AppColors.tearspwn,
-        child: const Center(child: Icon(Icons.pets, size: 28, color: AppColors.textSecondary)),
-      );
+    color: AppColors.tearspwn,
+    child: const Center(child: Icon(Icons.pets, size: 28, color: AppColors.textSecondary)),
+  );
 }

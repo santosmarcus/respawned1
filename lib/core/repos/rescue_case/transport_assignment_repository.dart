@@ -1,6 +1,7 @@
 // Split out of rescue_case_repository.dart (behavior-preserving refactor).
 
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:respawnd1/core/utils/transport_suitability.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
 
@@ -245,14 +246,22 @@ class TransportAssignmentRepository {
     final assignmentsCol = _store.transportAssignmentsOf(caseId);
     final newRef = assignmentsCol.doc();
 
+    // Revalidate presence here, not just in the UI's rider list — that
+    // list may already be stale by the time the admin taps Send (the
+    // transporter could have gone offline moments ago). Demo riders have
+    // no real presence data and are exempt. Read once before the
+    // transaction (not inside it) so the transaction itself only reads the
+    // case and its current offer — one fewer sequential round trip, and a
+    // transaction retry doesn't re-read the transporter.
+    // Started now and awaited inside the transaction, so it runs alongside
+    // the case read instead of before it. ignore() only stops an early
+    // failure being reported as unhandled; the await below still throws it.
+    final riderRead = isDemo ? null : (_store.users.doc(riderId).get()..ignore());
+
     await _store.db.runTransaction((tx) async {
       final caseSnap = await tx.get(caseRef);
-      // Revalidate presence here, not just in the UI's rider list — that
-      // list may already be stale by the time the admin taps Confirm (the
-      // transporter could have gone offline moments ago). Demo riders have
-      // no real presence data and are exempt.
-      if (!isDemo) {
-        final riderSnap = await tx.get(_store.users.doc(riderId));
+      final riderSnap = await riderRead;
+      if (riderSnap != null) {
         final riderData = riderSnap.data();
         final online = riderData?['online'] as bool? ?? false;
         final lastSeen = riderData?['lastSeenAt'];
@@ -265,6 +274,25 @@ class TransportAssignmentRepository {
         if (!stillOnline) {
           throw const TransporterNoLongerOnlineException();
         }
+        if (!isTransporterReachable(
+          phone: riderData?['phone'],
+          lastLat: riderData?['lastLat'],
+          lastLng: riderData?['lastLng'],
+        )) {
+          throw const TransporterNotReachableException();
+        }
+        // Vehicle suitability, re-checked against the transporter's
+        // current vehicle and capacity and the case's current animals, so
+        // a stale Assign screen can't send an unsuitable offer
+        // (transport_suitability.dart; firestore.rules checks it too).
+        final vehicle = (riderData?['transporterVerification'] as Map?) ?? const {};
+        final caseData = caseSnap.data() ?? const <String, dynamic>{};
+        final suitability = vehicleSuitability(
+          vehicleType: vehicle['vehicleType'] as String?,
+          declaredCapacity: vehicle['maxAnimals'],
+          animals: animalsToTransport(caseData),
+        );
+        if (!suitability.suitable) throw UnsuitableVehicleException(suitability.reason);
       }
       final currentId = caseSnap.data()?['currentAssignmentId'] as String?;
       if (currentId != null) {
@@ -330,6 +358,10 @@ class TransportAssignmentRepository {
         'offeredBy': ?FirebaseAuth.instance.currentUser?.uid,
         'vehicle': ?vehicle,
         'plate': ?plate,
+        // Written up front (the case's own) so the stamp trigger in
+        // functions/audit_logs.js has nothing to correct — no second write
+        // to the offer while the admin is watching it.
+        'organizationId': ?(caseSnap.data()?['organizationId'] as String?),
       });
       tx.update(caseRef, {'currentAssignmentId': newRef.id});
     });
@@ -517,8 +549,10 @@ class TransportAssignmentRepository {
         .doc(assignmentId);
     try {
       await _store.db.runTransaction((tx) async {
-        final snap = await tx.get(assignmentRef);
-        final caseSnap = await tx.get(caseRef);
+        // Both reads together (still before any write).
+        final reads = await Future.wait([tx.get(assignmentRef), tx.get(caseRef)]);
+        final snap = reads[0];
+        final caseSnap = reads[1];
         if (!snap.exists || snap.data()?['status'] != 'pending') return;
         final now = Timestamp.now();
         tx.update(assignmentRef, {
@@ -632,11 +666,15 @@ class TransportAssignmentRepository {
   ///
   /// Refused while an offer is still pending or accepted, so a transporter
   /// who already said yes isn't left holding a case the organization took.
+  ///
+  /// [byChoice]: an independent rescuer chose to bring the animal
+  /// themselves (no transporter was tried), which changes only the wording.
   Future<void> startOrganizationTransport({
     required String caseId,
     required String actorUid,
     required String actorName,
     String? note,
+    bool byChoice = false,
   }) async {
     final caseRef = _store.caseDoc(caseId);
     await _store.db.runTransaction((tx) async {
@@ -657,11 +695,15 @@ class TransportAssignmentRepository {
         }
       }
       final trimmedNote = note?.trim() ?? '';
+      // "Straight to shelter" (Assign Transport) goes to the shelter instead.
+      final place = data['transportDestination'] == 'shelter' ? 'the shelter' : 'the clinic';
       _store.recordActionIn(
         tx,
         caseId: caseId,
         action: 'organization_transport_started',
-        statusLine: 'No transporter was available. The organization is bringing the animal to the clinic itself.',
+        statusLine: byChoice
+            ? 'The rescuer is bringing the animal to $place themselves.'
+            : 'No transporter was available. The organization is bringing the animal to $place itself.',
         actorUid: actorUid,
         actorName: actorName,
         details: {if (trimmedNote.isNotEmpty) 'note': trimmedNote},
@@ -671,9 +713,47 @@ class TransportAssignmentRepository {
             'byUid': actorUid,
             'byName': actorName,
             'startedAt': Timestamp.now(),
+            if (byChoice) 'byChoice': true,
             if (trimmedNote.isNotEmpty) 'note': trimmedNote,
           },
           if (currentId != null) 'currentAssignmentId': FieldValue.delete(),
+        },
+      );
+    });
+  }
+
+  /// The organization (or independent rescuer) can't finish the trip itself
+  /// (vehicle broke down, can't handle the animal): the case goes back to
+  /// Awaiting Assignment so a transporter can be offered it. The trip that
+  /// stopped stays in the activity log.
+  Future<void> stopOrganizationTransport({
+    required String caseId,
+    required String actorUid,
+    required String actorName,
+    String? reason,
+  }) async {
+    final caseRef = _store.caseDoc(caseId);
+    await _store.db.runTransaction((tx) async {
+      final data = (await tx.get(caseRef)).data();
+      if (data == null) throw StateError('This case no longer exists.');
+      if (data['organizationTransport'] is! Map ||
+          RescueStatus.fromFirestoreValue(data['status'] as String?) != RescueStatus.ongoing) {
+        throw StateError('This case is not being transported by your team.');
+      }
+      final why = reason?.trim() ?? '';
+      _store.recordActionIn(
+        tx,
+        caseId: caseId,
+        action: 'organization_transport_stopped',
+        statusLine: why.isEmpty
+            ? "The team's trip stopped. The case is waiting for a transporter."
+            : "The team's trip stopped ($why). The case is waiting for a transporter.",
+        actorUid: actorUid,
+        actorName: actorName,
+        details: {'previous': data['organizationTransport'], if (why.isNotEmpty) 'reason': why},
+        fields: {
+          'status': RescueStatus.awaitingAssignment.firestoreValue,
+          'organizationTransport': FieldValue.delete(),
         },
       );
     });
@@ -698,6 +778,35 @@ class TransportAssignmentRepository {
         'status': RescueStatus.treatment.firestoreValue,
         'dateAdmitted': now,
         'organizationTransport.arrivedAt': now,
+      },
+    );
+  }
+
+  /// The organization brought the animal straight to its shelter ("Straight
+  /// to shelter" on Assign Transport): the case moves to Intake with the
+  /// same writes as a transporter's shelter drop-off
+  /// (TransitCaseService.completeShelterDropoff). [animals] is the case's
+  /// animals already marked for intake (animalsAfterShelterDropoff).
+  Future<void> confirmOrganizationTransportAtShelter({
+    required String caseId,
+    required String actorUid,
+    required String actorName,
+    required List<Map<String, dynamic>> animals,
+  }) async {
+    final now = Timestamp.now();
+    await _store.recordAction(
+      caseId: caseId,
+      action: 'organization_delivered_to_shelter',
+      statusLine: 'The animal has reached the shelter. Waiting for the organization to confirm it was received.',
+      actorUid: actorUid,
+      actorName: actorName,
+      details: {'transportedBy': 'organization'},
+      fields: {
+        'status': RescueStatus.intake.firestoreValue,
+        'shelterDeliveredAt': now,
+        'organizationTransport.arrivedAt': now,
+        if (animals.isNotEmpty) 'animals': animals,
+        if (animals.isNotEmpty) ...RescueCaseStore.stageSummaryUpdate(animals),
       },
     );
   }

@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:image_picker/image_picker.dart';
 
+import 'package:respawnd1/core/utils/user_autofill.dart';
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/core/models/rescue/rescue_adoption.dart';
 import 'package:respawnd1/core/utils/validators.dart';
@@ -155,6 +156,8 @@ class _RescueAdoptionFormPageState extends State<RescueAdoptionFormPage> {
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid == null) return;
     setState(() => _saving = true);
+    // So the next form that asks for an address can fill it in.
+    UserAutofill.rememberAddress(_address.text);
     try {
       final c = widget.caseData;
       final orgId = (c['organizationId'] as String?) ?? '';

@@ -1,9 +1,15 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:respawnd1/features/rescue/widgets/surrender_withdrawal_section.dart';
+import 'package:respawnd1/features/rescue/widgets/litter_report_link.dart';
+import 'package:respawnd1/core/utils/community_adoption_eligibility.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:respawnd1/core/utils/rescue_progress.dart';
+import 'package:respawnd1/core/widgets/progress_timeline.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
+import 'package:respawnd1/features/rescue/widgets/case_report_details.dart';
 import 'package:respawnd1/core/models/rescue/rescue_adoption.dart';
 import 'package:respawnd1/core/utils/app_date_format.dart';
 import 'package:respawnd1/features/rescue/rescue_adoption_form_page.dart';
@@ -19,6 +25,8 @@ import 'package:respawnd1/features/admin/rescue/state/rescue_reports_providers.d
 import 'package:url_launcher/url_launcher.dart';
 import 'package:respawnd1/features/rescue/widgets/community_report_section.dart';
 import 'package:respawnd1/features/rescue/widgets/live_proof_request_card.dart';
+import 'package:respawnd1/features/rescue/widgets/independent_report_section.dart';
+import 'package:respawnd1/core/models/rescue/org_involvement.dart';
 import 'package:respawnd1/core/widgets/app_messages.dart';
 import 'package:respawnd1/core/repos/rescue_case/rescue_case_store.dart';
 
@@ -135,6 +143,7 @@ class TrackCasePage extends StatefulWidget {
 
 class _TrackCasePageState extends State<TrackCasePage> {
   late int _tabIndex = widget.initialTabIndex;
+  bool _mapExpanded = false;
   final _messageController = TextEditingController();
   final _routeLoader = _SharedRouteLoader();
   final _messageFocusNode = FocusNode();
@@ -155,9 +164,15 @@ class _TrackCasePageState extends State<TrackCasePage> {
         .collection('users')
         .doc(uid)
         .get();
-    final name =
+    final fullName =
     '${userDoc.data()?['firstName'] ?? ''} ${userDoc.data()?['lastName'] ?? ''}'
         .trim();
+    // Accounts without first/last name (e.g. Google sign-in) fall back to
+    // their account name so the organization sees who wrote.
+    final authName = FirebaseAuth.instance.currentUser?.displayName?.trim() ?? '';
+    final name = fullName.isNotEmpty
+        ? fullName
+        : (authName.isNotEmpty ? authName : 'Reporter');
 
     await FirebaseFirestore.instance
         .collection('cases')
@@ -251,14 +266,16 @@ class _TrackCasePageState extends State<TrackCasePage> {
             ),
             title: Text(
               'Track Case',
-              style: Theme.of(context).textTheme.displaySmall,
+              style: GoogleFonts.tiltWarp(fontSize: 20, color: AppColors.textPrimary),
             ),
             centerTitle: true,
           ),
           body: Column(
             children: [
-              SizedBox(
-                height: 232,
+              AnimatedContainer(
+                duration: const Duration(milliseconds: 220),
+                curve: Curves.easeOut,
+                height: _mapExpanded ? 412 : 232,
                 child: Stack(
                   clipBehavior: Clip.none,
                   children: [
@@ -266,11 +283,31 @@ class _TrackCasePageState extends State<TrackCasePage> {
                       top: 0,
                       left: 0,
                       right: 0,
-                      height: 200,
+                      bottom: 32,
                       child: _TrackCaseMap(
                         caseId: widget.caseId,
                         data: data ?? {},
                         routeLoader: _routeLoader,
+                      ),
+                    ),
+                    // Expand the map for a closer look; collapse to get the
+                    // case details back on screen.
+                    Positioned(
+                      top: 8,
+                      left: 8,
+                      child: Material(
+                        color: Colors.white,
+                        shape: const CircleBorder(),
+                        elevation: 2,
+                        child: IconButton(
+                          visualDensity: VisualDensity.compact,
+                          tooltip: _mapExpanded ? 'Collapse map' : 'Expand map',
+                          icon: Icon(
+                            _mapExpanded ? Icons.fullscreen_exit : Icons.fullscreen,
+                            color: AppColors.textPrimary,
+                          ),
+                          onPressed: () => setState(() => _mapExpanded = !_mapExpanded),
+                        ),
                       ),
                     ),
                     Positioned(
@@ -1179,6 +1216,23 @@ class _TrackingTabState extends State<_TrackingTab> {
       children: [
         // The rescue team is waiting on a fresh photo from the reporter.
         if (widget.isReporter) LiveProofRequestCard(caseId: widget.caseId, data: widget.data),
+        // Rescue progress: where the case is on its normal path, so the
+        // current stage is clear without reading the whole history.
+        if (rescueProgressFinished(widget.data['status'] as String?) case final finished?)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+            child: ProgressTimeline(
+              title: 'Rescue progress',
+              statusLabel: finished >= kRescueProgressSteps.length ? 'Completed' : 'In progress',
+              steps: [
+                for (final (i, step) in ProgressTimeline.sequence(kRescueProgressSteps, finished).indexed)
+                  i == finished && rescueProgressDetail(widget.data['status'] as String?) != null
+                      ? TimelineStep(step.title,
+                          subtitle: rescueProgressDetail(widget.data['status'] as String?), state: step.state)
+                      : step,
+              ],
+            ),
+          ),
         _collapsibleHeader(
           title: 'Tracking Progress',
           expanded: _trackingExpanded,
@@ -1279,7 +1333,7 @@ class _TrackingTabState extends State<_TrackingTab> {
                               radius: 14,
                               backgroundColor: AppColors.slaterspwn,
                               child: Text(
-                                (msg['senderName'] ?? 'U')[0],
+                                _initial(msg['senderName']),
                                 style: GoogleFonts.zain(
                                   fontSize: 12,
                                   color: AppColors.textPrimary,
@@ -1613,6 +1667,11 @@ class _CaseDetailTabState extends State<_CaseDetailTab> {
           if ((data['status'] as String?) == 'rejected')
             _RejectionDetailsSection(caseId: widget.caseId, data: data),
 
+          // At a glance: photo, case number, urgency, animal, when and by
+          // whom it was reported.
+          _CaseSummaryCard(caseId: widget.caseId, data: data),
+          const SizedBox(height: 12),
+
           // Case media
           _buildMediaSection(
             context,
@@ -1620,19 +1679,22 @@ class _CaseDetailTabState extends State<_CaseDetailTab> {
             List<String>.from(data['photoUrls'] ?? []),
           ),
           const SizedBox(height: 16),
-          _DetailRow('Reporter Name', data['reporterName']),
-          _DetailRow('Address', data['address']),
-          _DetailRow('Rescue Type', data['rescueType']),
-          _DetailRow('Urgency', data['urgency']),
-          _DetailRow('Description', data['condition']),
-          _AnimalGroupSection(caseId: widget.caseId, data: data),
-          _DetailRow('Coordination', data['coordinateWithShelter']),
-          if (data['coordinateWithShelter'] == 'no') ...[
-            _DetailRow('Witness Name', data['witnessName']),
-            _DetailRow('Witness Mobile Number', data['witnessPhone']),
-          ],
-          _DetailRow('Interest to adopt', data['interestedToAdopt']),
+          // Every field from the rescue form, grouped into cards: rescue
+          // details, condition, animals, location, coordination (see
+          // CaseReportDetails). The address is in its Location card.
+          CaseReportDetails(caseId: widget.caseId, data: data),
           const SizedBox(height: 12),
+
+          // Reporter-led Neglect or Abuse: what was filed with the
+          // authorities, the guide, and asking the organization for help.
+          // Pet Surrender: withdraw (older reports still waiting in review)
+          // or, once withdrawn, the reason and date.
+          // Litter: linked puppy / mother reports, and "report these puppies".
+          LitterReportsSection(caseId: widget.caseId, data: data),
+          if (isSurrenderRescueType(data['rescueType'] as String?))
+            SurrenderWithdrawalSection(caseId: widget.caseId, data: data),
+          if (OrgInvolvement.fromFirestoreValue(data['orgInvolvement']) == OrgInvolvement.independentReport)
+            IndependentReportSection(caseId: widget.caseId, data: data, isReporter: widget.isReporter),
 
           // Rescue gaps 6/10: the interested adopter sends an adoption
           // request (with the vet-fee, obligations and pickup agreements)
@@ -1707,10 +1769,13 @@ class _CaseDetailTabState extends State<_CaseDetailTab> {
             const SizedBox(height: 12),
           ],
 
-          // The reporter already answered "no" to adopting on the report
-          // form, so don't prompt them again. Everyone else still sees it.
-          if (!_hasWillingAdopter &&
-              !(widget.isReporter && data['interestedToAdopt'] == 'no')) ...[
+          // Never offered to the reporter: they answered the adoption
+          // question on the report form ("yes" already makes them the
+          // willing adopter), and a Pet Surrender's reporter is the owner
+          // giving the animal up — that form doesn't ask, so the answer
+          // is blank and must not reopen the offer. Everyone else still
+          // sees it.
+          if (!_hasWillingAdopter && !widget.isReporter) ...[
             Container(
               width: double.infinity,
               padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 14),
@@ -1757,138 +1822,11 @@ class _CaseDetailTabState extends State<_CaseDetailTab> {
           ] else if (_hasWillingAdopter)
             _DetailRow(
               'Willing adopter',
-              '${data['willingAdopterName'] ?? '-'}'
+              '${data['willingAdopterName'] ?? 'Not provided'}'
                   '${data['willingAdopterType'] != null ? ' (${data['willingAdopterType']})' : ''}',
             ),
 
           const SizedBox(height: 24),
-        ],
-      ),
-    );
-  }
-}
-
-// Restores each animal's own detail block from the rescue form's
-// `animals[]` array — mirrors case_summary_page.dart's _AnimalGroupSection
-// so Track Case and the post-completion summary always agree on the
-// latest rescue-form data instead of falling back to legacy singular
-// fields only.
-class _AnimalGroupSection extends StatelessWidget {
-  final String caseId;
-  final Map<String, dynamic> data;
-  const _AnimalGroupSection({required this.caseId, required this.data});
-
-  Map<String, dynamic> _animalMap(Map raw) => {
-    'animalType': raw['species'],
-    'breed': raw['breed'],
-    'sex': raw['sex'],
-    'size': raw['size'],
-    'colorMarkings': raw['colorMarkings'],
-  };
-
-  @override
-  Widget build(BuildContext context) {
-    final animals = data['animals'] as List?;
-    if (animals != null && animals.isNotEmpty) {
-      final total = animals.length;
-      return Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          _DetailRow('No. of Animals', '$total'),
-          for (var i = 0; i < animals.length; i++)
-            _AnimalDetailBlock(
-              data: _animalMap(animals[i] as Map),
-              index: i + 1,
-              total: total,
-            ),
-        ],
-      );
-    }
-
-    final groupId = data['groupId'] as String?;
-    if (groupId == null || groupId.isEmpty) {
-      return _AnimalDetailBlock(data: data, index: 1, total: 1);
-    }
-
-    return FutureBuilder<QuerySnapshot<Map<String, dynamic>>>(
-      future: FirebaseFirestore.instance
-          .collection('publicCases')
-          .where('groupId', isEqualTo: groupId)
-          .get(),
-      builder: (context, snapshot) {
-        if (!snapshot.hasData) {
-          return _AnimalDetailBlock(data: data, index: 1, total: 1);
-        }
-        final docs = snapshot.data!.docs;
-        final total = docs.length;
-        if (total <= 1) {
-          return _AnimalDetailBlock(data: data, index: 1, total: 1);
-        }
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            _DetailRow('No. of Animals', '$total'),
-            for (var i = 0; i < docs.length; i++)
-              _AnimalDetailBlock(
-                data: docs[i].data(),
-                index: i + 1,
-                total: total,
-              ),
-          ],
-        );
-      },
-    );
-  }
-}
-
-class _AnimalDetailBlock extends StatelessWidget {
-  final Map<String, dynamic> data;
-  final int index;
-  final int total;
-  const _AnimalDetailBlock({
-    required this.data,
-    required this.index,
-    required this.total,
-  });
-
-  List<Widget> _fields() => [
-    _DetailRow('Species', data['animalType']),
-    _DetailRow('Breed / Mixed', data['breed']),
-    _DetailRow('Sex', data['sex']),
-    _DetailRow('Size', data['size']),
-    _DetailRow('Color / Distinguishing Markings', data['colorMarkings']),
-  ];
-
-  @override
-  Widget build(BuildContext context) {
-    if (total <= 1) {
-      return Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: _fields(),
-      );
-    }
-
-    return Container(
-      margin: const EdgeInsets.only(bottom: 8),
-      padding: const EdgeInsets.all(10),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: AppColors.slaterspwn),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            'Animal $index of $total',
-            style: GoogleFonts.zain(
-              fontSize: 12,
-              fontWeight: FontWeight.w700,
-              color: AppColors.textPrimary,
-            ),
-          ),
-          const SizedBox(height: 4),
-          ..._fields(),
         ],
       ),
     );
@@ -1988,6 +1926,121 @@ class _RejectionDetailsSection extends StatelessWidget {
   }
 }
 
+/// Track Case's top card on the Case Detail tab.
+class _CaseSummaryCard extends StatelessWidget {
+  final String caseId;
+  final Map<String, dynamic> data;
+  const _CaseSummaryCard({required this.caseId, required this.data});
+
+  @override
+  Widget build(BuildContext context) {
+    final photos = List<String>.from(data['photoUrls'] ?? const []);
+    final animals = data['animals'] as List?;
+    final first = animals != null && animals.isNotEmpty && animals.first is Map
+        ? Map<String, dynamic>.from(animals.first as Map)
+        : <String, dynamic>{'species': data['animalType'], 'breed': data['breed'], 'size': data['size']};
+    final animalLine = [first['species'], first['breed'], first['size']]
+        .whereType<String>()
+        .where((s) => s.trim().isNotEmpty)
+        .join(' · ');
+    final count = animals?.length ?? 1;
+    final created = data['createdAt'];
+    final reportedAt = created is Timestamp ? created.toDate() : null;
+    final urgency = (data['urgency'] as String?)?.trim() ?? '';
+    final reporter = (data['reporterName'] as String?)?.trim() ?? '';
+
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: const Color(0xFFDAD7CC)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          ClipRRect(
+            borderRadius: BorderRadius.circular(12),
+            child: photos.isEmpty
+                ? Container(
+                    width: 72,
+                    height: 72,
+                    color: AppColors.tearspwn,
+                    child: const Icon(Icons.pets, color: AppColors.textSecondary),
+                  )
+                : Image.network(
+                    photos.first,
+                    width: 72,
+                    height: 72,
+                    fit: BoxFit.cover,
+                    errorBuilder: (_, _, _) => Container(
+                      width: 72,
+                      height: 72,
+                      color: AppColors.tearspwn,
+                      child: const Icon(Icons.pets, color: AppColors.textSecondary),
+                    ),
+                  ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        'Case #${caseId.length >= 7 ? caseId.substring(0, 7).toUpperCase() : caseId}',
+                        style: GoogleFonts.tiltWarp(fontSize: 15, color: AppColors.textPrimary),
+                      ),
+                    ),
+                    if (urgency.isNotEmpty)
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: urgency == 'Critical'
+                              ? AppColors.error
+                              : urgency == 'Medium'
+                                  ? AppColors.yellowrspwn
+                                  : AppColors.greenrspwn,
+                          borderRadius: BorderRadius.circular(20),
+                        ),
+                        child: Text(urgency,
+                            style: GoogleFonts.zain(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w800,
+                                color: urgency == 'Critical' ? Colors.white : AppColors.textPrimary)),
+                      ),
+                  ],
+                ),
+                if (animalLine.isNotEmpty)
+                  Text(
+                    count > 1 ? '$animalLine  +${count - 1} more' : animalLine,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: GoogleFonts.zain(fontSize: 14, fontWeight: FontWeight.w700, color: AppColors.textPrimary),
+                  ),
+                if (reportedAt != null)
+                  Text(formatDateTime(reportedAt),
+                      style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary)),
+                if (reporter.isNotEmpty)
+                  Text('Reported by $reporter',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary)),
+                // An independent rescuer took the case (never their address).
+                if (data['ownerKind'] == 'independent')
+                  Text('Handled by a rescue volunteer',
+                      style: GoogleFonts.zain(fontSize: 12, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _DetailRow extends StatelessWidget {
   final String label;
   final String? value;
@@ -2009,7 +2062,7 @@ class _DetailRow extends StatelessWidget {
             ),
           ),
           Text(
-            value ?? '-',
+            (value == null || value!.trim().isEmpty) ? 'Not provided' : value!,
             style: GoogleFonts.zain(
               fontSize: 13,
               color: AppColors.textSecondary,
@@ -2088,4 +2141,11 @@ class _RescueAdoptionSection extends StatelessWidget {
       ),
     );
   }
+}
+
+/// First letter of a sender's name for the message avatar; 'U' when the
+/// name is missing or empty (indexing an empty string throws a RangeError).
+String _initial(Object? name) {
+  final s = (name is String ? name : '').trim();
+  return s.isEmpty ? 'U' : s[0].toUpperCase();
 }

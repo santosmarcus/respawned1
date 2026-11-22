@@ -6,6 +6,7 @@ const admin = require('firebase-admin');
 
 admin.initializeApp();
 const {orgMemberUids, requireOrgPermission} = require('./org_access');
+const orgInvolvement = require('./org_involvement');
 const db = admin.firestore();
 
 exports.getOrCreateRescueSession = onCall(async (request) => {
@@ -347,6 +348,25 @@ function orgCoversPoint(org, lat, lng) {
     haversineKm(lat, lng, a.lat, a.lng) <= a.radiusKm);
 }
 
+/// Staff push for a new case in their coverage area. Wording depends on
+/// whether the organization is asked to act (org_involvement.js): a
+/// surrender or a reporter-led neglect/abuse report is for awareness only.
+function serviceAreaMessage(c, isCritical) {
+  switch (orgInvolvement.involvementOf(c)) {
+    case orgInvolvement.INDEPENDENT_REPORT:
+      return {
+        title: 'Neglect/abuse report in your service area (reporter-led)',
+        body: 'The reporter is taking this to the authorities themselves. ' +
+          'Review it and assist only if your capacity allows.',
+      };
+    default:
+      return {
+        title: isCritical ? 'URGENT: Critical case in your service area' : 'New case in your service area',
+        body: 'A rescue report was filed inside your organization\'s coverage area. Tap to review it.',
+      };
+  }
+}
+
 async function assignCaseToServiceAreas({caseRef, caseId, c, isCritical}) {
   const orgsSnap = await db
     .collection('organizations')
@@ -361,6 +381,10 @@ async function assignCaseToServiceAreas({caseRef, caseId, c, isCritical}) {
     areaOrgIds: matched,
     outsideServiceArea: matched.length === 0,
   });
+
+  // Pet Surrender goes to Community Adoption, not to an organization: no
+  // staff push and no outside-coverage alert (org_involvement.js).
+  if (orgInvolvement.involvementOf(c) === orgInvolvement.NOT_ORG_FACILITATED) return;
 
   if (matched.length === 0) {
     await db.collection('adminAlerts').add({
@@ -397,10 +421,7 @@ async function assignCaseToServiceAreas({caseRef, caseId, c, isCritical}) {
   for (let i = 0; i < list.length; i += FCM_MULTICAST_LIMIT) {
     await admin.messaging().sendEachForMulticast({
       tokens: list.slice(i, i + FCM_MULTICAST_LIMIT),
-      notification: {
-        title: isCritical ? 'URGENT: Critical case in your service area' : 'New case in your service area',
-        body: 'A rescue report was filed inside your organization\'s coverage area. Tap to review it.',
-      },
+      notification: serviceAreaMessage(c, isCritical),
       data: toFcmData({type: 'new_case_service_area', caseId}),
     });
   }
@@ -424,6 +445,10 @@ exports.notifyNewCaseReported = onDocumentCreated(
 
     // Which organizations' coverage geofences contain this case?
     await assignCaseToServiceAreas({caseRef: snap.ref, caseId, c, isCritical});
+
+    // Surrenders and reporter-led neglect/abuse reports are not calls for
+    // help: no responder or public broadcast (org_involvement.js).
+    if (!orgInvolvement.broadcastsForHelp(c)) return;
 
     // Responders: wider geofence + "view and accept" wording.
     await notifyNearbyUsers({
@@ -475,6 +500,8 @@ exports.notifyUnconfirmedReports = onSchedule('every 5 minutes', async () => {
     if (DISMISSED_STATUSES.includes(status)) continue;
     if (isFinalStatus(status)) continue;
     if (c.lat == null || c.lng == null) continue;
+    // Not a call for help (surrender, reporter-led report): no nudges.
+    if (!orgInvolvement.broadcastsForHelp(c)) continue;
 
     const reportsSnap = await caseDoc.ref
       .collection('communityReports')
@@ -869,6 +896,9 @@ async function notifyStaff(uids, {title, body, data}) {
         isRead: false,
         type: data.type,
         caseId: data.caseId || null,
+        ...(data.organizationId ? {organizationId: data.organizationId} : {}),
+        ...(data.animalIds ? {animalIds: data.animalIds} : {}),
+        ...(data.cashOutId ? {cashOutId: data.cashOutId} : {}),
       });
     } catch (e) {
       console.warn('[notifyStaff] in-app notification failed', uid, e.message);
@@ -1892,6 +1922,29 @@ exports.facebookTestConnection = facebook.facebookTestConnection;
 exports.facebookDisconnectPage = facebook.facebookDisconnectPage;
 exports.facebookPublishAnimalRecords = facebook.facebookPublishAnimalRecords;
 exports.facebookSetPublisher = facebook.facebookSetPublisher;
+// Cash-outs (functions/campaigns.js, functions/paymongo.js): money taken out
+// of PayMongo, the bank or the cash box. Everyone who can see the
+// organization's money (financeView or financeManage; Admins included) is
+// told when one needs a fund and when someone assigns it, except the person
+// who just did it.
+const cashOutRules = require('./cash_out_rules');
+exports.notifyCashOut = onDocumentWritten('organizations/{orgId}/cashOuts/{cashOutId}', async (event) => {
+  const before = event.data.before.exists ? event.data.before.data() : null;
+  const after = event.data.after.exists ? event.data.after.data() : null;
+  const notice = cashOutRules.noticeFor(before, after);
+  if (!notice) return;
+  const {orgId, cashOutId} = event.params;
+  const uids = (await orgStaffUids(orgId, {anyOf: ['financeView', 'financeManage']}))
+    .filter((uid) => uid !== notice.actorUid);
+  await notifyStaff(uids, {
+    title: notice.title,
+    body: notice.body,
+    data: {type: notice.type, organizationId: orgId, cashOutId},
+  });
+});
+
+// Scheduled adoption posts (reminders to publish) — see functions/adoption_promotion.js.
+Object.assign(exports, require('./adoption_promotion')({db, orgStaffUids, notifyStaff}));
 
 // PayMongo donations & sponsorships — see functions/paymongo.js.
 Object.assign(exports, require('./paymongo'));
@@ -1912,6 +1965,10 @@ Object.assign(exports, require('./org_members'));
 Object.assign(exports, require('./referral_shares')({notifyStaff, orgStaffUids}));
 // Public copy of each animal for non-staff readers — see functions/public_animals.js.
 exports.syncPublicAnimal = require('./public_animals').syncPublicAnimal;
+
+// Sponsorship listings: open / fully funded from their recorded money
+// (functions/sponsorship_funding.js).
+exports.syncSponsorshipFunding = require('./sponsorship_funding').syncSponsorshipFunding;
 
 // ---- Organization verification review ------------------------------------
 //
@@ -2269,6 +2326,32 @@ exports.followUpAdopterPickups = onSchedule('every 30 minutes', async () => {
       console.error('[followUpAdopterPickups] failed for', doc.ref.path, e);
     }
   }
+});
+
+// ---- Reporter-led report turned into a request for help -----------------
+//
+// A Neglect or Abuse reporter who first chose to report to the authorities
+// themselves can ask the organization for help from Track Case
+// (independent_report_section.dart), which flips orgInvolvement to
+// org_assist. Tell the rescue staff of the organizations covering it.
+exports.notifyOrgAssistanceRequested = onDocumentUpdated('cases/{caseId}', async (event) => {
+  const before = event.data.before.data();
+  const after = event.data.after.data();
+  if (!before || !after) return;
+  if (orgInvolvement.involvementOf(before) !== orgInvolvement.INDEPENDENT_REPORT) return;
+  if (orgInvolvement.involvementOf(after) !== orgInvolvement.ORG_ASSIST) return;
+  const orgIds = criticalEscalation.escalationOrgIds(after);
+  if (!orgIds.length) return;
+  const uids = new Set();
+  for (const orgId of orgIds) {
+    for (const uid of await orgMemberUids(db, orgId, {anyOf: ['rescue']})) uids.add(uid);
+  }
+  uids.delete(after.reporterId);
+  await notifyStaff([...uids], {
+    title: after.urgency === 'Critical' ? 'URGENT: reporter asks for help with an abuse case' : 'Reporter asks for help with a neglect/abuse case',
+    body: 'A reporter who was handling this with the authorities now asks your organization for assistance. Tap to review it.',
+    data: {type: 'org_assistance_requested', caseId: event.params.caseId},
+  });
 });
 
 // ---- Critical reports left unreviewed ---------------------

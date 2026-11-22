@@ -233,7 +233,7 @@ class ActionRequiredSection extends ConsumerWidget {
     // filtered to urgency=='Critical'.
     final reviewList = reviewCases.value;
     if (reviewList != null) {
-      final critical = reviewList.where((c) => c.urgency == 'Critical').length;
+      final critical = reviewList.where((c) => c.urgency == 'Critical' && c.countsAsOrgWorkload).length;
       if (critical > 0) {
         rows.add(_AlertRow(
           icon: Icons.priority_high,
@@ -533,14 +533,10 @@ class TopMetricsRow extends ConsumerWidget {
     final activeAnimalCount =
         allLoaded ? activeTabs.fold<int>(0, (acc, a) => acc + a.value!.fold<int>(0, (s, c) => s + c.animalCount)) : null;
 
-    // Active Volunteers — no distinct active/inactive account field exists
-    // for rescue_volunteer users (confirmed by inspection); the only real
-    // presence signal already used elsewhere (Volunteers page itself) is
-    // PetTransporter.isOnline (online + seen within the last 5 minutes).
-    // Reported honestly as "online now" rather than implying a broader
-    // "active" concept the data can't actually support.
-    final volunteersAsync = ref.watch(rescueVolunteersProvider);
-    final onlineVolunteers = volunteersAsync.value?.where((v) => v.isOnline).length;
+    // Active Volunteers — approved rescue volunteers (kind 'independent'),
+    // and how many are taking cases now (not paused, under their limits).
+    final volunteersAsync = ref.watch(approvedRescueVolunteersProvider);
+    final onlineVolunteers = volunteersAsync.value?.where((v) => v.isAvailable).length;
     final totalVolunteers = volunteersAsync.value?.length;
 
     return Row(
@@ -561,8 +557,8 @@ class TopMetricsRow extends ConsumerWidget {
         const SizedBox(width: 10),
         _CompactMetricCard(
           title: 'Active Volunteers',
-          primary: onlineVolunteers == null ? '—' : '$onlineVolunteers online',
-          secondary: totalVolunteers == null ? 'True active-state requires additional data' : '$totalVolunteers registered',
+          primary: onlineVolunteers == null ? '—' : '$onlineVolunteers taking cases',
+          secondary: totalVolunteers == null ? null : '$totalVolunteers approved',
           onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const VolunteersPage())),
         ),
       ],
@@ -582,7 +578,7 @@ class CurrentOperationsSection extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final review = ref.watch(casesForTabProvider(RescuePipelineTab.review));
+    final reviewAll = ref.watch(casesForTabProvider(RescuePipelineTab.review));
     final assign = ref.watch(casesForTabProvider(RescuePipelineTab.assign));
     final ongoing = ref.watch(casesForTabProvider(RescuePipelineTab.ongoing));
     final treatment = ref.watch(casesForTabProvider(RescuePipelineTab.treatment));
@@ -597,6 +593,11 @@ class CurrentOperationsSection extends ConsumerWidget {
     final transporters = ref.watch(petTransportersProvider);
 
     int? lenOf(AsyncValue<List<dynamic>> a) => a.value?.length;
+
+    // Reporter-led neglect/abuse reports and surrenders waiting in review
+    // are counted apart: visible for awareness, not organization workload.
+    final review = reviewAll.whenData((l) => l.where((c) => c.countsAsOrgWorkload).toList());
+    final awarenessOnly = reviewAll.value?.where((c) => !c.countsAsOrgWorkload).length;
 
     final activeRescueCases = [review, assign, ongoing, treatment, intake]
         .map(lenOf)
@@ -641,6 +642,11 @@ class CurrentOperationsSection extends ConsumerWidget {
         _KpiCard(
           value: v(review.value?.where((c) => c.urgency == 'Critical').length),
           label: 'Critical rescue reports',
+          onTap: () => _pushRescue(context, ref, RescuePipelineTab.review),
+        ),
+        _KpiCard(
+          value: v(awarenessOnly),
+          label: 'Reporter-led / surrender reports (awareness)',
           onTap: () => _pushRescue(context, ref, RescuePipelineTab.review),
         ),
         _KpiCard(

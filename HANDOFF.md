@@ -1,6 +1,332 @@
 # Handoff
 
-_Latest: Admin + Staff permissions on `dev` (2026-11-18, committed and deployed; app build pending). Then the system admin console, one-organization scope and referral links (2026-11-17, committed and deployed). The build-fix sections further down are from branch `marcus` (base `a899293`), 2026-11-04._
+_Latest: Pet Surrender via Community Adoption with withdrawal, Lost Pet not org-handled, female dog litter details with linked puppy reports, transporter matching by vehicle capacity (2026-11-22, not deployed, not checked on a device). Before that, adoption without proof of address, collar tags (QR/NFC) required to be adoptable, sponsorship funding status (2026-11-22, not deployed, not checked on a device). Before that, rescue form urgency assessment, organization involvement and the neglect/abuse reporting paths (2026-11-22, not deployed, not checked on a device). Before that, money taken out / "Where did this money go?" (2026-11-22, not deployed, not checked on a device). Before that, scheduled adoption posts to Facebook (2026-11-21, fixed up 2026-11-22; not deployed, not checked on a device). Before that, independent rescuers (2026-11-20, indexes, functions and rules deployed; app build pending, not checked on a device). Before that, animal QR tags fixed, with New Code and Remove (2026-11-20, app only, not checked on a device). Before that, one mobile number and one email per account (2026-11-20, not deployed, not checked on a device). Before that, one default Staff permission set, carers merged into Staff, volunteer naming (2026-11-20, functions and rules deployed; app build pending). Before that, user Events page and Facebook sharing for campaigns and events (2026-11-20, function deployed; app build pending). Before that, Facebook sharing and photo descriptions (2026-11-20, deployed). Before that, feedback round (2026-11-18, Firestore rules deployed; app build pending). Before that, Admin + Staff permissions (2026-11-18, committed and deployed; app build pending). Then the system admin console, one-organization scope and referral links (2026-11-17, committed and deployed). The build-fix sections further down are from branch `marcus` (base `a899293`), 2026-11-04._
+
+## Pet Surrender, Lost Pet, litters, transporter vehicle capacity (2026-11-22, not deployed, not checked on a device)
+
+**Pet Surrender goes straight to Community Adoption.** New surrenders are filed with status `community_adoption` (not `pending`), so they never enter organization queues, transporter claims or staff notifications (`functions/index.js` `assignCaseToServiceAreas` stops after stamping service areas for `not_org_facilitated` cases). They are listed in Community Adoption next to rejected healthy strays (`isCommunityAdoptionEligible`, `isCommunityAdoptable` in the rules). The form shows the six-point note (lowest priority, listed for the community, interested people contact the owner, the pet stays in the owner's care, no guarantee, withdraw any time). Lost Pet texts no longer mention the organization reviewing or facilitating (owner and finder versions). Older `pending` surrenders keep working and can be withdrawn.
+
+**Withdrawing a surrender** (reporter only, Track Case and the Community Adoption page): reason (keeping, found an adopter, already rehomed, can no longer go ahead, Other + text), optional note, confirmation. The case becomes `withdrawn` with `surrenderWithdrawal` {reason, otherText, details, previousStatus, withdrawnAt, withdrawnBy}; nothing is deleted. Open/selected inquiries are declined (`declinedBecause: 'surrender_withdrawn'`) with a closing message in each chat. The rules allow the reporter only `community_adoption|pending -> withdrawn` with a reason on a surrender (no second withdrawal, no reopening, no self-listing), and new inquiries need a listable case. History shows "Surrender Withdrawn"; the admin Rescue filter has Community Adoption and Withdrawn.
+
+**Litter (Dog + Female + has a litter: Yes only).** Puppy count (1-20), where they are (together / scattered / some separated / not sure; per-group places when split), how they look, how many need attention (required when some are sick/injured/weak), notes, up to 3 photos. Saved as `animals[i].litter` and `litterPhotoUrls` on the case, shown in the report details and copied to the animal record as `litterAtIntake`. Changing species, sex or the litter answer clears it; collapsing the card keeps it. Not asked for cats or for a suspected pregnancy alone. When puppies need attention, the reporter is offered a **separate linked report** (Illness, one small dog per puppy) right after submitting or later from Track Case: `litterOf` on the puppy report, `litterReportCaseIds` on the mother's.
+
+**Transporter matching by vehicle** (`lib/core/utils/transport_suitability.dart`): 1 animal: any registered vehicle; 2+: a declared capacity that covers every animal; a motorcycle only ever 1 animal and never one that needs enclosed transport (critical urgency, large, cannot walk, unresponsive, serious injury, high bite/escape risk, mother with litter). Capacity is never inferred from the vehicle name. Assign Transporter shows each transporter's vehicle, capacity, trip size and why they are or are not suitable; unsuitable ones can't be picked, and "no suitable vehicle" is said plainly. Re-checked when the offer is created (repository) and in the rules (capacity and motorcycle only; the enclosed-transport reasons are app-side).
+- Registration now asks "How many animals can your vehicle carry safely?" (1-20, `transporterVerification.maxAnimals`, also on the application). Staff see it on applications and the transporter page.
+- Transporters who registered earlier count as 1 until they declare it: once, from their profile (Declare Capacity). After that, vehicle type and capacity change only by resubmitting verification (rules: `transporterVehicleSelfOk`).
+
+**Deploy:** `firestore.rules` and the `notifyNewCaseReported` function (where `assignCaseToServiceAreas` runs), then the app.
+
+**Tests:** rules emulator 229/229 (new `rules-tests/tests/surrender-transport.test.js`), functions 156/156, Flutter unit tests for these changes (`surrender_withdrawal_test`, `transport_suitability_test`, `litter_assessment_test`) plus the existing rescue/adoption/admin/transporter tests. No device testing: the withdrawal dialogs, litter photo picking, the puppy report hand-off and Assign Transporter were not run on a phone.
+
+## Adoption, collar tags (QR/NFC), sponsorship funding (2026-11-22, not deployed, not checked on a device)
+
+**Adoption form: no Proof of Address.** The upload, its requirement and its fit-score item are gone; the two remaining required uploads are Government ID and Home Photos (fit "Documents" keeps 5 points: ID 3, photos 2; the admin "documents complete" filter checks those two). Older applications still show their proof of address, and a resumed draft keeps the one it has.
+
+**Collar tags.**
+- **The bug:** shelter animal QR tags (`RESPAWND-ANIMAL:<code>`) could only be resolved by `startTagScan`, which nothing calls. The scanner people can reach (Report a Stray → Scan NFC/QR) only knew owner collar tags, so an animal QR showed "Tag scanned: RESPAWND-ANIMAL:…" and opened nothing. Codes were also never checked for uniqueness, and NFC for animals was "not available yet".
+- **Now:** one registry, `animalTags/{code}` (doc id = code; `animalId`, `organizationId`, `type` qr/nfc, `active`), shared by QR and NFC (`lib/core/utils/animal_tag_codes.dart`: one code format, one payload, one parser). `AnimalRecordRepository.registerTag` picks a free code and writes the registry entry and `animals.qrTagId`/`nfcTagId` in one transaction; `removeTag` retires the entry. Management tab: Add/Show QR Tag as before, plus **Add NFC Tag** (writes the same payload to a chip through `NfcService.writeAnimalTag`; a chip carrying another animal's registered tag is refused, a retired one can be reused after confirming), and a collar-tag status panel. Profile tab shows the status. Report a Stray's QR/NFC scan opens the animal (registry first, then the old `qrTagId` lookup for codes printed earlier). One `TagQrImage` renders QR for animal tags and owner collar tags and never draws an empty value (the owner card used `tagUrl(tagId ?? '')`).
+- **Adoptable needs a registered tag** (`firestore.rules`, `getAfter` on the registry): to become adoptable (including a released reservation) and to stay adoptable while a tag changes. Removing the last tag of an adoptable animal sets it to `not_ready` in the same write; releasing a reservation of an untagged animal returns it to `not_ready`. New records are never created adoptable. Not overridable, unlike the readiness checklist. Codes from before the registry are registered on first use (Show QR Tag, the Adoptable switch). Animals listed adoptable before this rule, without a tag, can still be re-saved as long as their tags aren't touched.
+- **Security fix:** the catch-all rule at the end of `firestore.rules` let any signed-in user write any collection not on its list; `animalTags` is now on it.
+
+**Sponsorship.**
+- Eligibility is unchanged in substance and now documented: any animal with a record (admitted at intake) can be sponsored while in care, whatever its adoption status or tags.
+- **Funding status:** sponsorships have no `targetAmount` (saveCampaign stores 0), so the target is the listing's own `monthlyAmount`. `functions/sponsorship_funding_rules.js`: **Fully Funded** while the available balance (`campaign_money.moneyOf`, moved out of campaigns.js: verified donations − refunds/reversals − expenses/cash-outs ± transfers) covers one month; **Open** otherwise, so spending or a refund reopens it. `syncSponsorshipFunding` (trigger on `campaigns/{id}`) writes `fundingStatus`/`fundingTarget`/`fundingAvailable` on the listing and `sponsorshipFunding` on the animal (copied to `publicAnimals`); it writes only on change. Fully funded listings are hidden from the user sponsorship list, the detail page says so, and `createDonationCheckout` refuses a new sponsor (existing sponsors can still renew). Admin listing info, listing cards and the animal's donations sheet/profile show the status.
+
+**Deploy**
+1. `firebase deploy --only firestore:rules`
+2. Functions, by name: `FUNCTIONS_DISCOVERY_TIMEOUT=60 firebase deploy --only functions:syncSponsorshipFunding,functions:createDonationCheckout,functions:syncPublicAnimal`. The other campaign callables only moved `moneyOf` to `campaign_money.js` with no behaviour change; they pick it up at their next deploy.
+3. Existing sponsorship listings get their status on their next write (any donation, expense or edit); to set them all now, touch each sponsorship listing once (e.g. re-save it).
+
+**Checks run:** `flutter analyze` 16 issues, all pre-existing; `flutter test` 378 pass (15 new: tag codes, tag status, adoption uploads and fit score, sponsorship eligibility and funding); `functions` `npm test` 156 pass (8 new for funding); `rules-tests` 218 pass (tag registry, duplicate/moved codes, adoptable gate, last-tag removal, reservation release, updated readiness tests).
+
+**Check on a device:** Add QR/NFC tag, scan each from Report a Stray; write a chip already registered to another animal (refused); Adoptable switch with and without a tag; remove the last tag of an adoptable animal; submit an adoption without proof of address; a sponsorship reaching its monthly amount, then an expense bringing it under.
+
+## Rescue form: assessed urgency, organization involvement, neglect/abuse paths (2026-11-22, not deployed, not checked on a device)
+
+**What changed**
+- **Urgency is assessed, not set from the rescue type.** `kRescueTypeOptions` no longer carries an urgency; the Lost Pet finder's urgency radios and the type-based `RescueUrgencyCard` are gone. `lib/core/utils/urgency_assessment.dart` (rules `rules-v1`) rates each animal from its answers: a new **Visible injury** question (with "is it visible in your photos?"), the health assessment, the per-type visible signs, "needs immediate medical attention", distress and bite history. Answers about the same body system share a dimension and only the strongest counts (an injury reported twice is not two severe signs). Critical needs an uncontradicted red flag (unresponsive/collapsed, heavy bleeding, difficulty breathing, seizures), two severe signs, or a severe sign plus a functional sign from another body system; one severe sign alone is Medium; minor-only is Low; "Not sure / Not assessed" or missing core answers rate Medium and are flagged. Contradictions are recorded, counted one tier lower and flagged for staff. Photos are not analyzed. Saved as `urgency` (same strings) plus `urgencyAssessment` {level, method, reasons, conflicts, notes, insufficientInformation, needsStaffVerification, photosAnalyzed:false, assessedAt}. `CaseReportDetails` shows it with its reasons (Track Case, Rescue Details, transporter); older reports keep their type-based level, labeled as such.
+- **`cases.orgInvolvement`**: `org_assist` (default; how older reports read), `independent_report` (Neglect or Abuse, reporter-led), `not_org_facilitated` (Pet Surrender). Dart `core/models/rescue/org_involvement.dart`, JS `functions/org_involvement.js`, sync test in `test/core/models/org_involvement_test.dart`. The last two are not workload while in review: out of dashboard counts and alerts, the morning digest and critical escalation; no responder/public broadcasts or nudges; different staff push wording. Rescue Reports shows a chip and an **Organization involvement** filter; Current Operations shows them as a separate awareness count; Rescue Details shows a badge and banner.
+- **Pet Surrender**: no urgency, no coordination group, a notice that the organization does not facilitate surrenders. **Lost Pet**: the finder's "needs pickup or medical help" toggle (which created an org case with a hand-picked urgency) is replaced by a button that switches the form to a rescue report, keeping the animals.
+- **Neglect or Abuse**: the reporter picks *Ask the organization for help* (coordination questions, availability/coverage disclaimer) or *I will report it myself* (step-by-step guide in a sheet; no coordination questions). Saved as `abuseReportPath`; the independent path also saves `independentReport` from the existing "Reporting to Authorities" answers. From Track Case the reporter can add the office, reference no., date and updates, or ask the organization for help, which flips the case to `org_assist` and pushes rescue staff (`notifyOrgAssistanceRequested`, type `org_assistance_requested`).
+- **Female animals**: "Has a litter?" and "Suspected pregnant?" with a signs-of-pregnancy info sheet, only when Female; changing the sex clears them. Saved per animal as `hasLitter` / `suspectedPregnancy`, always shown as an observation, never confirmed.
+- **Every animal card collapses** (before, only with two or more animals). Answers live on the entry, so collapsing never resets them.
+- **Fix**: `functions/public_cases.js` only treated `rescueType == 'surrender'` as a surrender, but the form saves `'Pet Surrender'`, so surrender reports were published to `publicCases` with the owner's full address. Both now match.
+- `firestore.rules`: reporters can no longer change `urgency` / `urgencyAssessment`, and may change `orgInvolvement` only from `independent_report` to `org_assist`.
+
+**Guide content is not verified against PAWS.** paws.org.ph could not be reached from the build environment, so `lib/features/rescue/neglect_abuse_guide_content.dart` holds general safety-first steps, labeled in the app as Respawnd guidance (no contact details, fees or legal procedures). Replace it with the verified PAWS text, set `kAbuseGuideVerifiedAgainstPaws = true`, and tag each step `pawsRecommendation` or `officialProcedure`.
+
+**Deploy**
+1. `firebase deploy --only firestore:rules`
+2. Functions, by name: `FUNCTIONS_DISCOVERY_TIMEOUT=60 firebase deploy --only functions:notifyNewCaseReported,functions:notifyUnconfirmedReports,functions:escalateCriticalReports,functions:syncPublicCase,functions:sendDashboardDigest,functions:notifyOrgAssistanceRequested`.
+3. Optional: `functions/scripts/backfill_public_cases.js` so existing surrender reports lose their address in `publicCases`.
+
+**Check on a device**: each rescue type's form; Female/Male switching; collapsing a half-filled card; Low/Medium/Critical examples; Neglect or Abuse both paths and the Track Case update / ask-for-help buttons; Rescue Reports chip and filter; dashboard counts.
+
+## Money taken out: "Where did this money go?" (2026-11-22, not deployed, not checked on a device)
+
+When money leaves the organization (a **PayMongo payout** deposited to the bank, or someone **taking money out** of the bank, GCash or the cash box), the app asks the people who manage money which fund it came from and what it was for, and tells the rest of the finance team.
+
+**What people see** (Donations, admin):
+- **Pop-up** the first time someone with *Manage money* opens Donations while a cash-out has no fund: "₱5,000 was paid out from PayMongo on Nov 20. Choose which fund it came from…" → *Choose fund* / *Later*.
+- **Yellow banner** above the Donations tabs until every cash-out is sorted out. Everyone who can see money sees it; those who can't manage money see "Someone who manages money needs to choose".
+- **Where did this money go?** sheet: the amount, then one or more parts, each with *Which fund did it come from?* (General fund first, each with its available balance), *What was it for?* (the allocation categories), a short description and an amount. *Split into another fund* adds a part; a live "Left without a fund / All of it has a fund ✓" line. Saving part of it is allowed (the rest stays on the banner). *It was already recorded somewhere else* closes it with a note, for spending already entered as a general expense or allocation, so nothing is counted twice.
+- Menu → **Record money taken out** (Manage money): amount, taken from (PayMongo payout / Bank / GCash / Cash on hand / Other), date, note, and the same fund parts, or *I'll decide later*.
+- Menu → **Money taken out** (View or Manage money): the history with status (Needs a fund, Partly assigned, Assigned, Already recorded) and who assigned what.
+
+**What it records.** Each part becomes an ordinary spending record on that fund (`campaigns/{id}/allocations`, kind `expense`, with `cashOutId`), so fund balances, Fund Tracking, reports and analytics include it. A fund can't go below zero; a cash-out can't be assigned more than its amount.
+
+**Notifications** (`notifyCashOut`, push + in-app, type `cash_out_needs_assignment` / `cash_out_assigned`): everyone with *View money* or *Manage money* (Admins included) when a cash-out needs a fund and when someone assigns it or marks it recorded, except the person who just did it. Tapping opens Money taken out with that cash-out's sheet.
+
+**Access** (same as the rest of the money): reading needs `financeView` or `financeManage`; recording, assigning and settling need `financeManage` (checked in the functions; the app hides the buttons). `organizations/{orgId}/cashOuts` has no client writes.
+
+**Backend**
+- `functions/campaigns.js`: `recordCashOut`, `assignCashOut`, `settleCashOut` (transactions; idempotent by request id; audit log entries, category `expenses`).
+- `functions/paymongo.js`: the webhook now handles PayMongo's two payout events:
+  - **`payout.deposited`** (money reached the bank): records a cash-out (doc id = payout id, so repeats are ignored).
+  - **`payout.returned`** (the bank sent it back to PayMongo): a cash-out still waiting for a fund is closed as *Returned by the bank*; one with spending already assigned is kept and flagged, and the finance team is told to check that spending (type `cash_out_returned`; nothing is voided automatically). A return with no earlier deposit is ignored.
+  - Fields are read defensively (`net_amount` or `amount` in centavos; `deposited_at`, `paid_at`, `updated_at` or `created_at`; destination bank if present) because PayMongo's payout docs couldn't be checked from here; check one real payout event against `cash_out_rules.js payoutFromPaymongo`. A payout belongs to the only approved organization; with more than one, it's only logged and staff record it by hand.
+- `functions/cash_out_rules.js` (+ `cash_out_rules_test.js`): validation, the split plan, payout parsing, notification text.
+- `functions/index.js`: `notifyCashOut` trigger; `notifyStaff` also keeps `cashOutId`.
+- `firestore.rules`: `organizations/{orgId}/cashOuts` read for `financeView`/`financeManage`, no writes; added to the subcollection catch-all's exclusions.
+
+**App:** `lib/core/models/donation/cash_out.dart`, `lib/features/admin/donation/cash_out_sheets.dart`, providers `cashOutsProvider`/`openCashOutsProvider`, service calls, Donations home (banner, pop-up, menu), notification routing.
+
+### Deploy, in this order
+
+1. Rules: `firebase deploy --only firestore:rules` (adds read access only).
+2. Functions, by name: `FUNCTIONS_DISCOVERY_TIMEOUT=60 firebase deploy --only functions:recordCashOut,functions:assignCashOut,functions:settleCashOut,functions:notifyCashOut,functions:paymongoWebhook`.
+3. PayMongo webhook. **None exists yet** (2026-11-22): donations have been confirmed only by `syncDonationPayment` when the donor returns to the app. In the PayMongo dashboard (Test mode first) → Developers → Webhooks → Create, URL = `paymongoWebhook`'s URL from the Firebase console (us-central1), events `checkout_session.payment.paid`, `payment.failed`, `payout.deposited`, `payout.returned`. Then `firebase functions:secrets:set PAYMONGO_WEBHOOK_SECRET` with the webhook's `whsk_…` secret and redeploy `paymongoWebhook`. Test: a test donation adds a `paymongoWebhookEvents` doc. Live mode needs its own webhook and secret (the function ignores events from the other mode). Payout events only happen in live mode.
+4. App build.
+
+### Checks run
+
+- `functions/`: `npm test` 141 pass (8 new). `rules-tests`: 210 pass, including the new cash-out test (run with `firebase emulators:exec … "node --test --test-concurrency=1 tests/*.test.js"`; the package script's `tests/` folder argument fails on Node 22).
+- App (Flutter 3.50.1): `flutter analyze` 0 errors. `flutter test`: 310 pass; the same 4 Google Fonts widget-test failures as before. New: `test/core/models/cash_out_test.dart` (6 pass).
+- Not run: a real PayMongo payout event; the sheets on a device.
+
+### Check on a device
+
+As a Treasurer, Record money taken out ₱1,000 from Cash on hand, split ₱600 General fund (Food) + ₱400 a campaign (Transport): both funds' Fund Tracking show the spending, and an Admin gets "₱1,000 taken out and assigned". Record another with *I'll decide later*: the Admin gets "Where did this money go?", opening Donations shows the pop-up and banner, and assigning it clears both. A Full staff member (view only) sees the banner and history but no buttons; a Rescue-only member sees nothing.
+
+## Scheduled adoption posts to Facebook (2026-11-21, fixed up 2026-11-22; not deployed, not checked on a device)
+
+Adoption listings get shared to the organization's Facebook Page on a schedule the organization sets. **The Admin sets the schedule; the whole organization is reminded.** Nothing posts automatically: when a post is due, every active member (owner, Admins, all Staff) gets a reminder with suggested animals, and a member with the Share to Facebook permission reviews and posts it.
+
+**Schedule (Admin).** Organization Profile → Facebook Page Integration → *Set/Edit Post Schedule*, or *Edit* on the Promote Adoptions screen:
+- Scheduled reminders: every 1, 2 or 4 weeks, on a weekday, at an hour (Philippine time), N animals per post (1–6).
+- Smart suggestions (separate switch): a nudge between reminders when an animal open for adoption has **never been shared**, or **2+ animals** listed 14+ days with no open application haven't been shared in 30+ days. Sent at the schedule's hour, at most every 3 days, not within 3 days of a post, nor within 2 days of the next scheduled reminder.
+- A post made in the half-interval before a slot (3.5 days for weekly) counts for that slot: no reminder.
+- Missed slots (job down) collapse into one reminder.
+
+**Reminder.** Push + in-app notification `adoption_promotion_due` to every active member (`orgStaffUids(orgId)`: owner, Admins, all Staff, linked accounts). Tapping opens **Promote Adoptions**: members with `facebookPublish` get the suggested animals ticked; others see the schedule and a note that posting needs that permission. If the Page isn't connected, the slot passes silently.
+
+**Promote Adoptions screen** (`lib/features/admin/animals/promote_adoptions_page.dart`; admin drawer → Promote Adoptions for every active member; also from the Facebook section): the schedule (everyone; only Admins can edit), then, for members with Share to Facebook, every animal open for adoption (adoptable, not archived/deceased/hidden, with a photo), most in need first (never shared → no applicants → longest since shared → longest listed), with the reason. Tick up to 10, edit the caption (draft follows the selection until edited), **Post** → the existing `facebookPublishAnimalRecords`.
+
+**Backend** (`functions/adoption_promotion.js`, rules in `functions/adoption_promotion_rules.js` + tests):
+- `facebookSaveAdoptionPromotion` (callable, Admin only): validates and stores the schedule at `organizations/{orgId}/integrations/facebookPromotion` with the next slot (`nextDueAt`); audit log entry with old and new values. The existing rules already cover the doc (members read, no client writes), so **no rules change**.
+- `facebookAdoptionPromotionSuggestions` (callable, `facebookPublish`): ranked animals, suggested ids, draft caption. Callable because `facebookShares` is closed to clients.
+- `remindAdoptionPromotions` (scheduled, minute 5 of every hour, Asia/Manila): per approved organization with a schedule doc.
+- `facebookPublishAnimalRecords` now also stamps `lastPostedAt`/`lastPostUrl`/`lastPostAnimalIds` on the schedule doc (best effort).
+- `notifyStaff` (index.js) now also keeps `organizationId` and `animalIds` on the in-app notification when given.
+
+**Posting** uses the current `facebookPublishAnimalRecords` items API: one photo per animal (its first) plus the caption. Facebook campaign/event posts (`facebookPublishRecordPost`) don't count as adoption posts.
+
+**Merge fix (2026-11-22):** commit `0c9cacb` brought these files in by hand. It overwrote `lib/core/repos/facebook_integration_repository.dart` with a copy of `functions/index.js` (1,600+ analyzer errors), replaced the newer `functions/facebook.js` (per-photo captions, link posts, Secret Manager errors) with an older copy, added a second unused copy of the schedule sheet, and left out the drawer entry, provider, push routing and Facebook section. All fixed in the following commit; `functions/facebook.js` is the team's version plus the `lastPostedAt` stamp.
+
+### Deploy
+
+1. Functions, by name (a plain `--only functions` would delete the two functions that aren't in the repo; see below): `FUNCTIONS_DISCOVERY_TIMEOUT=60 firebase deploy --only functions:facebookSaveAdoptionPromotion,functions:facebookAdoptionPromotionSuggestions,functions:remindAdoptionPromotions,functions:facebookPublishAnimalRecords`. Safe for older builds (they never call the new callables). Other functions pick up the `notifyStaff` change at their next deploy; nothing depends on it.
+2. App build.
+
+### Checks run
+
+- `functions/`: `npm test` 133 pass (9 new in `adoption_promotion_rules_test.js`); `index.js` loads and exports the new functions.
+- App (Flutter 3.50.1): `flutter analyze` 0 errors (1 warning, unused `_FundTrackingPanel` in donation_detail.dart, not from this work). `flutter test`: 304 pass, 4 fail (`admin_shared_widgets_test.dart` x2, `rescue_closed_tab_test.dart`, `member_access_editor_test.dart`) with "An animation is still running even after the widget tree was disposed" from Google Fonts' system-font relayout; the same 4 fail on `0c9cacb^`, so they're unrelated. New: `test/core/models/adoption_promotion_schedule_test.dart` (6 pass).
+
+### Check on a device
+
+As an Admin, set a weekly schedule for the next hour with smart suggestions on; at that hour, every member gets the reminder. A Staff member with Share to Facebook taps it, sees the suggested animals ticked, posts; the schedule shows the last post, and the next reminder moves a week ahead. A Staff member without the permission also gets the reminder; Promote Adoptions shows them the schedule and that posting needs the permission, and they can't edit the schedule.
+
+## Independent rescuers (2026-11-20, indexes, functions and rules deployed; app build pending, not checked on a device)
+
+One person or a small team who rescues like a small organization. They are an `organizations/{id}` doc with `kind: 'independent'`, so cases, animal records, members and rules work as they do for shelters, with these limits. Picks up the volunteer work that was deferred.
+
+- **Sign-up:** **Independent Rescuer** on Select User Type. It saves `role: organization` + `signupKind: independent` and runs the same About → documents → review steps, worded for a person:
+  - **Name and area:** a name, plus a general area (barangay, city) that is shown on the profile.
+  - **Home pin (private):** saved in `organizations/{id}/settings/home`, readable by the team only. The public coverage circle is centred on the pin rounded to about 1 km, 3 km by default.
+  - **Documents:** valid ID, proof of address, rescue history or references, and an optional barangay clearance.
+  - **Review:** system admins approve or reject it in Approvals, where the card shows "Type: Independent rescuer".
+- **Modules:** `functions/org_permissions.json` `independent`, mirrored in `IndependentRescuer` (`org_permission.dart`) and in `independentPerms()`/`independentDefaultPerms()` in firestore.rules.
+  - **Defaults:** rescue, animals, care.
+  - **Optional:** adoptions and insights, which a system admin turns on in Approvals → Approved → **Modules & limits** (`setIndependentLimits`).
+  - **Never:** campaigns, donations/finance, volunteers/events and Facebook posting.
+  - **Owner included:** nobody in the org gets more than what it has (`orgEnabledPermissions` in the app and `org_access.js`, `orgPermsOf` in rules).
+  - **Member editor:** shows only the org's modules.
+- **Limits:** team of 5, 3 active cases, 5 animals in care (a system admin can change each).
+  - **Counters:** `memberCount`, `activeCaseCount`, `animalsInCareCount` and `lastActiveAt` are kept by `functions/independent_rescuers.js`. Clients can't write them, nor `kind`, `enabledPermissions` or the caps.
+  - **Team cap:** rules refuse invitations and joins once the team is full.
+  - **Available/Paused:** the existing `acceptingCases` switch.
+- **Getting cases:**
+  - **Head start:** `assignCaseToServiceAreas` now tags shelters only (`areaOrgIds`). It also writes `nearbyIndependentIds` (approved, available, under-capacity independents covering the point, radius clamped to 1–5 km) and `independentsOpenAt`, which is 15 minutes after the report, or at once for Critical.
+  - **Notifications:** independents get no instant "nearby responder" push. `openCasesToIndependents` (every minute) tells them when a case opens and nobody has taken it.
+  - **Their list:** only their own cases, cases referred to them, and unowned cases opened to them (`watchScopedCaseDocs`).
+  - **Shelters:** their view is unchanged.
+- **First accept wins:**
+  - **App:** `acceptCase` is now a transaction. It throws `CaseClaimException` ("An organization already accepted this case", head start, outside area, at capacity, paused), and Rescue Details shows it and leaves.
+  - **Rules:** `claimOk()` stops anyone re-stamping a case another org owns. This also fixes the last-write-wins race between two shelters.
+  - **Independents:** rules let them work an unowned case only once it opened to them (`poolCaseOpenToMe`).
+- **Referrals:** Refer → **Rescue Volunteer** is live. It lists independents covering the case with their room left; paused or full ones are shown but greyed out. It goes through `referToOrganization` with type `rescueVolunteer`, so accept/decline and the 24 h/48 h follow-ups are unchanged. Accepting checks capacity in the transaction. Independents can refer a case on to a **Shelter or Rescue Group** even while `multiOrganizationEnabled` is off. New flag: `FeatureFlags.independentRescuersEnabled` (on).
+- **Transport:**
+  - **I'll Bring It Myself:** shown on Assign Transport as soon as the clinic is saved (`startOrganizationTransport(byChoice: true)`).
+  - **Switch to a Transporter:** Rescue Details offers it mid-trip (`stopOrganizationTransport`), which sends the case back to Awaiting Assignment.
+  - **Transporter trips end at the clinic:** accepting stamps `ownerKind: 'independent'`, and `statusAfterTreatmentAccepted` then ends the trip there, because the rescuer collects the animal.
+- **Adoption:** the shelter flow, made lighter:
+  - **Interview optional:** a pending application has **Accept Without Interview**.
+  - **No stall withdrawals:** `followUpStalledApplications` skips independents' applications.
+  - **Returns:** approving one while at the animal limit warns the rescuer to transfer an animal on.
+  - **Public label:** the public animal page reads "Independent rescuer · name" (`syncPublicAnimal` adds `ownerKind`/`ownerName`).
+  - **Track Case:** shows "Handled by an independent rescuer".
+- **Dashboard:** `IndependentAreaCard` on Today, a new widget rather than one extracted from `explore_reports_map.dart`:
+  - **Map:** the coverage circle, open cases in it, their own cases, nearby shelters and the home pin.
+  - **Controls:** a radius slider (1–5 km), the Available switch, and room left.
+  - **Left out:** other orgs' cases and reporter details.
+  - **Profile:** for independents it hides the shelter pin, city service areas and Facebook.
+- **Accountability:**
+  - **Weekly check-in:** "Animals in your care" push (`weeklyIndependentCheckIn`, Monday 9:00).
+  - **Auto-pause:** after 30 days with no activity and no open cases.
+  - **Deletion:** account deletion is refused while the rescuer holds cases or animals.
+  - **Users directory:** shows "Independent rescuer · 1/3 cases · 2/5 animals".
+- **Rescue Volunteer accounts** stay transporters (no case ownership) and now verify with the same ID/vehicle documents as pet transporters. `isVerifiedResponder()`, `transitBlockReason` and `staffTransporterReview` accept `isVerified` for them, and an older approved volunteer application still counts. This closes the "nothing creates one now" gap noted below.
+- **Not done:**
+  - **Rules don't enforce the head start on reads.** They check the case lists the rescuer, but the 15 minutes is checked on accept, not on read: a listed independent could open a case early with a direct link, though not take it.
+  - **Storage not capped:** storage.rules doesn't cap independents' modules. Photos only; Firestore refuses the records.
+  - **No expense log:** independents have none (finance is off for them).
+  - **No partner clinics on the map:** there's no saved list of partner clinics.
+
+### Deploy, in this order
+1. `firebase deploy --only firestore:indexes` (three new `cases` indexes: the head-start job and the independents' pool queries).
+2. Functions:
+   - **New:** `setIndependentLimits`, `syncIndependentMemberCount`, `syncIndependentCaseCount`, `syncIndependentAnimalCount`, `openCasesToIndependents`, `weeklyIndependentCheckIn`.
+   - **Changed:** `notifyNewCaseReported`, `setMemberAccess` (and every callable using `org_access.js`), `followUpStalledApplications`, `syncPublicAnimal`, `deleteMyAccount`, `adminDeleteUser`.
+   - `FUNCTIONS_DISCOVERY_TIMEOUT=60 firebase deploy --only functions`.
+3. App build.
+4. `firebase deploy --only firestore:rules`. This only adds access for existing builds, apart from `claimOk`, which older builds never trip, because they accept unowned cases only.
+
+**Deployed 2026-11-20 (commit `335b3b5`, rebased on `0873df0` pet matching):** `firestore:indexes`, all 102 functions (8 created: the six above, `scorePetAlertMatches` from the pet-matching commits, and `checkSignUpPhone`; some updates hit the per-minute quota and went through on the CLI's retry), then `firestore:rules`.
+- **Side effect:** these rules include the phone rule from "One mobile number, one email per account" below, which was meant to wait for the new app build: older builds that save a typed number at onboarding are now refused. Ship the app build soon, or relax that rule until then.
+
+### Checks run
+- `flutter analyze lib`: the 17 issues already there, none in changed files.
+- `flutter test`: 287 pass (new: `test/core/models/rescue/case_claim_rules_test.dart`, more in `org_permission_test.dart` and `transit_rules_test.dart`).
+- `functions`: `npm test` 104 pass (new: `independent_rescuer_rules.test.js`; independent lists added to `org_permissions_sync.test.js`).
+- `rules-tests`: 198 pass with JDK 21 (new: `tests/independent-rescuers.test.js`, 10 tests). Run on ports 8188/9299 because emulators from an interrupted run still held 8080/9199 on this machine.
+
+### Check on a device
+- **Sign-up:** Independent Rescuer → name, area, home pin, documents → Submit. As a system admin, approve it, then Modules & limits → turn on Adoptions.
+- **Head start:** a non-critical report inside the rescuer's circle. The shelter sees it at once; the rescuer sees it after 15 minutes with a "New case near you" push. A Critical report shows to both at once.
+- **Race:** shelter and rescuer tap Accept together. One gets it, and the other sees "already accepted" and is sent back.
+- **Self-transport:** rescuer accepts → saves a clinic → I'll Bring It Myself → Arrived — Start Treatment. On another case, Switch to a Transporter mid-trip.
+- **Referral:** a shelter refers a case to a full rescuer (3 active cases): the rescuer is greyed out. Refer to one with room, who accepts.
+- **Dashboard:** the map shows the circle and pins; the radius slider saves; Paused hides new cases.
+
+## Animal QR tags: Show/Add fixed, New Code and Remove (2026-11-20, app only, not checked on a device)
+
+- **Cause:** Animal record → Management → **Show QR Tag** / **Add QR Tag** stayed on a dimmed screen on every build. The QR was shown in an `AlertDialog`, which sizes itself from its content's intrinsic width, and `QrImageView` (qr_flutter 4.1.0) is a `LayoutBuilder`, which can't report one. Layout threw "LayoutBuilder does not support returning intrinsic dimensions", and in release builds only the dialog's barrier was painted. Add QR's write was saved; only the dialog failed. Firestore rules, the scanner and the CameraX/ML Kit bump in `android/app/build.gradle.kts` weren't involved.
+- **Fix** (`lib/features/admin/animals/widgets/animal_management_tab.dart`): the QR sits in a fixed 220×220 box inside a new `_QrTagDialog`. Saving shows "Saving QR tag…" on the tile, with a 20 s timeout and clear messages for no connection, permission denied and other errors, instead of a silent wait.
+- **New Code / Remove** (in the QR dialog, each behind a confirmation): `AnimalRecordRepository.regenerateQrTag` writes a new random code and `removeQrTag` deletes `qrTagId`. Both log the old code in View Logs (`qrRegenerated` / `qrRemoved`, `previousValues.qrTagId`). Scans resolve by `qrTagId` (`animal_tag_scan.dart`) and `syncPublicAnimal` replaces the public copy, so tags already printed with the old code show "No animal record uses this QR tag". The confirmations say so and tell staff to reprint. Same people as Add QR (records staff of the owning organization); no rules change. Collar tags (`users/{uid}/collarTags`) are separate and unchanged.
+
+### Deploy
+- App build only.
+
+### Checks run
+- `flutter analyze` on the changed files: no issues.
+- A throwaway widget test (not kept) reproduced the LayoutBuilder exception with the old layout; the sized version rendered.
+- `rules-tests`: 188/188 with JDK 21 (1 new: "the owning organization's records staff add, replace and remove QR tags").
+
+### Check on a device
+- Animal without a tag → Add QR Tag: the QR and code show at once; the tile then reads Show QR Tag.
+- Show QR Tag → New Code → Replace Code: a new code shows; scanning the old printout says "No animal record uses this QR tag"; the new one opens the animal.
+- Show QR Tag → Remove → Remove Code: "QR tag removed." and the tile reads Add QR Tag. View Logs lists all three events.
+- Airplane mode → Add QR Tag: after 20 s, the connection message shows instead of a dimmed screen.
+
+## One mobile number, one email per account (2026-11-20, not deployed, not checked on a device)
+
+- **Email:** Firebase Auth already keeps an email on one account (sign-up fails with "email already in use"; Google sign-in with the same email joins the same account while Authentication → Settings → *User account linking* stays on "Link accounts that use the same email").
+- **Phone sign-ups add an email:** Your Details also asks phone sign-ups for an email and password and adds them to the account (`AuthService.addEmailSignIn` → `linkWithCredential`), then shows the confirm-email screen until the link is opened. An email another account uses is refused ("This email already has a ResPAWnd account…"). Every new account can then sign in with either its email or its number.
+- **Existing phone accounts:** Profile → Email Address → Update opens **Add Email Address** (email + password, same check), and the row shows "(not confirmed)" until the link is opened. The app-wide confirm-email gate (`AuthService.needsEmailVerification`) no longer holds accounts that also sign in with a verified number, so a mistyped address can be corrected there instead of locking the person out; Your Details still waits for new phone sign-ups to confirm.
+- **Mobile number:** the number typed in **Your Details** used to be saved without checking, so the same person could sign up by email and later sign in with that number and get a second account. Now:
+  - Your Details sends an SMS code and adds the verified number to the account (`AuthService.addVerifiedPhone` → `updatePhoneNumber`). Signing in with that number later opens the same account. A number another account already has is refused: "This number already has a ResPAWnd account. Log out and sign in with your number instead…". After phone sign-in the number is filled in and locked.
+  - Profile → Update Mobile Number uses the same code check (`lib/core/widgets/phone_verification_sheet.dart`); phone sign-in accounts change the number they sign in with.
+  - Older profiles list numbers nobody verified. `checkSignUpPhone` (`functions/phone_accounts.js`) runs after a new sign-up verifies a number: if a finished account already lists it, a phone-only sign-up is removed (it has no data yet) and an email/Google sign-up loses the number; the message names that account's masked email (e.g. `ma***@gmail.com`) so the person signs in there. Existing accounts keep a number they verify.
+  - firestore.rules: a profile's `phone` can only be set to the number verified on the account (`request.auth.token.phone_number`) or emptied. Existing values stay until changed.
+
+### Deploy, in this order
+1. `firebase deploy --only functions:checkSignUpPhone`
+2. Ship the app build.
+3. `firebase deploy --only firestore:rules`, only once people have the new build: older builds save the typed number at onboarding, which the new rule refuses.
+
+### Checks run
+- `functions`: `npm test` 94/94 (6 new in `phone_account_rules.test.js`).
+- `rules-tests`: 187/187 with JDK 21 (3 new under "one mobile number, one account").
+- `flutter analyze` on the changed files: no issues.
+
+### Check on a device
+- Email sign-up → Your Details → number → code → finish. Log out, sign in with that number: the same account opens.
+- Second email sign-up with the same number: refused at the code step.
+- Phone sign-up → Your Details asks email and password → confirm the link → finish. Log out, sign in with that email and password: the same account opens. An email already in use is refused.
+- Existing phone-only account → Profile → Email Address → Update → add email and password: the row shows "(not confirmed)" until the link is opened; then email sign-in opens the same account.
+- Phone sign-in with a number an older account lists (unverified): told to sign in with `xx***@…`, and no new account is left behind.
+- Profile → Update Mobile Number with a number another account has: refused; with a new number: saved.
+
+## One default Staff set, carers merged into Staff, volunteer naming (2026-11-20, functions and rules deployed, not checked on a device)
+
+- **Presets removed.** `functions/org_permissions.json` has one set, `staff`: rescue, animals, care, adoptions, volunteers, insights. Campaigns, View donations & funds, Manage money and Post to Facebook are never in it; an Admin ticks them per person. The member editor (`member_access_editor.dart`) shows "Default staff permissions" / "Custom permissions" with **Reset to default** instead of the preset dropdown. Titles read "Staff" or "Staff · Custom access" (`staffTitle`).
+- **Carers merged into Staff.** Legacy `role: 'carer'` and legacy Staff without a `permissions` list both get the default set (app, `functions/org_access.js`, `firestore.rules`/`storage.rules` `defaultStaffPerms()` + `permsOf`). Any member with daily care (the default) gets **Care Tasks** in the admin drawer, which opens the care-tasks screen (`CarerHomeScreen(fromAdminShell: true)`, back button instead of Log out). Staff whose *only* box is daily care still land on that screen as their home.
+- **Volunteers.** Home screen's **Volunteer** card is gone; **Events** stays (no application banner). Signing up for an event = event volunteer (admin event detail: "Event volunteers"; dashboard report "Event volunteers"). Admin **Volunteers** is now **Rescue Volunteers** (external `rescue_volunteer` accounts; applications page "Rescue Volunteer Applications"; system admin directory group "Rescue volunteers"). The general volunteer application form and its banner (`volunteer_application_screen.dart`) were **removed**; rescue volunteers sign up as their own account type. The admin review page (`volunteer_applications_page.dart`) and the model/repository stay for existing applications. **Open:** rescue volunteers still need an approved `volunteerApplications/{uid}` to take transits and read full reports (`transitBlockReason`, `isVerifiedResponder()` in firestore.rules), and nothing creates one now (nothing did for them before either, since they never saw the form). `rescue_volunteer` is self-selectable at sign-up, so the gate should stay until staff have another way to approve them.
+- **Access change for existing members:** members without an explicit list (the `--step=permissions` migration hasn't run) lose campaigns and View donations once the rules are live; former carers gain the default set. Members with an explicit list keep it. Before deploying the rules, an Admin should open each person who handles money in Staff Members and tick their money permissions (that writes an explicit list through `setMemberAccess`).
+- **To deploy, in order:** `firebase deploy --only functions` (org_access is shared by every callable that checks access), the app build, money boxes ticked for the people who need them, then `firebase deploy --only firestore:rules,storage`. `functions/scripts/migrate_member_permissions.js --step=permissions` now writes the default set for both staff and carers.
+
+**Deployed 2026-11-20 (commit `cd5c0df`):** all 91 live functions by name (88 on the first run; `completeDueQuarantines`, `evaluateCampaignDeadlines`, `followUpStalledApplications` hit the per-minute quota and went through on a retry), then `firestore:rules` and `storage`. The members check before the rules was skipped: there are no local Google credentials for `migrate_member_permissions.js`, so which non-Admin Staff lost money access wasn't listed; an Admin ticks it back in Staff Members. App build not installed anywhere yet.
+- `syncActiveSponsorCount` and `recountActiveSponsors` (the unlisted functions noted below) are no longer on the project. `deleteMyAccount`, `adminDeleteUser`, `adminSetUserDisabled` (in `functions/index.js` since `f157dff`) had never been deployed, so Delete account and the system admin's disable/remove buttons failed; **created 2026-11-20** by name (not tried from the app yet).
+
+**Checks:** `flutter analyze` (pre-existing issues only), `flutter test` 280 pass, functions `npm test` 88 pass, `rules-tests` 184 pass (fixtures: `staffA`/`staffB` now have money ticked, `carerA` is care-only Staff, new `legacyStaffA`/`legacyCarerA` for the fallback).
+
+## User Events page, campaign and event Facebook sharing (2026-11-20, function deployed, not checked on a device)
+
+- **Events (Home → Events):** the event detail page now follows the live event (spots left, cancellation, removed) and checks the viewer's own sign-up when opened from anywhere (organization profile, Favorites), so it shows **View E-Ticket** instead of offering a second sign-up. The sign-up form fills name, email and mobile from the profile (`UserAutofill`), validates email and PH mobile, and names the event. The list's filter button works (Saved only, Hide full), has pull-to-refresh, a "You're going" label and a **Past events you joined** section. Favorites → Volunteer lists saved events (`VolunteerEventRepository.loadMyFavoriteEvents`).
+- **Share to Facebook for campaigns and events:** admin campaign detail → **Share to Facebook** chip (not drafts or archived); admin event detail → Facebook icon in the app bar (not cancelled). Both open `lib/features/admin/facebook/facebook_record_post_page.dart`: editable suggested text (`record_post_text.dart`), optional cover photo, **Post to <Page>** or **Share…** (share sheet, text copied).
+- **New callable `facebookPublishRecordPost`** (`functions/facebook.js`, checks in `facebook_share_rules.js`): `{organizationId, kind: 'campaign'|'event', recordId, message, includePhoto}`. Same publisher check as animals; the record must belong to the organization; refuses draft/archived campaigns and cancelled events; the photo is the record's own `imageUrl`. Logged to `facebookShares` (`recordKind`, `recordId`) and `auditLogs`. No rules change.
+- **Deployed 2026-11-20:** `firebase deploy --only functions:facebookPublishRecordPost` (the first try returned 409 while the function was still being created; the second updated it). App build not installed anywhere yet.
+
+**Checks:** `flutter analyze` (pre-existing issues only), new `test/features/admin/record_post_text_test.dart` (5 pass), functions `facebook_share.test.js` 10 pass.
+
+## Facebook sharing and photo descriptions (2026-11-20, functions + hosting deployed, not checked on a device)
+
+- **Facebook re-enabled:** `flutter_facebook_auth` 7.3.3 is back in pubspec; Organization Profile → Facebook Page Integration → Connect works again (classic login, `pages_*` permissions; Limited Login on iOS can't post to Pages). App ID `1764224901694464` (same as the `FB_APP_ID` secret) is in `lib/core/constants/facebook_config.dart`, `strings.xml` and `Info.plist`. **The client token is still a placeholder** in `android/app/src/main/res/values/strings.xml` and `ios/Runner/Info.plist` (Meta dashboard → App settings → Advanced → Client token).
+- **Share to Facebook** (`lib/features/admin/animals/facebook_share_page.dart`): Animal Records → long-press to select (up to 10) → Facebook icon, or Management tab → Share to Facebook. Pick which details go in the text (`ShareField`, `lib/core/utils/facebook_post_composer.dart`), which photos to attach (up to 20) and each photo's description, opening/closing lines, and whether to add each animal's profile link. **Post to <Page>** (owner/Admin or `facebookPublish`; confirm dialog) or **Share…** (system share sheet; the text is copied because Facebook drops pre-filled text).
+- `facebookPublishAnimalRecords` now takes `items: [{animalId, photos: [{url, caption}]}]` and `link`; each photo must be one of that record's own photos, captions go on the Facebook photos. Older builds sending `animalRecordIds` still post each record's first photo. Checks in `functions/facebook_share_rules.js`.
+- **Public animal page** `/animal/<id>` (`functions/public_animal_page.js`, HTML in `public_animal_page_rules.js`, Hosting rewrite in firebase.json): server-rendered from `publicAnimals` only, with og: tags for the Facebook preview, photo captions, facts, health summary, organization contacts, and **Open in the ResPAWnd app** (`respawnd://open/animal/<id>`; Android intent URL falls back to the page). Archived/hidden/deceased animals show "Profile not available".
+- **In the app:** the `respawnd://open/...` scheme is registered (AndroidManifest, Info.plist); `MaterialApp.onGenerateRoute` → `AnimalLinkPage` (staff of the owning org get the full record, others the public profile, signed-out users a sign-in prompt).
+- **Photo descriptions:** `animals.photoCaptions: [{url, caption}]` (`lib/core/models/photo_captions.dart`), edited by tapping a photo in Create/Edit Animal Record, copied to `publicAnimals` for public photos, shown in the photo gallery (inline and fullscreen), on the web page and on Facebook photos. No rules change needed.
+
+**Deployed 2026-11-20:** the three functions below (by name) and Hosting; `/animal/<made-up id>` returns the not-found page (a real animal's page not checked: no local credentials to look one up). App build not installed anywhere yet.
+
+**How it was deployed:** `firebase deploy --only functions:publicAnimalPage,functions:facebookPublishAnimalRecords,functions:syncPublicAnimal` (by name, see the note on unlisted functions below), then `firebase deploy --only hosting`. Existing `publicAnimals` copies gain captions the next time each animal is saved (or rerun `functions/scripts/backfill_public_animals.js`). Posting to a Page needs the Meta app live with `pages_manage_posts` approved, or the posting account added as a tester/developer while it's in development mode.
+
+**Checks:** `flutter analyze` (pre-existing issues only), `flutter test` 275 pass (new `facebook_post_composer_test.dart`), functions `npm test` 85 pass (new `facebook_share.test.js`).
+
+## Feedback round: view-only modules, account page, transport flow (2026-11-18, rules deployed, not checked on a device)
+
+- **Access:** every module shows for every Staff member outside the care-tasks screen; without the permission it is **view only** (drawer tag, banner, no action bar/menus/create buttons). `firestore.rules` `readKeys()` (= `opsKeys()`) now gates reads of cases, animals and medical records, adoptions, events, volunteer/transporter applications, transport assignments, logs, audit log and analytics; writes keep their own permission. Money (donor records, payments, expenses, transfers, general expenses) is unchanged. Carers still can't read the unowned pool. Storage rules unchanged (transporter IDs and adoption documents stay with `volunteers`/`adoptions`).
+- **Presets:** Rescue coordinator + Adoptions officer are now one preset, **Rescue & adoptions** (`rescueAdoptions`: rescue, animals, care, adoptions, insights). Members saved with the old names match by permissions, so they show as Custom. Picking **Custom** clears every box.
+- **Dashboard loading for Staff:** Riverpod 3 retried refused queries and reported them as loading; `appProviderRetry` (main.dart) no longer retries `permission-denied`, and the dashboard treats errors as settled.
+- **Drawer:** Members section (Team for Admins, Volunteers, Transporters); **Account** next to Log out: details, Switch account (accounts used on this device, `known_accounts.dart`, `shared_preferences`), Delete account. Carers get Account and a labelled Log out.
+- **Rescue pages:** the bottom-left "more" button moved to the app bar (top right) on Rescue Details, Track Case, Treatment and Intake. Intake: transporter card has its own menu (Reassign Transporter) and Transport Tracking under Call; the bar keeps only Confirm Animal Received. Transporter card is full width everywhere.
+- **Assign Transport:** no popup. One inline panel: live timer, Send to Another Transporter, Cancel Offer; a declined/expired offer offers Retry <name> or Choose Another; acceptance opens tracking.
+- **Track Case:** the map follows the sheet (no empty band when it slides down); the animal's photo is its map pin and sits on the status card.
+- **Create Animal Record from a case:** description starts empty; every case photo is prefilled (removable).
+
+**Deployed 2026-11-18:** `firebase deploy --only firestore:rules` to respawnd1-45021 (only widens reads; safe for older builds; the four compiler warnings are pre-existing). **Not done:** the app build. Checks: `flutter analyze` (pre-existing issues only), `flutter test` 242 pass, functions 78 pass, rules-tests 181 pass.
 
 ## Admin + Staff permissions (2026-11-18, deployed, not checked on a device)
 

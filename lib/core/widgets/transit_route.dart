@@ -12,33 +12,57 @@ import 'package:respawnd1/app_theme.dart';
 class TransitRouteStyle {
   TransitRouteStyle._();
 
-  /// Road route still to drive.
+  /// Road route still to drive, styled like Google Maps: a darker casing
+  /// under the blue line.
   static const Color routeColor = Color(0xFF4285F4);
+  static const Color casingColor = Color(0xFF1A5DC8);
   static const int routeWidth = 6;
+  static const int casingWidth = 9;
 
   /// Where the transporter has already been (cases/{id}/tracking).
   static Color get trailColor => AppColors.textPrimary.withValues(alpha: 0.35);
   static const int trailWidth = 3;
-
-  /// A straight-line stand-in when the road route is unavailable.
-  static List<PatternItem> get fallbackPattern => [PatternItem.dash(12), PatternItem.gap(8)];
 
   /// Re-request the road route once the rider is this far from where it
   /// was last requested, or this far off the drawn line.
   static const double refetchAfterMovingMeters = 200;
   static const double offRouteMeters = 60;
 
-  static Polyline route(List<LatLng> points, {bool roadFollowing = true}) => Polyline(
-        polylineId: const PolylineId('directions_route'),
-        points: points,
-        color: routeColor,
-        width: routeWidth,
-        zIndex: 1,
-        jointType: JointType.round,
-        startCap: Cap.roundCap,
-        endCap: Cap.roundCap,
-        patterns: roadFollowing ? const [] : fallbackPattern,
-      );
+  /// The road route: casing + line.
+  static Set<Polyline> route(List<LatLng> points) => {
+        Polyline(
+          polylineId: const PolylineId('directions_casing'),
+          points: points,
+          color: casingColor,
+          width: casingWidth,
+          zIndex: 1,
+          jointType: JointType.round,
+          startCap: Cap.roundCap,
+          endCap: Cap.roundCap,
+        ),
+        Polyline(
+          polylineId: const PolylineId('directions_route'),
+          points: points,
+          color: routeColor,
+          width: routeWidth,
+          zIndex: 2,
+          jointType: JointType.round,
+          startCap: Cap.roundCap,
+          endCap: Cap.roundCap,
+        ),
+      };
+
+  /// No road route yet: a dashed straight line toward the stop.
+  static Set<Polyline> straightLine(List<LatLng> points) => {
+        Polyline(
+          polylineId: const PolylineId('straight_line'),
+          points: points,
+          color: routeColor.withValues(alpha: 0.7),
+          width: 4,
+          zIndex: 1,
+          patterns: [PatternItem.dash(20), PatternItem.gap(12)],
+        ),
+      };
 
   static Polyline trail(List<LatLng> points) => Polyline(
         polylineId: const PolylineId('route_trail'),
@@ -46,7 +70,6 @@ class TransitRouteStyle {
         color: trailColor,
         width: trailWidth,
         zIndex: 0,
-        jointType: JointType.round,
       );
 }
 

@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
-
 import 'package:respawnd1/app_theme.dart';
+
+/// RouteSettings.name of screens pushed from a dashboard card.
+const kFromDashboardRoute = 'fromDashboard';
 
 /// One entry in an admin screen's overflow (three-dot) menu.
 class AdminMenuAction {
@@ -46,6 +48,10 @@ class AdminAppBar extends StatelessWidget implements PreferredSizeWidget {
 
   @override
   Widget build(BuildContext context) {
+    // A module screen pushed from a dashboard card is a detour: back returns
+    // to the dashboard, so it gets a back arrow rather than the drawer.
+    final fromDashboard = ModalRoute.of(context)?.settings.name == kFromDashboardRoute;
+    final showDrawerButton = this.showDrawerButton && !fromDashboard;
     return AppBar(
       backgroundColor: AppColors.textPrimary,
       centerTitle: true,

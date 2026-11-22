@@ -269,7 +269,7 @@ List<Widget> buildTransitContactRows(
     TransitContactRow(
       name: organizationName.isNotEmpty
           ? organizationName
-          : 'Loved by the Gapz',
+          : 'Rescue organization',
       onCall: () => onCall(organizationPhone),
     ),
   ];

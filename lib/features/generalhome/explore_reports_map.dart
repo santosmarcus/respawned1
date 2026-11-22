@@ -223,6 +223,7 @@ class ReportMapEntry {
     final statusLabel = switch (status) {
       'verified' => 'Match verified — coordinating handover',
       'resolved' => 'Resolved',
+      'reunited' => 'Reunited with owner',
       _ => 'Searching for possible matches',
     };
 
@@ -329,6 +330,9 @@ List<ReportMapEntry> extractPublicLostPetAlerts(
     if (data['reporterId'] == currentUserId) continue;
     final status = (data['status'] as String? ?? 'open').toLowerCase();
     if (_kAlertDismissedStatuses.contains(status)) continue;
+    // The pet is home: no longer something for the public to look out for
+    // (the owner still sees it under My Reports).
+    if (status == 'reunited') continue;
     final groupId = data['groupId'] as String?;
     if (groupId != null && groupId.isNotEmpty && groupId != doc.id) continue;
 
@@ -413,7 +417,17 @@ class _ExploreReportsMapState extends State<ExploreReportsMap> {
   List<ReportMapEntry> _caseMyReports = [];
   List<ReportMapEntry> _alertMyReports = [];
 
-  List<ReportMapEntry> get _allReports => [..._caseReports, ..._alertReports];
+  /// "All" = everyone else's public reports plus the viewer's own. The
+  /// public pool leaves out the viewer's own reports (isCasePublic), which
+  /// made a reporter's only nearby report vanish from the home map unless
+  /// "My Reports" was selected — and the map said "No public reports yet".
+  List<ReportMapEntry> get _allReports {
+    final seen = <String>{};
+    return [
+      for (final r in [..._myReports, ..._caseReports, ..._alertReports])
+        if (seen.add(r.caseId)) r,
+    ];
+  }
   // The viewer's own reports — only computed/used when the My Reports
   // filter is active; kept as a separate list rather than folded into
   // _allReports since the two use different visibility rules (see
@@ -588,12 +602,25 @@ class _ExploreReportsMapState extends State<ExploreReportsMap> {
     ).catchError((_) {});
   }
 
+  /// Cache key for a pin's icon: the case plus everything that decides its
+  /// look. When a case changes — e.g. it is rejected and opens for
+  /// Community Adoption, its rescue type is corrected, or its first photo
+  /// arrives — the key changes, so the pin is redrawn with the new icon
+  /// instead of keeping the one drawn for its old state.
+  String _iconKey(ReportMapEntry r) => [
+    r.caseId,
+    r.isCommunityAdoptionEligible ? 'community' : r.rescueType,
+    r.photoUrls.isEmpty ? '' : r.photoUrls.first,
+  ].join('|');
+
   Future<void> _ensureIconFor(ReportMapEntry r) async {
-    if (_iconCache.containsKey(r.caseId) ||
-        _iconRequestsInFlight.contains(r.caseId)) {
+    final key = _iconKey(r);
+    if (_iconCache.containsKey(key) || _iconRequestsInFlight.contains(key)) {
       return;
     }
-    _iconRequestsInFlight.add(r.caseId);
+    _iconRequestsInFlight.add(key);
+    // Drop icons drawn for this case's earlier state.
+    _iconCache.removeWhere((k, _) => k.startsWith('${r.caseId}|') && k != key);
     // Ring color AND icon glyph follow the same rescue-type styling used
     // on the filter chips (kReportCategories is the single source of
     // truth) — Community-Adoption-eligible cases get a distinct lavender
@@ -608,7 +635,7 @@ class _ExploreReportsMapState extends State<ExploreReportsMap> {
 
     try {
       final quick = await _buildRingIcon(ringColor, icon: glyph, photoBytes: null);
-      if (mounted) setState(() => _iconCache[r.caseId] = quick);
+      if (mounted) setState(() => _iconCache[key] = quick);
     } catch (_) {
       // Leave it to fall back to a default hued marker in _markerFor.
     }
@@ -621,14 +648,14 @@ class _ExploreReportsMapState extends State<ExploreReportsMap> {
         if (resp.statusCode == 200) {
           final upgraded =
           await _buildRingIcon(ringColor, icon: glyph, photoBytes: resp.bodyBytes);
-          if (mounted) setState(() => _iconCache[r.caseId] = upgraded);
+          if (mounted) setState(() => _iconCache[key] = upgraded);
         }
       } catch (_) {
         // Keep the ring-only icon — the photo just didn't come through.
       }
     }
 
-    _iconRequestsInFlight.remove(r.caseId);
+    _iconRequestsInFlight.remove(key);
   }
 
   Future<BitmapDescriptor> _buildRingIcon(
@@ -824,7 +851,7 @@ class _ExploreReportsMapState extends State<ExploreReportsMap> {
                       left: 12,
                       right: 12,
                       bottom: 12,
-                      child: _MapBanner(text: 'No public reports yet.'),
+                      child: _MapBanner(text: 'No reports nearby yet.'),
                     ),
                 ],
               ),
@@ -934,7 +961,7 @@ class _ExploreReportsMapState extends State<ExploreReportsMap> {
     return Marker(
       markerId: MarkerId(r.caseId),
       position: position,
-      icon: _iconCache[r.caseId] ??
+      icon: _iconCache[_iconKey(r)] ??
           _fallbackIcon(
             r.isCommunityAdoptionEligible
                 ? BitmapDescriptor.hueViolet

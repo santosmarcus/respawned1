@@ -10,6 +10,7 @@ import 'package:respawnd1/features/userauth/signup_screen.dart';
 import 'package:respawnd1/features/userauth/phonelogin_screen.dart';
 import 'package:respawnd1/features/userauth/forgotpass_screen.dart';
 import 'package:respawnd1/core/widgets/app_messages.dart';
+import 'package:respawnd1/core/services/known_accounts.dart';
 
 
 class LoginScreen extends StatefulWidget {
@@ -26,6 +27,43 @@ class _LoginScreenState extends State<LoginScreen> {
   final _emailController    = TextEditingController();
   final _passwordController = TextEditingController();
   final _authService        = AuthService();
+
+  /// The account chosen in Account > Switch account, if any.
+  KnownAccount? _switchingTo;
+
+  @override
+  void initState() {
+    super.initState();
+    final pending = KnownAccounts.pendingSwitch.value;
+    KnownAccounts.pendingSwitch.value = null;
+    if (pending == null) return;
+    _switchingTo = pending;
+    switch (pending.method) {
+      case KnownAccountMethod.password:
+        _emailController.text = pending.email;
+      case KnownAccountMethod.google:
+        WidgetsBinding.instance.addPostFrameCallback((_) => _googleSignIn());
+      case KnownAccountMethod.phone:
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (!mounted) return;
+          Navigator.push(context, MaterialPageRoute(builder: (_) => const PhoneLoginScreen()));
+        });
+    }
+  }
+
+  Future<void> _googleSignIn() async {
+    setState(() => _errorMessage = null);
+    try {
+      final result = await _authService.signInWithGoogle(fromLogin: true);
+      if (result != null && mounted) {
+        Navigator.of(context).popUntil((route) => route.isFirst);
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() => _errorMessage = 'Google sign-in failed: $e');
+      }
+    }
+  }
 
   @override
   void dispose() {
@@ -129,6 +167,18 @@ class _LoginScreenState extends State<LoginScreen> {
               ),
 
               const SizedBox(height: 16),
+
+              if (_switchingTo != null)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 12),
+                  child: Text(
+                    _switchingTo!.method == KnownAccountMethod.password
+                        ? 'Enter the password for ${_switchingTo!.name}.'
+                        : 'Switching to ${_switchingTo!.name}.',
+                    textAlign: TextAlign.center,
+                    style: GoogleFonts.zain(fontSize: 15, color: AppColors.textPrimary, fontWeight: FontWeight.w600),
+                  ),
+                ),
 
               // Email field
               TextFormField(
@@ -259,19 +309,7 @@ class _LoginScreenState extends State<LoginScreen> {
               _SocialButton(
                 label: 'Continue with Google',
                 icon: 'assets/icons/Google__G__logo.svg', // add a google icon to assets
-                onTap: () async {
-                  setState(() => _errorMessage = null);
-                  try {
-                    final result = await _authService.signInWithGoogle();
-                    if (result != null && context.mounted) {
-                      Navigator.of(context).popUntil((route) => route.isFirst);
-                    }
-                  } catch (e) {
-                    if (mounted) {
-                      setState(() => _errorMessage = 'Google sign-in failed: $e');
-                    }
-                  }
-                },
+                onTap: _googleSignIn,
               ),
 
               const SizedBox(height: 12),

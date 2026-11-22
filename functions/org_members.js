@@ -42,6 +42,7 @@ exports.setMemberAccess = onCall(async (request) => {
       members: new Map(members.docs.map((m) => [m.id, m.data()])),
       role: d.role,
       permissions: d.permissions,
+      org: org.exists ? org.data() : null,
     });
     if (plan.error) throw new HttpsError('failed-precondition', plan.error);
     const {before, after} = plan;

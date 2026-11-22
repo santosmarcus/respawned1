@@ -201,3 +201,20 @@ class AppInputFormatters {
   static final TextInputFormatter alphanumericWithSpaces =
   FilteringTextInputFormatter.allow(RegExp(r'[A-Za-z0-9\s\-]'));
 }
+
+/// A Philippine mobile number in the form Firebase phone sign-in uses
+/// (`request.auth.token.phone_number`): `+639XXXXXXXXX`. Accepts
+/// 9XXXXXXXXX, 09XXXXXXXXX, 639XXXXXXXXX and +639XXXXXXXXX (spaces and
+/// dashes ignored); null when it isn't a PH mobile number.
+String? normalizePhPhone(String raw) {
+  final digits = raw.replaceAll(RegExp(r'\D'), '');
+  String? local;
+  if (digits.length == 10 && digits.startsWith('9')) {
+    local = digits;
+  } else if (digits.length == 11 && digits.startsWith('09')) {
+    local = digits.substring(1);
+  } else if (digits.length == 12 && digits.startsWith('639')) {
+    local = digits.substring(2);
+  }
+  return local == null ? null : '+63$local';
+}

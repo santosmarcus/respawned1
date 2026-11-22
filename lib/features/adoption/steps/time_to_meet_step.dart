@@ -88,12 +88,17 @@ class TimeToMeetStep extends StatelessWidget {
                   size: 20,
                 ),
                 const SizedBox(width: 10),
-                Text(
-                  '${form.appointmentType}  ·  ${formatAdoptionDate(form.appointmentDate!)} ·  ${form.appointmentTime!}',
-                  style: GoogleFonts.zain(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w600,
-                    color: AppColors.textPrimary,
+                Expanded(
+                  child: Text(
+                    [form.appointmentType, formatAdoptionDate(form.appointmentDate!), form.appointmentTime]
+                        .whereType<String>()
+                        .where((p) => p.isNotEmpty)
+                        .join('  ·  '),
+                    style: GoogleFonts.zain(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                      color: AppColors.textPrimary,
+                    ),
                   ),
                 ),
               ],

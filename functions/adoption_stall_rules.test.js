@@ -50,3 +50,13 @@ test('a new clock start (missed interview) resets the reminders', () => {
   const nowMs = restart + BOOKING_REMINDER_DAYS * DAY;
   assert.strictEqual(bookingStepDue({clockStartMs: restart, nowMs, sent: oldSent}), 'remind');
 });
+
+test('interview confirmed only on Pending -> Interview', () => {
+  const {isInterviewConfirmed} = require('./adoption_stall_rules');
+  assert.strictEqual(isInterviewConfirmed('pending', 'interview'), true);
+  assert.strictEqual(isInterviewConfirmed('pending_appointment', 'interview'), true);
+  assert.strictEqual(isInterviewConfirmed('interview', 'interview'), false);
+  assert.strictEqual(isInterviewConfirmed('pending', 'pending'), false);
+  assert.strictEqual(isInterviewConfirmed('interview', 'approved'), false);
+  assert.strictEqual(isInterviewConfirmed(undefined, 'interview'), false);
+});

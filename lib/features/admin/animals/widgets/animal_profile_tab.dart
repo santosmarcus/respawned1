@@ -88,6 +88,37 @@ class AnimalProfileTab extends StatelessWidget {
               Expanded(child: _InfoItem('Adoptable', animal.isAdoptable ? 'Yes' : 'No')),
             ],
           ),
+          // A registered QR or NFC collar tag is required to be adoptable
+          // (Management tab adds them).
+          // Kept current from the live sponsorship listing's money
+          // (functions/sponsorship_funding.js). Any animal in the
+          // organization's care can be sponsored, whatever its adoption
+          // status.
+          _InfoItem('Sponsorship', switch (animal.raw['sponsorshipFunding']) {
+            {'status': 'fully_funded'} => 'Fully funded',
+            {'status': 'open'} => 'Open for sponsorship',
+            _ => 'No live sponsorship listing',
+          }),
+          // The litter reported with her at intake (female dogs).
+          if (animal.raw['litterAtIntake'] case final Map litter)
+            _InfoItem(
+              'Litter (at intake)',
+              [
+                if (litter['count'] != null) '${litter['count']} puppies',
+                ?litter['location'] as String?,
+                ?litter['condition'] as String?,
+                if (litter['puppiesNeedingAttention'] != null)
+                  '${litter['puppiesNeedingAttention']} needing attention',
+                if ((litter['puppyReportCaseIds'] as List?)?.isNotEmpty ?? false)
+                  'puppy reports: ${(litter['puppyReportCaseIds'] as List).map((id) => '#${shortCaseId(id as String)}').join(', ')}',
+              ].join(' · '),
+            ),
+          _InfoItem(
+            'Collar Tag',
+            animal.hasCollarTag
+                ? '${animal.collarTagSummary} registered'
+                : 'None registered (required to be adoptable)',
+          ),
           if (animal.isReserved || animal.isAdopted)
             _InfoItem(
               animal.isAdopted ? 'Adopted' : 'Reserved',
@@ -226,7 +257,10 @@ class _AnimalDonationsSheet extends ConsumerWidget {
                                   style: GoogleFonts.zain(
                                       fontSize: 14, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
                               subtitle: Text(
-                                '${formatPeso(l.collected)} of ${formatPeso(l.target)} · ${l.status.replaceAll('_', ' ')}',
+                                l.type == 'sponsorship'
+                                    ? 'Sponsorship · ${l.isFullyFunded ? 'fully funded' : 'open'} · '
+                                        '${formatPeso(l.availableBalance)} available · ${l.status.replaceAll('_', ' ')}'
+                                    : '${formatPeso(l.collected)} of ${formatPeso(l.target)} · ${l.status.replaceAll('_', ' ')}',
                                 style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary),
                               ),
                               trailing: const Icon(Icons.chevron_right, color: AppColors.textSecondary),

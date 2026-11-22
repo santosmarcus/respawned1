@@ -14,6 +14,8 @@ const logger = require('firebase-functions/logger');
 const {recountActiveSponsors, recountAllSponsorships} = require('./sponsor_counts');
 const admin = require('firebase-admin');
 const {requireOrgPermission} = require('./org_access');
+const cashOutRules = require('./cash_out_rules');
+const sponsorshipFunding = require('./sponsorship_funding_rules');
 const {completedCampaignFields, certificateBenefit, issueCertificate, formatPeso} = require('./donation_common');
 
 // index.js calls admin.initializeApp() before requiring this module.
@@ -482,6 +484,20 @@ exports.createDonationCheckout = onCall({secrets: [paymongoSecretKey]}, async (r
   if (c.isActive === false || (c.date instanceof Timestamp && c.date.toMillis() < Date.now())) {
     throw new HttpsError('failed-precondition', 'This campaign has ended.');
   }
+  // A fully funded sponsorship is out of the open opportunities: no new
+  // sponsors until spending brings it under its monthly amount again.
+  // Someone already sponsoring it can keep renewing.
+  if (!sponsorshipFunding.acceptsNewSponsor(c)) {
+    const mine = await db.collection('donations')
+      .where('userId', '==', uid)
+      .where('campaignId', '==', campaignId)
+      .limit(1)
+      .get();
+    if (mine.empty) {
+      throw new HttpsError('failed-precondition',
+        'This animal is fully funded for now. Please sponsor another animal; it reopens if its funds run low.');
+    }
+  }
   const min = typeof c.minAmount === 'number' ? c.minAmount : DEFAULT_MIN_AMOUNT;
   const max = typeof c.maxAmount === 'number' ? c.maxAmount : DEFAULT_MAX_AMOUNT;
   const pesos = amountCentavos / 100;
@@ -787,7 +803,89 @@ async function handlePaymongoEvent(type, resource) {
     return (await finalizePaidDonation(ref, session)).outcome;
   }
   if (type === 'payment.failed') return recordFailedAttempt(resource);
+  // payout.deposited: the money reached the organization's bank.
+  // payout.returned: the bank sent it back to the PayMongo balance.
+  if (type === 'payout.deposited') return recordPayout(resource);
+  if (type === 'payout.returned') return recordPayoutReturned(resource);
   return 'ignored_type';
+}
+
+// One PayMongo account serves the platform: while there is exactly one
+// approved organization, its payouts are theirs. Otherwise null (the payout
+// is only logged; staff record it by hand).
+async function payoutOrganizationId(payoutId) {
+  const orgs = await db.collection('organizations').get();
+  const approved = orgs.docs.filter((o) => (o.get('verificationStatus') || 'approved') === 'approved');
+  if (approved.length === 1) return approved[0].id;
+  logger.warn('payout: no single organization for this payout; record it by hand', {
+    payoutId, organizations: approved.length,
+  });
+  return null;
+}
+
+// PayMongo deposited money from the account balance into the bank. Recorded
+// as a cash-out waiting for the organization to say which fund(s) it came
+// from (functions/campaigns.js assignCashOut). The webhook must be
+// subscribed to payout.deposited (and payout.returned) in the PayMongo
+// dashboard.
+async function recordPayout(resource) {
+  const payout = cashOutRules.payoutFromPaymongo(resource);
+  if (!payout) return 'ignored_unreadable_payout';
+  const orgId = await payoutOrganizationId(payout.payoutId);
+  if (!orgId) return 'unmatched_payout';
+  const ref = db.collection('organizations').doc(orgId).collection('cashOuts').doc(payout.payoutId);
+  return db.runTransaction(async (tx) => {
+    if ((await tx.get(ref)).exists) return 'duplicate_payout';
+    const now = FieldValue.serverTimestamp();
+    tx.set(ref, {
+      organizationId: orgId,
+      source: 'paymongo',
+      amount: payout.amountC / 100,
+      assignedAmount: 0,
+      status: 'needs_assignment',
+      note: payout.destination ? `Paid out to ${payout.destination}` : null,
+      occurredAt: payout.occurredAtMs ? Timestamp.fromMillis(payout.occurredAtMs) : Timestamp.now(),
+      paymongo: {
+        payoutId: payout.payoutId,
+        status: payout.status,
+        grossAmount: payout.grossC == null ? null : payout.grossC / 100,
+        fee: payout.feeC == null ? null : payout.feeC / 100,
+      },
+      lines: [],
+      appliedRequestIds: [],
+      recordedBy: null,
+      recordedByName: 'PayMongo',
+      createdAt: now,
+      updatedAt: now,
+    });
+    return 'recorded_payout';
+  });
+}
+
+// The bank sent a payout back to the PayMongo balance. A cash-out still
+// waiting for a fund is closed as 'returned'; either way it is flagged, and
+// notifyCashOut asks the finance team to check any spending already
+// assigned from it (nothing is voided automatically).
+async function recordPayoutReturned(resource) {
+  const payout = cashOutRules.payoutFromPaymongo(resource);
+  if (!payout) return 'ignored_unreadable_payout';
+  const orgId = await payoutOrganizationId(payout.payoutId);
+  if (!orgId) return 'unmatched_payout';
+  const ref = db.collection('organizations').doc(orgId).collection('cashOuts').doc(payout.payoutId);
+  return db.runTransaction(async (tx) => {
+    const snap = await tx.get(ref);
+    // Returned before it was ever deposited: no money left PayMongo.
+    if (!snap.exists) return 'ignored_return_without_deposit';
+    const update = cashOutRules.returnUpdate(snap.data());
+    if (!update) return 'duplicate_return';
+    tx.update(ref, {
+      ...update,
+      returnedAt: payout.occurredAtMs ? Timestamp.fromMillis(payout.occurredAtMs) : Timestamp.now(),
+      'paymongo.status': payout.status,
+      updatedAt: FieldValue.serverTimestamp(),
+    });
+    return update.status === 'returned' ? 'closed_returned_payout' : 'flagged_returned_payout';
+  });
 }
 
 exports.paymongoWebhook = onRequest(

@@ -2,7 +2,9 @@ import 'package:cloud_functions/cloud_functions.dart';
 import 'package:flutter/material.dart';
 
 import 'package:respawnd1/app_theme.dart';
+import 'package:respawnd1/core/models/organization/org_permission.dart';
 import 'package:respawnd1/core/repos/organization_repository.dart';
+import 'package:respawnd1/features/admin/organizations/independent_limits_sheet.dart';
 import 'package:respawnd1/core/widgets/app_dialogs.dart';
 import 'package:respawnd1/core/widgets/app_messages.dart';
 import 'package:respawnd1/features/admin/volunteers/application_review.dart';
@@ -11,10 +13,14 @@ import 'package:respawnd1/features/admin/widgets/admin_app_bar.dart';
 import 'package:respawnd1/features/admin/widgets/admin_search_bar.dart';
 import 'package:respawnd1/features/admin/widgets/admin_tab_bar.dart';
 
-/// Platform staff's queue of organizations that submitted their
-/// verification documents. Decisions are only possible while an
-/// organization is "Under review"; they run in the reviewOrganization
-/// callable, which also notifies the owner.
+/// The queue of sign-ups that submitted their verification documents.
+/// Decisions are only possible while a sign-up is "Under review"; they run
+/// in the reviewOrganization callable, which also notifies the owner.
+///
+/// [kind] picks which sign-ups: shelters (Organization approvals: platform
+/// staff and system admins) or rescue volunteers (kind 'independent',
+/// reviewed from Volunteers by platform staff, system admins and
+/// organization staff with the Volunteers permission).
 ///
 /// Pushed from the admin drawer (back arrow), or a tab of the system admin
 /// console ([showBackButton] false, with the console's [menuActions]).
@@ -22,14 +28,21 @@ class OrganizationReviewPage extends StatefulWidget {
   const OrganizationReviewPage({
     super.key,
     this.repository,
+    this.kind = OrgKind.shelter,
     this.showBackButton = true,
     this.title = 'Organization approvals',
+    this.canSetLimits = true,
     this.menuActions = const [],
   });
 
   final OrganizationRepository? repository;
+  final OrgKind kind;
   final bool showBackButton;
   final String title;
+
+  /// Show "Modules & limits" on approved rescue volunteers (the
+  /// setIndependentLimits callable: platform staff and system admins only).
+  final bool canSetLimits;
   final List<AdminMenuAction> menuActions;
 
   @override
@@ -40,7 +53,7 @@ const _tabs = [
   (OrgVerificationStatus.pending, 'Under review'),
   (OrgVerificationStatus.requiresChanges, 'Needs changes'),
   (OrgVerificationStatus.approved, 'Approved'),
-  (OrgVerificationStatus.rejected, 'Not approved'),
+  (OrgVerificationStatus.rejected, 'Rejected'),
 ];
 
 class _OrganizationReviewPageState extends State<OrganizationReviewPage> {
@@ -55,15 +68,23 @@ class _OrganizationReviewPageState extends State<OrganizationReviewPage> {
     super.dispose();
   }
 
+  bool get _volunteers => widget.kind == OrgKind.independent;
+
+  /// 'organization' or 'rescue volunteer', for messages.
+  String get _noun => _volunteers ? 'rescue volunteer' : 'organization';
+
   Future<void> _decide(OrganizationReviewItem org, OrgVerificationStatus decision) async {
-    final name = org.name.isEmpty ? 'this organization' : org.name;
+    final name = org.name.isEmpty ? 'this $_noun' : org.name;
     String? note;
     switch (decision) {
       case OrgVerificationStatus.approved:
         final ok = await showConfirmActionDialog(
           context,
           title: 'Approve $name?',
-          message: 'Its staff get the admin tools, and it starts receiving cases in its service areas.',
+          message: org.kind == OrgKind.independent
+              ? 'They get rescue, animal records and daily care, and nearby cases open to them after shelters '
+                  'have had first look.${widget.canSetLimits ? ' You can turn on more modules from Approved.' : ''}'
+              : 'Its staff get the admin tools, and it starts receiving cases in its service areas.',
           confirmLabel: 'Approve',
         );
         if (!ok) return;
@@ -80,10 +101,10 @@ class _OrganizationReviewPageState extends State<OrganizationReviewPage> {
       case OrgVerificationStatus.rejected:
         note = await showTextInputDialog(
           context,
-          title: 'Not approve $name?',
+          title: 'Reject $name?',
           message: 'The owner sees this status and your note.',
           label: 'Reason',
-          confirmLabel: 'Not approve',
+          confirmLabel: 'Reject',
           required: true,
           destructive: true,
         );
@@ -98,9 +119,9 @@ class _OrganizationReviewPageState extends State<OrganizationReviewPage> {
       await _repo.review(organizationId: org.id, decision: decision, note: note?.trim());
       messenger.showSnackBar(appSnackBar(
         switch (decision) {
-          OrgVerificationStatus.approved => 'Organization approved.',
+          OrgVerificationStatus.approved => _volunteers ? 'Rescue volunteer approved.' : 'Organization approved.',
           OrgVerificationStatus.requiresChanges => 'Changes requested.',
-          _ => 'Organization not approved.',
+          _ => _volunteers ? 'Application rejected.' : 'Organization rejected.',
         },
         kind: AppMessageKind.success,
       ));
@@ -115,26 +136,48 @@ class _OrganizationReviewPageState extends State<OrganizationReviewPage> {
         name: org.name,
         phone: org.phone,
         lines: [
+          if (org.kind == OrgKind.independent) ('Type', 'Rescue volunteer'),
           ('Email', org.email),
-          ('Location', org.location),
+          (org.kind == OrgKind.independent ? 'Area' : 'Location', org.location),
           ('Reviewed by', org.reviewedByName),
           if (org.documents.isEmpty) ('Documents', 'None uploaded'),
         ],
         submittedAt: org.submittedAt,
         reviewedAt: org.reviewedAt,
         reviewNote: org.note,
-        extra: org.documents.isEmpty
+        extra: org.documents.isEmpty && !_canSetLimits(org)
             ? null
-            : SizedBox(
-                height: 92,
-                child: ListView.separated(
-                  scrollDirection: Axis.horizontal,
-                  itemCount: org.documents.length,
-                  separatorBuilder: (_, _) => const SizedBox(width: 8),
-                  itemBuilder: (context, i) => DocumentThumb(doc: org.documents[i]),
-                ),
+            : Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  if (org.documents.isNotEmpty)
+                    SizedBox(
+                      height: 92,
+                      child: ListView.separated(
+                        scrollDirection: Axis.horizontal,
+                        itemCount: org.documents.length,
+                        separatorBuilder: (_, _) => const SizedBox(width: 8),
+                        itemBuilder: (context, i) => DocumentThumb(doc: org.documents[i]),
+                      ),
+                    ),
+                  if (_canSetLimits(org))
+                    TextButton.icon(
+                      onPressed: () => showIndependentLimitsSheet(
+                        context,
+                        organizationId: org.id,
+                        name: org.name,
+                        repository: _repo,
+                      ),
+                      icon: const Icon(Icons.tune, size: 18, color: AppColors.textPrimary),
+                      label: const Text('Modules & limits', style: TextStyle(color: AppColors.textPrimary)),
+                    ),
+                ],
               ),
       );
+
+  /// Approved independent rescuers: modules, team size and capacity.
+  bool _canSetLimits(OrganizationReviewItem org) =>
+      widget.canSetLimits && org.kind == OrgKind.independent && org.status == OrgVerificationStatus.approved;
 
   bool _matches(OrganizationReviewItem org) {
     if (_query.isEmpty) return true;
@@ -175,17 +218,18 @@ class _OrganizationReviewPageState extends State<OrganizationReviewPage> {
               onSelected: (i) => setState(() => _tab = i),
               child: StreamBuilder<List<OrganizationReviewItem>>(
                 key: ValueKey(status),
-                stream: _repo.streamForReview(status),
+                stream: _repo.streamForReview(status, kind: widget.kind),
                 builder: (context, snap) {
-                  if (snap.hasError) return const AdminListMessage('Could not load organizations.');
+                  if (snap.hasError) return AdminListMessage('Could not load ${_volunteers ? 'applications' : 'organizations'}.');
                   if (!snap.hasData) {
                     return const Center(child: CircularProgressIndicator(color: AppColors.greenrspwn));
                   }
                   final items = snap.data!.where(_matches).toList();
                   if (items.isEmpty) {
+                    final plural = _volunteers ? 'rescue volunteers' : 'organizations';
                     return AdminListMessage(_query.isEmpty
-                        ? 'No organizations ${label.toLowerCase()}.'
-                        : 'No organizations match your search.');
+                        ? 'No $plural ${label.toLowerCase()}.'
+                        : 'No $plural match your search.');
                   }
                   return ListView.separated(
                     padding: const EdgeInsets.all(16),

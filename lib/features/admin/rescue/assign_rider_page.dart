@@ -10,6 +10,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:respawnd1/core/utils/current_org_kind.dart';
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/core/models/rescue/pet_transporter.dart';
 import 'package:respawnd1/core/models/rescue/rescue_status.dart';
@@ -20,14 +21,16 @@ import 'package:respawnd1/core/utils/case_id.dart';
 import 'package:respawnd1/core/utils/geo.dart';
 import 'package:respawnd1/core/utils/rescue_risk.dart';
 import 'package:respawnd1/core/utils/transporter_ranking.dart';
+import 'package:respawnd1/core/utils/transport_suitability.dart';
 import 'package:respawnd1/core/utils/species_summary.dart' as species_summary_util;
 import 'package:respawnd1/core/widgets/rescue_risk_banner.dart';
 import 'package:respawnd1/features/admin/rescue/admin_track_case_page.dart';
 import 'package:respawnd1/features/admin/rescue/state/rescue_reports_providers.dart';
 import 'package:respawnd1/features/admin/rescue/widgets/refer_case_sheet.dart';
-import 'package:respawnd1/core/utils/app_date_format.dart';
+import 'package:respawnd1/features/admin/rescue/widgets/select_clinic_sheet.dart';
 import 'package:respawnd1/core/widgets/app_messages.dart';
 import 'package:respawnd1/core/widgets/app_dialogs.dart';
+import 'package:respawnd1/features/organization/shelter_location_picker_page.dart';
 
 // ---- Demo transporters ---------------------------------------------------
 // Two fixed, clearly-marked (isDemo: true) test transporters so the whole
@@ -100,6 +103,8 @@ void _scheduleDemoResponse({
 
 enum _RiderAvailability { available, pending, busy }
 
+enum _FallbackChoice { retry, chooseAnother, refer, selfTransport, keepWaiting }
+
 class _RiderVm {
   final String uid;
   final String name;
@@ -117,6 +122,13 @@ class _RiderVm {
   final int compatibilityScore;
   final bool isPreferred;
 
+  /// Whether the vehicle can carry this trip's animals, and why
+  /// (transport_suitability.dart). Unsuitable transporters are listed but
+  /// never selectable.
+  final VehicleSuitability suitability;
+
+  bool get isSelectable => availability == _RiderAvailability.available && suitability.suitable;
+
   const _RiderVm({
     required this.uid,
     required this.name,
@@ -130,6 +142,7 @@ class _RiderVm {
     required this.distanceKm,
     required this.vehicleCategory,
     required this.compatibilityScore,
+    required this.suitability,
     this.phone,
     this.isPreferred = false,
   });
@@ -148,6 +161,7 @@ class _RiderVm {
     distanceKm: distanceKm,
     vehicleCategory: vehicleCategory,
     compatibilityScore: compatibilityScore,
+    suitability: suitability,
     isPreferred: isPreferred ?? this.isPreferred,
   );
 
@@ -183,8 +197,65 @@ class _AssignRiderPageState extends ConsumerState<AssignRiderPage> {
   String? _selectedRiderUid;
 
   /// True only while the confirmed assignment is being saved, to guard
-  /// against duplicate taps on "Next".
+  /// against duplicate taps on "Send offer".
   bool _isAssigning = false;
+
+  /// High-risk cases: the bite/escape risk is acknowledged with a checkbox
+  /// on this page rather than a separate popup before the offer goes out.
+  bool _riskAcknowledged = false;
+
+  bool _savingClinic = false;
+
+  // ---- The offer this page sent ------------------------------------------
+  //
+  // One place for the whole offer: the inline panel below the map shows it
+  // while it is pending (with a live timer, Cancel offer and Send to
+  // another transporter), a declined or expired offer gets Retry and Choose
+  // another transporter, and an acceptance goes on to tracking by itself.
+  // (There used to be a popup showing the same thing on top of this panel.)
+
+  /// The offer sent from this page, so its acceptance opens tracking.
+  String? _sentAssignmentId;
+  bool _openedTracking = false;
+
+  /// A declined/expired offer the admin dismissed with Choose another.
+  String? _dismissedOutcomeId;
+
+  /// Ticks the pending panel's elapsed/expiry labels once a second.
+  Timer? _ticker;
+
+  /// The account belongs to an independent rescuer, who may bring the
+  /// animal to the clinic themselves at any point (shelters only once no
+  /// transporter can be found).
+  bool _isIndependent = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadOrgKind();
+  }
+
+  Future<void> _loadOrgKind() async {
+    final independent = await currentOrgIsIndependent();
+    if (mounted && independent) setState(() => _isIndependent = true);
+  }
+
+  @override
+  void dispose() {
+    _ticker?.cancel();
+    super.dispose();
+  }
+
+  void _syncTicker(bool pending) {
+    if (pending && _ticker == null) {
+      _ticker = Timer.periodic(const Duration(seconds: 1), (_) {
+        if (mounted) setState(() {});
+      });
+    } else if (!pending && _ticker != null) {
+      _ticker!.cancel();
+      _ticker = null;
+    }
+  }
 
   GoogleMapController? _mapController;
   bool _hasFitCamera = false;
@@ -241,25 +312,35 @@ class _AssignRiderPageState extends ConsumerState<AssignRiderPage> {
   }
 
   Future<void> _organizationWillTransport() async {
+    final toShelter = _currentCaseData()['transportDestination'] == 'shelter';
+    final place = toShelter ? 'your shelter' : 'the selected clinic';
+    final next = toShelter ? 'start intake' : 'start treatment';
     final confirmed = await showConfirmActionDialog(
       context,
-      title: 'Organization will transport?',
-      message: 'Your organization will bring the animal to the selected clinic itself, without a transporter. '
-          'The case moves to Ongoing; confirm arrival on Rescue Details to start treatment.',
-      confirmLabel: 'We Will Transport',
+      title: _isIndependent ? 'Bring it yourself?' : 'Organization will transport?',
+      message: _isIndependent
+          ? 'You or someone on your team brings the animal to $place, without a transporter. '
+              'The case moves to Ongoing; confirm arrival on Rescue Details to $next. '
+              "If the trip can't be finished, switch to a transporter from Rescue Details."
+          : 'Your organization will bring the animal to $place itself, without a transporter. '
+              'The case moves to Ongoing; confirm arrival on Rescue Details to $next.',
+      confirmLabel: _isIndependent ? "I'll Bring It" : 'We Will Transport',
       cancelLabel: 'Back',
     );
     if (confirmed != true || !mounted) return;
     setState(() => _fallbackBusy = true);
     try {
       await ref.read(rescueCaseRepositoryProvider).startOrganizationTransport(
-            caseId: widget.caseId,
-            actorUid: _actorUid,
-            actorName: _actorName,
-          );
+        caseId: widget.caseId,
+        actorUid: _actorUid,
+        actorName: _actorName,
+        byChoice: _isIndependent,
+      );
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        appSnackBar('Recorded: your organization is transporting this animal.'),
+        appSnackBar(_isIndependent
+            ? 'Recorded: your team is bringing this animal to ${toShelter ? 'the shelter' : 'the clinic'}.'
+            : 'Recorded: your organization is transporting this animal.'),
       );
       Navigator.pop(context);
     } catch (e) {
@@ -274,47 +355,193 @@ class _AssignRiderPageState extends ConsumerState<AssignRiderPage> {
     }
   }
 
-  Widget _noTransporterPrompt({required int failedOffers, required bool isCritical}) {
-    final reason = failedOffers >= kNoTransporterAttemptLimit
-        ? '$failedOffers transporter offers for this case were declined or expired.'
-        : 'Nobody is available within ${_maxRadiusKm.toStringAsFixed(0)} km.';
+  String _fallbackReason(int failedOffers) => failedOffers >= kNoTransporterAttemptLimit
+      ? '$failedOffers transporter offers for this case were declined or expired.'
+      : 'Nobody is available within ${_maxRadiusKm.toStringAsFixed(0)} km.';
+
+  /// True while the no-transporter sheet is on screen, so build() doesn't
+  /// stack a second one.
+  bool _fallbackSheetOpen = false;
+
+  /// Latest transporter list, for Retry from the sheet.
+  List<_RiderVm> _latestRiders = const [];
+
+  /// The no-transporter options as a bottom sheet, so they aren't squeezed
+  /// between the map and the transporter list. Opens by itself when the
+  /// fallback applies (again on every visit to this page, and again when
+  /// another offer fails); the banner reopens it after Keep Waiting.
+  Future<void> _openFallbackSheet({
+    required int failedOffers,
+    required bool isCritical,
+    required TransportAssignment? failedOffer,
+  }) async {
+    if (_fallbackSheetOpen || !mounted) return;
+    _fallbackSheetOpen = true;
     final tone = isCritical ? AppColors.error : AppColors.warning;
-    return Container(
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: tone.withValues(alpha: 0.12),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: tone),
+    final declined = failedOffer?.status == TransportAssignmentStatus.rejected;
+    final choice = await showModalBottomSheet<_FallbackChoice>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: AppColors.background,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (ctx) => SafeArea(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.fromLTRB(20, 12, 20, 16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Center(
+                child: Container(
+                  width: 40,
+                  height: 4,
+                  decoration: BoxDecoration(color: AppColors.slaterspwn, borderRadius: BorderRadius.circular(2)),
+                ),
+              ),
+              const SizedBox(height: 14),
+              Row(children: [
+                Icon(Icons.warning_amber_rounded, color: tone),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text('No transporter yet',
+                      style: GoogleFonts.tiltWarp(fontSize: 18, color: AppColors.textPrimary)),
+                ),
+              ]),
+              const SizedBox(height: 6),
+              Text('${_fallbackReason(failedOffers)} Choose how to move this case forward.',
+                  style: GoogleFonts.zain(fontSize: 14, color: AppColors.textPrimary)),
+              if (failedOffer != null) ...[
+                const SizedBox(height: 10),
+                Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: AppColors.error.withValues(alpha: 0.08),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Text(
+                    [
+                      declined ? 'Last offer: ${failedOffer.riderName} declined' : 'Last offer to ${failedOffer.riderName} expired',
+                      if (declined && (failedOffer.rejectionReason ?? '').isNotEmpty) failedOffer.rejectionReason!,
+                    ].join('\n'),
+                    style: GoogleFonts.zain(fontSize: 13, color: AppColors.textPrimary),
+                  ),
+                ),
+              ],
+              const SizedBox(height: 16),
+              _sheetLabel('Try a transporter again'),
+              if (failedOffer != null) ...[
+                OutlinedButton.icon(
+                  onPressed: () => Navigator.pop(ctx, _FallbackChoice.retry),
+                  style: AppButtons.outline,
+                  icon: const Icon(Icons.refresh, size: 18),
+                  label: Text('Retry ${failedOffer.riderName}',
+                      maxLines: 1, overflow: TextOverflow.ellipsis, style: GoogleFonts.zain(fontWeight: FontWeight.w700)),
+                ),
+                const SizedBox(height: 8),
+              ],
+              OutlinedButton.icon(
+                onPressed: () => Navigator.pop(ctx, _FallbackChoice.chooseAnother),
+                style: AppButtons.outline,
+                icon: const Icon(Icons.person_search_outlined, size: 18),
+                label: Text('Choose Another Transporter', style: GoogleFonts.zain(fontWeight: FontWeight.w700)),
+              ),
+              const SizedBox(height: 16),
+              _sheetLabel('Or move the case another way'),
+              ElevatedButton.icon(
+                onPressed: () => Navigator.pop(ctx, _FallbackChoice.refer),
+                style: AppButtons.primary,
+                icon: const Icon(Icons.forward_outlined, size: 18),
+                label: Text('Refer Case', style: GoogleFonts.zain(fontWeight: FontWeight.w700)),
+              ),
+              const SizedBox(height: 8),
+              OutlinedButton.icon(
+                onPressed: () => Navigator.pop(ctx, _FallbackChoice.selfTransport),
+                style: AppButtons.outline,
+                icon: const Icon(Icons.directions_car_outlined, size: 18),
+                label: Text(_isIndependent ? "I'll Bring It Myself" : 'Organization Will Transport',
+                    style: GoogleFonts.zain(fontWeight: FontWeight.w700)),
+              ),
+              const SizedBox(height: 8),
+              TextButton(
+                onPressed: () => Navigator.pop(ctx, _FallbackChoice.keepWaiting),
+                child: Text('Keep Waiting for a Transporter',
+                    style: GoogleFonts.zain(color: AppColors.textSecondary, fontWeight: FontWeight.w600)),
+              ),
+            ],
+          ),
+        ),
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Text('No transporter available',
-              style: GoogleFonts.tiltWarp(fontSize: 15, color: AppColors.textPrimary)),
-          const SizedBox(height: 4),
-          Text('$reason Choose how to move this case forward.',
-              style: GoogleFonts.zain(fontSize: 13, color: AppColors.textPrimary)),
-          const SizedBox(height: 10),
-          ElevatedButton.icon(
-            onPressed: _fallbackBusy ? null : _referFromFallback,
-            style: AppButtons.primary,
-            icon: const Icon(Icons.forward_outlined, size: 18),
-            label: Text('Refer Case (Organization / LGU)', style: GoogleFonts.zain(fontWeight: FontWeight.w700)),
+    );
+    _fallbackSheetOpen = false;
+    if (!mounted) return;
+    // Any close (including a swipe down) counts as Keep Waiting: it comes
+    // back when another offer fails, on the next visit, or from the banner.
+    setState(() => _fallbackDismissedAtCount = failedOffers);
+    switch (choice) {
+      case _FallbackChoice.retry:
+        if (failedOffer != null) await _retryRider(failedOffer, _latestRiders);
+      case _FallbackChoice.chooseAnother:
+        if (failedOffer != null) setState(() => _dismissedOutcomeId = failedOffer.id);
+      case _FallbackChoice.refer:
+        await _referFromFallback();
+      case _FallbackChoice.selfTransport:
+        await _organizationWillTransport();
+      case _FallbackChoice.keepWaiting:
+      case null:
+        break;
+    }
+  }
+
+  Widget _sheetLabel(String text) => Padding(
+        padding: const EdgeInsets.only(bottom: 6),
+        child: Text(text.toUpperCase(),
+            style: GoogleFonts.zain(
+                fontSize: 11, fontWeight: FontWeight.w800, letterSpacing: 0.6, color: AppColors.textSecondary)),
+      );
+
+  /// One line in place of the old inline prompt; reopens the sheet.
+  Widget _fallbackBanner({
+    required int failedOffers,
+    required bool isCritical,
+    required TransportAssignment? failedOffer,
+  }) {
+    final tone = isCritical ? AppColors.error : AppColors.warning;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
+      child: Material(
+        color: tone.withValues(alpha: 0.12),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12), side: BorderSide(color: tone)),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(12),
+          onTap: _fallbackBusy
+              ? null
+              : () => _openFallbackSheet(failedOffers: failedOffers, isCritical: isCritical, failedOffer: failedOffer),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(12, 10, 8, 10),
+            child: Row(
+              children: [
+                Icon(Icons.warning_amber_rounded, color: tone, size: 20),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    failedOffers >= kNoTransporterAttemptLimit
+                        ? 'No transporter yet · $failedOffers offers declined or expired'
+                        : 'No transporter available nearby',
+                    style: GoogleFonts.zain(fontSize: 13, fontWeight: FontWeight.w700, color: AppColors.textPrimary),
+                  ),
+                ),
+                _fallbackBusy
+                    ? const Padding(
+                        padding: EdgeInsets.all(8),
+                        child: SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)),
+                      )
+                    : Text('Options',
+                        style: GoogleFonts.zain(fontSize: 13, fontWeight: FontWeight.w800, color: AppColors.textPrimary)),
+                const Icon(Icons.chevron_right, color: AppColors.textPrimary),
+              ],
+            ),
           ),
-          const SizedBox(height: 8),
-          OutlinedButton.icon(
-            onPressed: _fallbackBusy ? null : _organizationWillTransport,
-            style: AppButtons.outline,
-            icon: const Icon(Icons.directions_car_outlined, size: 18),
-            label: Text('Organization Will Transport', style: GoogleFonts.zain(fontWeight: FontWeight.w700)),
-          ),
-          const SizedBox(height: 4),
-          TextButton(
-            onPressed: _fallbackBusy ? null : () => setState(() => _fallbackDismissedAtCount = failedOffers),
-            child: Text('Keep Waiting for a Transporter',
-                style: GoogleFonts.zain(color: AppColors.textSecondary, fontWeight: FontWeight.w600)),
-          ),
-        ],
+        ),
       ),
     );
   }
@@ -324,6 +551,13 @@ class _AssignRiderPageState extends ConsumerState<AssignRiderPage> {
   /// idempotent — this just avoids redundant calls).
   final Set<String> _reconcilingAssignmentIds = {};
   bool _cancellingOffer = false;
+
+  /// Shown as the pending offer while [_sendOffer] is still saving it
+  /// (id empty until the server answers).
+  TransportAssignment? _optimisticOffer;
+
+  /// An offer being cancelled: hidden at once instead of after the server.
+  String? _optimisticCancelledId;
 
   void _reconcileIfStale(TransportAssignment assignment) {
     if (!assignment.isStalePending) return;
@@ -335,18 +569,40 @@ class _AssignRiderPageState extends ConsumerState<AssignRiderPage> {
     );
   }
 
-  Future<void> _cancelExistingOffer(TransportAssignment assignment) async {
-    final confirmed = await showConfirmActionDialog(context, title: 'Cancel this offer?', message: 'The pending offer to ${assignment.riderName} will be cancelled, and you can select another transporter.', confirmLabel: 'Cancel Offer', cancelLabel: 'Keep Waiting', destructive: true);
-    if (confirmed != true || !mounted) return;
-    setState(() => _cancellingOffer = true);
+  /// Cancels the pending offer. [toAnother]: the admin wants to pick a
+  /// different transporter, so no confirmation and the list comes back
+  /// with nothing selected.
+  Future<void> _cancelExistingOffer(TransportAssignment assignment, {bool toAnother = false}) async {
+    if (!toAnother) {
+      final confirmed = await showConfirmActionDialog(context,
+          title: 'Cancel this offer?',
+          message: 'The pending offer to ${assignment.riderName} will be cancelled.',
+          confirmLabel: 'Cancel Offer',
+          cancelLabel: 'Keep Waiting',
+          destructive: true);
+      if (confirmed != true || !mounted) return;
+    }
+    // Back to the transporter list at once; the cancel is a server
+    // transaction and is undone here if it fails.
+    setState(() {
+      _cancellingOffer = true;
+      _optimisticOffer = null;
+      _optimisticCancelledId = assignment.id;
+      _dismissedOutcomeId = assignment.id;
+      _selectedRiderUid = null;
+    });
+    if (toAnother) {
+      ScaffoldMessenger.of(context).showSnackBar(appSnackBar('Offer cancelled. Choose another transporter.'));
+    }
     try {
       await ref.read(rescueCaseRepositoryProvider).cancelAssignment(
         caseId: widget.caseId,
         assignmentId: assignment.id,
-        reason: 'Cancelled by organization while waiting',
+        reason: toAnother ? 'Sent to another transporter' : 'Cancelled by organization while waiting',
       );
     } catch (e) {
       if (mounted) {
+        setState(() => _optimisticCancelledId = null);
         ScaffoldMessenger.of(context).showSnackBar(
           appSnackBar('Could not cancel this offer: $e', kind: AppMessageKind.error),
         );
@@ -356,60 +612,128 @@ class _AssignRiderPageState extends ConsumerState<AssignRiderPage> {
     }
   }
 
-  /// Awaiting-response panel shown in place of the map/rider-list/Next
-  /// whenever the case already has a valid, unexpired pending offer (spec
-  /// §4/§5) — an admin should never be able to pick a second transporter
-  /// while one is still outstanding.
+  /// The pending offer, shown in place of the rider list (an admin can't
+  /// pick a second transporter while one is outstanding). Updates every
+  /// second; the transporter's answer arrives live.
   Widget _pendingOfferPanel(TransportAssignment assignment) {
     final offeredAt = assignment.offeredAt;
-    final pendingFor = offeredAt == null
-        ? ''
-        : DateTime.now().difference(offeredAt).inMinutes < 1
-        ? 'Pending for ${DateTime.now().difference(offeredAt).inSeconds}s'
-        : 'Pending for ${DateTime.now().difference(offeredAt).inMinutes}m';
+    String pendingFor = '';
+    if (offeredAt != null) {
+      final d = DateTime.now().difference(offeredAt);
+      pendingFor = d.inMinutes < 1 ? 'Waiting ${d.inSeconds}s' : 'Waiting ${d.inMinutes}m ${d.inSeconds % 60}s';
+    }
     final expiry = assignment.expiryLabel();
-    return Expanded(
-      child: Center(
-        child: Padding(
-          padding: const EdgeInsets.all(24),
+    // Part of the page's single scroll (no Expanded), so it can never
+    // overflow under the banners above it.
+    return Padding(
+        padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
+        child: Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: AppColors.yellowrspwn, width: 1.5),
+          ),
           child: Column(
-            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              const Icon(Icons.hourglass_top, size: 36, color: AppColors.textSecondary),
-              const SizedBox(height: 12),
-              Text('Awaiting transporter response',
-                  style: GoogleFonts.tiltWarp(fontSize: 16, color: AppColors.textPrimary)),
-              const SizedBox(height: 8),
-              Text('Offered to: ${assignment.riderName}',
-                  style: GoogleFonts.zain(fontSize: 14, color: AppColors.textPrimary)),
-              if (pendingFor.isNotEmpty)
-                Text(pendingFor, style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary)),
-              if (expiry.isNotEmpty)
-                Text(expiry, style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary)),
-              const SizedBox(height: 20),
               Row(
-                mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  OutlinedButton(
-                    onPressed: _cancellingOffer ? null : () => _cancelExistingOffer(assignment),
-                    style: AppButtons.dangerOutline,
-                    child: _cancellingOffer
-                        ? const SizedBox(
-                        width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
-                        : Text('Cancel Offer', style: GoogleFonts.zain(fontWeight: FontWeight.w700)),
+                  const SizedBox(
+                    width: 22,
+                    height: 22,
+                    child: CircularProgressIndicator(strokeWidth: 2.5, color: AppColors.greenrspwn),
                   ),
                   const SizedBox(width: 12),
-                  ElevatedButton(
-                    onPressed: () => Navigator.push(context, MaterialPageRoute(
-                        builder: (_) => AdminTrackCasePage(
-                            caseId: widget.caseId, data: _currentCaseData(), mode: widget.postAcceptTrackingMode))),
-                    style: AppButtons.primary,
-                    child: Text('View Pending', style: GoogleFonts.zain(fontWeight: FontWeight.w700)),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text('Waiting for ${assignment.riderName}',
+                            style: GoogleFonts.tiltWarp(fontSize: 15, color: AppColors.textPrimary)),
+                        Text(
+                          [pendingFor, expiry].where((t) => t.isNotEmpty).join(' · '),
+                          style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary),
+                        ),
+                      ],
+                    ),
                   ),
                 ],
               ),
+              const SizedBox(height: 14),
+              ElevatedButton.icon(
+                // Disabled for the moment the offer is still being saved.
+                onPressed: _cancellingOffer || assignment.id.isEmpty
+                    ? null
+                    : () => _cancelExistingOffer(assignment, toAnother: true),
+                style: AppButtons.primary,
+                icon: const Icon(Icons.swap_horiz, size: 18),
+                label: Text('Send to Another Transporter', style: GoogleFonts.zain(fontWeight: FontWeight.w700)),
+              ),
+              const SizedBox(height: 8),
+              OutlinedButton(
+                onPressed: _cancellingOffer || assignment.id.isEmpty ? null : () => _cancelExistingOffer(assignment),
+                style: AppButtons.dangerOutline,
+                child: _cancellingOffer
+                    ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                    : Text('Cancel Offer', style: GoogleFonts.zain(fontWeight: FontWeight.w700)),
+              ),
             ],
           ),
+        ),
+      );
+  }
+
+  /// A declined or expired offer: why, then Retry that transporter or
+  /// choose another.
+  Widget _failedOfferCard(TransportAssignment a, List<_RiderVm> riders) {
+    final declined = a.status == TransportAssignmentStatus.rejected;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: AppColors.error.withValues(alpha: 0.08),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: AppColors.error.withValues(alpha: 0.5)),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text(declined ? '${a.riderName} declined' : 'Offer to ${a.riderName} expired',
+                style: GoogleFonts.zain(fontSize: 14, fontWeight: FontWeight.w800, color: AppColors.textPrimary)),
+            if (declined && (a.rejectionReason ?? '').isNotEmpty)
+              Text(a.rejectionReason!, style: GoogleFonts.zain(fontSize: 13, color: AppColors.textSecondary)),
+            const SizedBox(height: 10),
+            // Short labels: the header already names the transporter, and
+            // a name inside a half-width button got squeezed.
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton(
+                    onPressed: _isAssigning ? null : () => _retryRider(a, riders),
+                    style: AppButtons.outline.copyWith(
+                        padding: const WidgetStatePropertyAll(EdgeInsets.symmetric(horizontal: 8, vertical: 10))),
+                    child: Text('Retry', maxLines: 1, style: GoogleFonts.zain(fontWeight: FontWeight.w700)),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: ElevatedButton(
+                    onPressed: () => setState(() => _dismissedOutcomeId = a.id),
+                    style: AppButtons.primary.copyWith(
+                        padding: const WidgetStatePropertyAll(EdgeInsets.symmetric(horizontal: 8, vertical: 10))),
+                    child: FittedBox(
+                      fit: BoxFit.scaleDown,
+                      child: Text('Choose another', maxLines: 1, style: GoogleFonts.zain(fontWeight: FontWeight.w700)),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ],
         ),
       ),
     );
@@ -455,9 +779,21 @@ class _AssignRiderPageState extends ConsumerState<AssignRiderPage> {
       LatLng? caseLocation,
       List<PetTransporter> transporters,
       Map<String, TransportAssignmentStatus> activeByRider,
-      AnimalTransportProfile animalProfile,
-      ) {
-    final onlineTransporters = transporters.where((t) => t.isOnline).toList();
+      AnimalTransportProfile animalProfile, {
+      required int tripAnimals,
+      }) {
+    // Unverified transporters can't take transits (firestore.rules
+    // isVerifiedResponder), so they are never offered one.
+    // Phone and location are required too: staff call the transporter
+    // about the pickup, and distance/radius need where they are.
+    final onlineTransporters = transporters
+        .where((t) =>
+            t.isOnline &&
+            t.isVerified &&
+            (t.phone ?? '').trim().isNotEmpty &&
+            t.lastLat != null &&
+            t.lastLng != null)
+        .toList();
     double distanceFor(LatLng pos) =>
         haversineDistanceKm(center.latitude, center.longitude, pos.latitude, pos.longitude);
 
@@ -482,6 +818,11 @@ class _AssignRiderPageState extends ConsumerState<AssignRiderPage> {
         distanceKm: distanceFor(pos),
         vehicleCategory: category,
         compatibilityScore: vehicleCompatibilityScore(category, animalProfile),
+        suitability: vehicleSuitability(
+          vehicleType: vehicle,
+          declaredCapacity: null,
+          animals: tripAnimals,
+        ),
       );
     }
 
@@ -525,6 +866,11 @@ class _AssignRiderPageState extends ConsumerState<AssignRiderPage> {
         distanceKm: (pos == null || caseLocation == null) ? null : distanceFor(pos),
         vehicleCategory: category,
         compatibilityScore: vehicleCompatibilityScore(category, animalProfile),
+        suitability: vehicleSuitability(
+          vehicleType: t.vehicleType,
+          declaredCapacity: t.maxAnimals,
+          animals: tripAnimals,
+        ),
       );
     }).toList();
 
@@ -553,31 +899,267 @@ class _AssignRiderPageState extends ConsumerState<AssignRiderPage> {
     final allRiders = [...demoRiders, ...realRiders];
 
     final demoAvailable = demoRiders.where((r) => r.availability == _RiderAvailability.available).toList()
-      ..sort(byDistance);
-    var available = realRiders.where((r) => r.availability == _RiderAvailability.available).toList()
-      ..sort(byCompatibilityThenDistance);
-    // The single top-ranked real, available transporter is labeled
-    // Preferred — every other eligible transporter stays listed below it,
-    // never hidden.
+    ..sort(byDistance);
+    // Vehicle suitability first (transport_suitability.dart): available
+    // transporters whose vehicle can carry this trip, ranked; then the
+    // available ones whose vehicle can't, listed with the reason but not
+    // selectable. Preferred only ever goes to a suitable transporter.
+    var available = realRiders
+        .where((r) => r.availability == _RiderAvailability.available && r.suitability.suitable)
+        .toList()
+    ..sort(byCompatibilityThenDistance);
     if (available.isNotEmpty) {
-      available = [available.first.copyWith(isPreferred: true), ...available.skip(1)];
+    available = [available.first.copyWith(isPreferred: true), ...available.skip(1)];
     }
+    final availableUnsuitable = realRiders
+        .where((r) => r.availability == _RiderAvailability.available && !r.suitability.suitable)
+        .toList()
+    ..sort(byDistance);
     final pending = allRiders.where((r) => r.availability == _RiderAvailability.pending).toList()
-      ..sort(byDistance);
+    ..sort(byDistance);
     final busy = allRiders.where((r) => r.availability == _RiderAvailability.busy).toList()
-      ..sort(byDistance);
+    ..sort(byDistance);
 
-    return [...demoAvailable, ...available, ...pending, ...busy];
+    return [...demoAvailable, ...available, ...availableUnsuitable, ...pending, ...busy];
   }
 
   void _selectRider(_RiderVm rider) {
     if (rider.availability != _RiderAvailability.available || _isAssigning) return;
+    if (!rider.suitability.suitable) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        appSnackBar("${rider.name}'s vehicle isn't suitable for this trip: ${rider.suitability.reason}."),
+      );
+      return;
+    }
     setState(() {
       // Tapping the already-selected transporter deselects it; tapping a
       // different available transporter replaces the selection — only one
       // at a time either way.
       _selectedRiderUid = _selectedRiderUid == rider.uid ? null : rider.uid;
     });
+  }
+
+  /// Picks (or changes) the case's clinic without leaving this page: the
+  /// clinic and the transporter are chosen together here, then one
+  /// "Send offer" starts the trip.
+  Future<void> _pickClinic(Map<String, dynamic> d) async {
+    if (_savingClinic) return;
+    final c = ref.read(caseDetailProvider(widget.caseId)).asData?.value;
+    final currentName = (d['vetClinicName'] as String?)?.trim();
+    final hasClinic = currentName != null && currentName.isNotEmpty;
+    setState(() => _savingClinic = true);
+    try {
+      final outcome = await showSelectClinicSheet(
+        context,
+        repository: ref.read(clinicSearchRepositoryProvider),
+        caseRepository: ref.read(rescueCaseRepositoryProvider),
+        savedClinicsRepository: ref.read(savedClinicsRepositoryProvider),
+        caseId: widget.caseId,
+        actorUid: _actorUid,
+        actorName: _actorName,
+        centerLat: c?.lat ?? (d['lat'] as num?)?.toDouble(),
+        centerLng: c?.lng ?? (d['lng'] as num?)?.toDouble(),
+        currentClinicName: currentName,
+        currentClinicAddress: d['vetClinicAddress'] as String?,
+        currentClinicPlaceId: d['vetClinicPlaceId'] as String?,
+        currentClinicLat: (d['vetClinicLat'] as num?)?.toDouble(),
+        currentClinicLng: (d['vetClinicLng'] as num?)?.toDouble(),
+        currentClinicPhone: d['vetClinicPhone'] as String?,
+        offerAssignRider: false,
+        previousClinicName: hasClinic ? currentName : null,
+      );
+      if (!mounted) return;
+      if (outcome.result == ClinicSheetResult.clinicSaved) {
+        ScaffoldMessenger.of(context).showSnackBar(appSnackBar('Clinic set: ${outcome.clinic?.name ?? ''}'));
+      }
+    } finally {
+      if (mounted) setState(() => _savingClinic = false);
+    }
+  }
+
+  /// Direct to shelter applies only to organizations with a shelter —
+  /// independent rescuers have none (statusAfterTreatmentAccepted).
+  bool _canGoToShelter(Map<String, dynamic> d) => !_isIndependent && d['ownerKind'] != 'independent';
+
+  /// Staff chose "straight to the shelter" and the pin is on the case.
+  static bool _shelterChosen(Map<String, dynamic> d) =>
+      d['transportDestination'] == 'shelter' && d['shelterLat'] is num && d['shelterLng'] is num;
+
+  /// Direct to shelter: resolves the organization's shelter pin and saves
+  /// it as the destination. Without a pin, offers to set one first.
+  Future<void> _chooseShelter(Map<String, dynamic> d) async {
+    if (_savingClinic) return;
+    final orgId = (d['organizationId'] as String?) ?? '';
+    final directory = ref.read(organizationDirectoryRepositoryProvider);
+    setState(() => _savingClinic = true);
+    try {
+      var s = await directory.resolveShelterLocation(orgId);
+      if (!mounted) return;
+      if (s == null || s.lat == null || s.lng == null) {
+        final setNow = await showConfirmActionDialog(
+          context,
+          title: 'Shelter location not set',
+          message: "Pin your shelter's exact location first. The transporter's arrival is checked against it.",
+          confirmLabel: 'Set Shelter Location',
+          cancelLabel: 'Not Now',
+        );
+        if (!setNow || !mounted || orgId.isEmpty) return;
+        final saved = await Navigator.push<bool>(
+          context,
+          MaterialPageRoute(
+            builder: (_) => ShelterLocationPickerPage(
+              organizationId: orgId,
+              initialName: s?.name,
+              initialAddress: s?.address,
+              initialPlaceId: s?.placeId,
+            ),
+          ),
+        );
+        if (saved != true || !mounted) return;
+        s = await directory.resolveShelterLocation(orgId);
+        if (!mounted || s == null || s.lat == null || s.lng == null) return;
+      }
+      await ref.read(rescueCaseRepositoryProvider).sendToShelter(
+            caseId: widget.caseId,
+            shelterName: s.name,
+            shelterAddress: s.address,
+            shelterLat: s.lat!,
+            shelterLng: s.lng!,
+            actorUid: _actorUid,
+            actorName: _actorName,
+          );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(appSnackBar('Destination: ${s.name} (shelter)'));
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          appSnackBar('Could not set the shelter as the destination: $e', kind: AppMessageKind.error),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _savingClinic = false);
+    }
+  }
+
+  /// Clinic chosen again: keeps the clinic already saved, or opens the
+  /// clinic picker when there is none.
+  Future<void> _chooseClinic(Map<String, dynamic> d) async {
+    if (_savingClinic) return;
+    final clinicName = (d['vetClinicName'] as String?)?.trim() ?? '';
+    if (clinicName.isEmpty) return _pickClinic(d);
+    if (d['transportDestination'] != 'shelter') return;
+    setState(() => _savingClinic = true);
+    try {
+      await ref.read(rescueCaseRepositoryProvider).useClinicDestination(
+            caseId: widget.caseId,
+            clinicName: clinicName,
+            actorUid: _actorUid,
+            actorName: _actorName,
+          );
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          appSnackBar('Could not switch back to the clinic: $e', kind: AppMessageKind.error),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _savingClinic = false);
+    }
+  }
+
+  /// Where the transporter takes the animal: a clinic (then on to the
+  /// shelter after treatment) or straight to the organization's shelter.
+  Widget _clinicCard(Map<String, dynamic> d) {
+    final toShelter = d['transportDestination'] == 'shelter';
+    final name = toShelter
+        ? (d['shelterName'] as String?)?.trim() ?? ''
+        : (d['vetClinicName'] as String?)?.trim() ?? '';
+    final address = toShelter
+        ? (d['shelterAddress'] as String?)?.trim() ?? ''
+        : (d['vetClinicAddress'] as String?)?.trim() ?? '';
+    final ready = toShelter ? _shelterChosen(d) : name.isNotEmpty;
+    final showChoice = _canGoToShelter(d);
+    final chipStyle = GoogleFonts.zain(fontSize: 13, fontWeight: FontWeight.w700, color: AppColors.textPrimary);
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(12, 10, 6, 10),
+      decoration: BoxDecoration(
+        color: ready ? Colors.white : AppColors.yellowrspwn.withValues(alpha: 0.25),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: ready ? AppColors.slaterspwn : AppColors.yellowrspwn),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (showChoice) ...[
+            Text('Take the animal to',
+                style: GoogleFonts.zain(fontSize: 11, fontWeight: FontWeight.w700, color: AppColors.textSecondary)),
+            const SizedBox(height: 4),
+            Wrap(
+              spacing: 8,
+              runSpacing: 4,
+              children: [
+                ChoiceChip(
+                  label: Text('Clinic first', style: chipStyle),
+                  avatar: const Icon(Icons.local_hospital_outlined, size: 16),
+                  selected: !toShelter,
+                  onSelected: _savingClinic ? null : (_) => _chooseClinic(d),
+                ),
+                ChoiceChip(
+                  label: Text('Straight to shelter', style: chipStyle),
+                  avatar: const Icon(Icons.home_outlined, size: 16),
+                  selected: toShelter,
+                  onSelected: _savingClinic ? null : (_) => _chooseShelter(d),
+                ),
+              ],
+            ),
+            const SizedBox(height: 6),
+          ],
+          Row(
+            children: [
+              Icon(toShelter ? Icons.home_outlined : Icons.local_hospital_outlined, color: AppColors.textPrimary),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                        toShelter
+                            ? 'Shelter'
+                            : name.isNotEmpty
+                                ? 'Clinic'
+                                : 'Choose a clinic first',
+                        style: GoogleFonts.zain(fontSize: 11, fontWeight: FontWeight.w700, color: AppColors.textSecondary)),
+                    Text(name.isNotEmpty ? name : 'Where the transporter takes the animal',
+                        style: GoogleFonts.zain(fontSize: 14, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
+                    if (address.isNotEmpty)
+                      Text(address,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary)),
+                    if (toShelter)
+                      Text('No clinic stop: the animal goes from pickup to intake.',
+                          style: GoogleFonts.zain(fontSize: 11, color: AppColors.textSecondary)),
+                  ],
+                ),
+              ),
+              if (_savingClinic)
+                const Padding(
+                  padding: EdgeInsets.all(12),
+                  child: SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2)),
+                )
+              else if (!toShelter)
+                TextButton(
+                  onPressed: () => _pickClinic(d),
+                  child: Text(name.isNotEmpty ? 'Change' : 'Choose',
+                      style: GoogleFonts.zain(fontWeight: FontWeight.w800, color: AppColors.textPrimary)),
+                ),
+            ],
+          ),
+        ],
+      ),
+    );
   }
 
   /// The live case document, not the possibly-stale snapshot passed in at
@@ -602,69 +1184,132 @@ class _AssignRiderPageState extends ConsumerState<AssignRiderPage> {
       return;
     }
 
-    final caseData = _currentCaseData();
-    final caseHighRiskAnimals = highRiskAnimalsIn(
-      animals: caseData['animals'] as List?,
-      legacyBiteRisk: caseData['biteRisk'] as String?,
-      legacyEscapeRisk: caseData['escapeRisk'] as String?,
-    );
-    if (caseHighRiskAnimals.isNotEmpty) {
-      final acknowledged = await confirmHighRiskAcknowledgment(context, highRiskAnimals: caseHighRiskAnimals);
-      if (!acknowledged || !mounted) return;
+    await _sendOffer(rider);
+  }
+
+  /// Sends the offer to [rider]; the inline panel takes it from there.
+  /// [allowReassign] replaces an already-accepted transporter (Intake's
+  /// Reassign Transporter), after the admin confirms.
+  Future<void> _sendOffer(_RiderVm rider, {bool allowReassign = false}) async {
+    if (_isAssigning) return;
+    // Shown straight away; the offer is a server transaction, and waiting
+    // for it plus the live update made the panel appear seconds later.
+    final offeredAt = DateTime.now();
+    TransportAssignment placeholder(String id) => TransportAssignment(
+          id: id,
+          caseId: widget.caseId,
+          riderId: rider.uid,
+          riderName: rider.name,
+          riderType: rider.type,
+          status: TransportAssignmentStatus.pending,
+          offeredAt: offeredAt,
+          isDemo: rider.isDemo,
+          vehicle: rider.vehicle,
+          plate: rider.plate,
+        );
+    setState(() {
+      _isAssigning = true;
+      _optimisticOffer = placeholder('');
+    });
+    try {
+      final assignmentId = await ref.read(rescueCaseRepositoryProvider).createAssignmentOffer(
+        caseId: widget.caseId,
+        riderId: rider.uid,
+        riderName: rider.name,
+        riderType: rider.type,
+        isDemo: rider.isDemo,
+        allowReassign: allowReassign,
+        vehicle: rider.vehicle,
+        plate: rider.plate,
+      );
+      if (!mounted) return;
+      if (rider.isDemo) {
+        _scheduleDemoResponse(caseId: widget.caseId, assignmentId: assignmentId, riderId: rider.uid);
+      }
+      setState(() {
+        _sentAssignmentId = assignmentId;
+        _selectedRiderUid = null;
+        // Now cancellable, even before the live update arrives.
+        _optimisticOffer = placeholder(assignmentId);
+      });
+    } on ActiveAssignmentConflictException catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _isAssigning = false;
+        _optimisticOffer = null;
+      });
+      if (e.status == TransportAssignmentStatus.accepted) {
+        final replace = await showConfirmActionDialog(
+          context,
+          title: 'Replace ${e.riderName}?',
+          message: '${e.riderName} already accepted this transport. Send the offer to ${rider.name} instead? '
+              '${e.riderName} is taken off the case if ${rider.name} accepts.',
+          confirmLabel: 'Send to ${rider.name}',
+          cancelLabel: 'Keep ${e.riderName}',
+        );
+        if (replace == true && mounted) await _sendOffer(rider, allowReassign: true);
+      } else {
+        // A pending offer already exists: the panel below shows it.
+        ScaffoldMessenger.of(context).showSnackBar(appSnackBar('${e.riderName} already has a pending offer for this case.'));
+      }
+      return;
+    } on TransporterNoLongerOnlineException catch (e) {
+      _offerRefused(e.toString());
+    } on TransporterNotReachableException catch (e) {
+      _offerRefused(e.toString());
+    } on UnsuitableVehicleException catch (e) {
+      _offerRefused(e.toString());
+    } catch (e, st) {
+      debugPrint('Assign transporter failed: $e\n$st');
+      if (mounted) {
+        setState(() => _optimisticOffer = null);
+        ScaffoldMessenger.of(context).showSnackBar(appSnackBar(
+          'Could not send the offer to ${rider.name}.',
+          kind: AppMessageKind.error,
+          action: SnackBarAction(label: 'Retry', onPressed: () => _sendOffer(rider, allowReassign: allowReassign)),
+        ));
+      }
+    } finally {
+      if (mounted) setState(() => _isAssigning = false);
     }
+  }
 
-    setState(() => _isAssigning = true);
-
-    // A single modal instance carries the admin through
-    // confirmation -> pending -> accepted/declined/error without ever
-    // navigating away from this screen. See _TransporterAssignmentDialog.
-    final outcome = await showDialog<_DialogOutcome>(
-      context: context,
-      barrierDismissible: false,
-      builder: (_) => _TransporterAssignmentDialog(caseId: widget.caseId, rider: rider),
-    );
-
+  /// The server refused the offer for this transporter: back to the list.
+  void _offerRefused(String message) {
     if (!mounted) return;
-    setState(() => _isAssigning = false);
+    setState(() {
+      _optimisticOffer = null;
+      _selectedRiderUid = null;
+    });
+    ScaffoldMessenger.of(context).showSnackBar(appSnackBar(message, kind: AppMessageKind.error));
+  }
 
-    switch (outcome) {
-      case _DialogOutcome.accepted:
-      case _DialogOutcome.viewExisting:
-      // Assignment is confirmed accepted (persisted, not just local
-      // state), or the admin chose to view an existing pending/accepted
-      // assignment instead of creating a new one — either way, Track
-      // Case now shows the live tracking map directly (or its own
-      // pending/declined inline view), in whichever mode this page was
-      // opened for (rescue pickup, or intake transport when this was a
-      // reassignment from Intake Details).
-        Navigator.pushReplacement(context, MaterialPageRoute(
-            builder: (_) => AdminTrackCasePage(
-                caseId: widget.caseId, data: _currentCaseData(), mode: widget.postAcceptTrackingMode)));
-        break;
-      case _DialogOutcome.acceptedStayHere:
-      // Assignment is accepted/persisted, but the admin chose to stay on
-      // this list (spec §6) — never navigate automatically. Keep the
-      // rider selected so its card highlight/Accepted state stays visible;
-      // the "Continue to Tracking" banner (build()) is the deliberate,
-      // manual next step from here.
-        break;
-      case _DialogOutcome.declined:
-      case _DialogOutcome.offerCancelled:
-      // Stay here; clear the selection so the admin can pick someone
-      // else. A declined transporter shows as Busy and drops to the
-      // bottom of the list automatically; an org-cancelled offer simply
-      // frees the transporter back to Available (its most-recent
-      // assignment is now 'cancelled', not 'accepted'/'pending') — no
-      // extra state to manage in either case.
-        setState(() => _selectedRiderUid = null);
-        break;
-      case _DialogOutcome.cancelled:
-      case null:
-      // Cancelled before any offer was created, or dismissed some other
-      // way — keep the selection, stay on Assign Transporter, nothing
-      // was written.
-        break;
+  /// Retry the same transporter after a decline or expiry. Skips the
+  /// availability check on purpose: the admin chose them again.
+  Future<void> _retryRider(TransportAssignment previous, List<_RiderVm> riders) async {
+    final rider = riders.where((r) => r.uid == previous.riderId).firstOrNull;
+    if (rider == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        appSnackBar('${previous.riderName} is not online right now. Choose another transporter.'),
+      );
+      setState(() => _dismissedOutcomeId = previous.id);
+      return;
     }
+    await _sendOffer(rider);
+  }
+
+  /// Opens tracking once the offer this page sent is accepted.
+  void _openTrackingOnAccept(TransportAssignment? assignment) {
+    if (_openedTracking || assignment == null) return;
+    if (assignment.id != _sentAssignmentId || assignment.status != TransportAssignmentStatus.accepted) return;
+    _openedTracking = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(appSnackBar('${assignment.riderName} accepted. Opening tracking.'));
+      Navigator.pushReplacement(context, MaterialPageRoute(
+          builder: (_) => AdminTrackCasePage(
+              caseId: widget.caseId, data: _currentCaseData(), mode: widget.postAcceptTrackingMode)));
+    });
   }
 
   void _fitCameraOnce(LatLng? center, List<_RiderVm> riders) {
@@ -693,23 +1338,23 @@ class _AssignRiderPageState extends ConsumerState<AssignRiderPage> {
         ),
       for (final rider in riders)
         if (rider.position != null)
-        Marker(
-          markerId: MarkerId(rider.uid),
-          position: rider.position!,
-          icon: BitmapDescriptor.defaultMarkerWithHue(
-            rider.uid == _selectedRiderUid
-                ? BitmapDescriptor.hueGreen
-                : switch (rider.availability) {
-              _RiderAvailability.pending => BitmapDescriptor.hueOrange,
-              _RiderAvailability.busy => BitmapDescriptor.hueViolet,
-              _RiderAvailability.available => BitmapDescriptor.hueRed,
-            },
+          Marker(
+            markerId: MarkerId(rider.uid),
+            position: rider.position!,
+            icon: BitmapDescriptor.defaultMarkerWithHue(
+              rider.uid == _selectedRiderUid
+                  ? BitmapDescriptor.hueGreen
+                  : switch (rider.availability) {
+                _RiderAvailability.pending => BitmapDescriptor.hueOrange,
+                _RiderAvailability.busy => BitmapDescriptor.hueViolet,
+                _RiderAvailability.available => BitmapDescriptor.hueRed,
+              },
+            ),
+            infoWindow: InfoWindow(
+              title: rider.name,
+              snippet: rider.distanceLabel,
+            ),
           ),
-          infoWindow: InfoWindow(
-            title: rider.name,
-            snippet: rider.distanceLabel,
-          ),
-        ),
     };
   }
 
@@ -727,16 +1372,22 @@ class _AssignRiderPageState extends ConsumerState<AssignRiderPage> {
     // case itself has no saved coordinates yet.
     final riderCenter = caseLocation ?? const LatLng(14.5995, 120.9842); // Manila fallback
 
-    final transporters = ref.watch(petTransportersProvider).asData?.value ?? const <PetTransporter>[];
+    final transportersAsync = ref.watch(petTransportersProvider);
+    final transportersLoading = !transportersAsync.hasValue && !transportersAsync.hasError;
+    final transporters = transportersAsync.value ?? const <PetTransporter>[];
     final activeByRider =
         ref.watch(activeAssignmentsByRiderProvider).asData?.value ?? const <String, TransportAssignmentStatus>{};
 
     final animals = (d['animals'] as List?) ?? const [];
-    // Ranking needs only the number of passengers (animals riding).
+    // Ranking and suitability need only the number of passengers (animals
+    // riding); no "enclosed vehicle" requirement.
     final animalProfile = AnimalTransportProfile(
       animalCount: animals.isEmpty ? 1 : animals.length,
     );
-    final riders = _buildRiderVms(riderCenter, caseLocation, transporters, activeByRider, animalProfile);
+    // What the trip needs from a vehicle (transport_suitability.dart).
+    final tripAnimals = animalsToTransport(d);
+    final riders = _buildRiderVms(riderCenter, caseLocation, transporters, activeByRider, animalProfile,
+        tripAnimals: tripAnimals);
 
     // Progressive Search Radius spec — only riders within the current
     // radius are actually shown/selectable; the underlying compatibility/
@@ -745,8 +1396,12 @@ class _AssignRiderPageState extends ConsumerState<AssignRiderPage> {
     // listed — the radius can't rule them in or out, and hiding them would
     // hide every transporter who hasn't shared a location.
     final visibleRiders = riders.where((r) => r.distanceKm == null || r.distanceKm! <= _currentRadiusKm).toList();
-    final hasAvailableInRadius = visibleRiders.any((r) => r.availability == _RiderAvailability.available);
-    final hasAvailableAnywhere = riders.any((r) => r.availability == _RiderAvailability.available);
+    // "Available" here means available with a suitable vehicle: the search
+    // keeps widening until one is in range.
+    final hasAvailableInRadius = visibleRiders.any((r) => r.isSelectable);
+    final hasAvailableAnywhere = riders.any((r) => r.isSelectable);
+    final hasUnsuitableOnly = !hasAvailableAnywhere &&
+        riders.any((r) => r.availability == _RiderAvailability.available);
     final atMaxRadius = _currentRadiusKm >= _maxRadiusKm;
 
     // Auto-expand one step at a time whenever nothing compatible/available
@@ -772,15 +1427,30 @@ class _AssignRiderPageState extends ConsumerState<AssignRiderPage> {
     // let the rider list/Next button be reachable while that's true — only
     // View Pending / Cancel Offer are available until it resolves.
     final currentAssignment = ref.watch(currentAssignmentProvider(widget.caseId)).asData?.value;
-    final blockingOffer =
-    currentAssignment != null && currentAssignment.status == TransportAssignmentStatus.pending
-        ? currentAssignment
+    // The offer just sent stands in until the live one arrives.
+    final optimistic = _optimisticOffer != null &&
+            (_sentAssignmentId == null || currentAssignment?.id != _sentAssignmentId)
+        ? _optimisticOffer
         : null;
+    final blockingOffer = optimistic ??
+        (currentAssignment != null &&
+                currentAssignment.status == TransportAssignmentStatus.pending &&
+                currentAssignment.id != _optimisticCancelledId
+            ? currentAssignment
+            : null);
     if (blockingOffer != null) {
       if (blockingOffer.isStalePending) {
         _reconcileIfStale(blockingOffer);
       }
     }
+    _syncTicker(blockingOffer != null);
+    _openTrackingOnAccept(currentAssignment);
+    final failedOffer = currentAssignment != null &&
+            (currentAssignment.status == TransportAssignmentStatus.rejected ||
+                currentAssignment.status == TransportAssignmentStatus.expired) &&
+            currentAssignment.id != _dismissedOutcomeId
+        ? currentAssignment
+        : null;
 
     // Set once the admin closes the accepted dialog with "Close" instead of
     // "View Transport Tracking" (spec §6) — shows a persistent, explicit
@@ -796,12 +1466,46 @@ class _AssignRiderPageState extends ConsumerState<AssignRiderPage> {
     // Only for the rescue pickup: this page is also the intake-leg
     // reassignment picker, where referring or "organization will
     // transport" don't apply.
-    final showFallback = RescueStatus.fromFirestoreValue(d['status'] as String?) ==
-            RescueStatus.awaitingAssignment &&
+    // fallbackApplies: the banner stays to reopen the options;
+    // showFallback: the sheet opens by itself (not after Keep Waiting).
+    final fallbackApplies = RescueStatus.fromFirestoreValue(d['status'] as String?) ==
+        RescueStatus.awaitingAssignment &&
         blockingOffer == null &&
         acceptedAssignment == null &&
-        !fallbackDismissed &&
         shouldOfferNoTransporterFallback(searchExhausted: searchExhausted, failedOfferCount: failedOffers);
+    final showFallback = fallbackApplies && !fallbackDismissed;
+    _latestRiders = riders;
+    if (showFallback && !_fallbackSheetOpen && !transportersLoading) {
+      final isCritical = urgency == 'Critical';
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        _openFallbackSheet(failedOffers: failedOffers, isCritical: isCritical, failedOffer: failedOffer);
+      });
+    }
+
+    // Independent rescuers choose up front: bring it themselves, or pick a
+    // transporter below. Needs the clinic saved first (awaitingAssignment).
+    final showSelfTransport = _isIndependent &&
+        !fallbackApplies &&
+        RescueStatus.fromFirestoreValue(d['status'] as String?) == RescueStatus.awaitingAssignment &&
+        blockingOffer == null &&
+        acceptedAssignment == null;
+
+    final highRisk = highRiskAnimalsIn(
+      animals: d['animals'] as List?,
+      legacyBiteRisk: d['biteRisk'] as String?,
+      legacyEscapeRisk: d['escapeRisk'] as String?,
+    );
+    // Rescue pickup needs a destination: a clinic, or the shelter pin when
+    // staff chose straight to shelter.
+    final needsClinic = widget.postAcceptTrackingMode == TrackingMode.rescuePickup &&
+        (d['transportDestination'] == 'shelter'
+            ? !_shelterChosen(d)
+            : ((d['vetClinicName'] as String?)?.trim().isEmpty ?? true));
+    final canSend = _selectedRiderUid != null &&
+        !_isAssigning &&
+        !needsClinic &&
+        (highRisk.isEmpty || _riskAcknowledged);
 
     return Scaffold(
       backgroundColor: AppColors.background,
@@ -813,11 +1517,18 @@ class _AssignRiderPageState extends ConsumerState<AssignRiderPage> {
           // Details, regardless of selection.
           onPressed: () => Navigator.pop(context),
         ),
-        title: Text('Assign Transporter',
+        title: Text('Assign Transport',
             style: GoogleFonts.tiltWarp(
                 fontSize: 18, color: AppColors.background)),
       ),
-      body: Column(
+      // One scroll for the whole page: banners, the map, notices and the
+      // transporter list. A fixed column used to overflow on phones when
+      // several banners showed, leaving a striped error block and a list
+      // that couldn't be reached.
+      body: CustomScrollView(
+        slivers: [
+          SliverToBoxAdapter(
+            child: Column(
         children: [
           // Case header
           Padding(
@@ -857,6 +1568,14 @@ class _AssignRiderPageState extends ConsumerState<AssignRiderPage> {
               ],
             ),
           ),
+          // Rescue pickup: the clinic is picked here too, so clinic and
+          // transporter are one page. The intake leg's pickup is the
+          // clinic the animal is already at.
+          if (widget.postAcceptTrackingMode == TrackingMode.rescuePickup)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+              child: _clinicCard(d),
+            ),
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
             child: RescueRiskBanner(
@@ -867,19 +1586,6 @@ class _AssignRiderPageState extends ConsumerState<AssignRiderPage> {
               ),
             ),
           ),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
-            child: Row(
-              children: [
-                const Icon(Icons.pets, size: 16, color: AppColors.textPrimary),
-                const SizedBox(width: 6),
-                Text('Passengers: ${animalProfile.passengersLabel}',
-                    style: GoogleFonts.zain(fontSize: 13, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
-              ],
-            ),
-          ),
-          const SizedBox(height: 10),
-
           // Real map: case marker + transporter markers (real-or-demo positions).
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -969,6 +1675,10 @@ class _AssignRiderPageState extends ConsumerState<AssignRiderPage> {
           if (blockingOffer != null)
             _pendingOfferPanel(blockingOffer)
           else ...[
+            if (fallbackApplies)
+              _fallbackBanner(failedOffers: failedOffers, isCritical: urgency == 'Critical', failedOffer: failedOffer)
+            else if (failedOffer != null)
+              _failedOfferCard(failedOffer, riders),
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16),
               child: Row(
@@ -1002,14 +1712,17 @@ class _AssignRiderPageState extends ConsumerState<AssignRiderPage> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        atMaxRadius
+                        hasUnsuitableOnly
+                            ? 'No available vehicle has room for this trip\'s $tripAnimals '
+                                'passenger${tripAnimals == 1 ? '' : 's'}.'
+                            : atMaxRadius
                             ? (hasAvailableAnywhere
                         // Shouldn't happen (max radius should contain
                         // everyone), kept only as a safe fallback.
                             ? 'No available transporters in range.'
                             : 'No compatible transporters are currently available. Try again later or use manual assignment.')
                             : hasAvailableAnywhere
-                            ? 'No available transporters nearby. Expanding the search radius…'
+                            ? 'No suitable transporters nearby. Expanding the search radius…'
                             : 'No available transporters nearby.',
                         style: GoogleFonts.zain(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.textPrimary),
                       ),
@@ -1052,6 +1765,28 @@ class _AssignRiderPageState extends ConsumerState<AssignRiderPage> {
 
             const SizedBox(height: 8),
 
+            if (showSelfTransport)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
+                child: OutlinedButton.icon(
+                  onPressed: _fallbackBusy ? null : _organizationWillTransport,
+                  style: AppButtons.outline,
+                  icon: const Icon(Icons.directions_car_outlined, size: 18),
+                  label: Text("I'll Bring It Myself — or pick a transporter below",
+                      style: GoogleFonts.zain(fontWeight: FontWeight.w700)),
+                ),
+              ),
+
+            // What the vehicle has to carry (transport_suitability.dart).
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+              child: Text(
+                'Passengers: $tripAnimals animal${tripAnimals == 1 ? '' : 's'}. '
+                'Transporters without room for them are listed but can\'t be selected.',
+                style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary),
+              ),
+            ),
+
             // Transporter list — fixed order (see _buildRiderVms): demo
             // transporters pinned above the real-Available group only while
             // they're Available themselves, then real transporters grouped
@@ -1060,8 +1795,11 @@ class _AssignRiderPageState extends ConsumerState<AssignRiderPage> {
             // the current search radius (Progressive Search Radius spec) —
             // scroll position/list identity otherwise untouched by radius
             // changes since this is the same ListView, just fewer/more items.
-            Expanded(
-              child: visibleRiders.isEmpty && !showFallback
+            Padding(
+              padding: const EdgeInsets.only(bottom: 16),
+              child: transportersLoading
+                  ? const Padding(padding: EdgeInsets.all(24), child: Center(child: CircularProgressIndicator()))
+                  : visibleRiders.isEmpty
                   ? Center(
                 child: Padding(
                   padding: const EdgeInsets.all(24),
@@ -1074,19 +1812,12 @@ class _AssignRiderPageState extends ConsumerState<AssignRiderPage> {
               )
                   : ListView.separated(
                 key: const PageStorageKey('assign_rider_list'),
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
                 padding: const EdgeInsets.symmetric(horizontal: 16),
-                itemCount: visibleRiders.length + (showFallback ? 1 : 0),
+                itemCount: visibleRiders.length,
                 separatorBuilder: (_, _) => const SizedBox(height: 12),
                 itemBuilder: (context, index) {
-                  if (showFallback) {
-                    if (index == 0) {
-                      return _noTransporterPrompt(
-                        failedOffers: failedOffers,
-                        isCritical: urgency == 'Critical',
-                      );
-                    }
-                    index -= 1;
-                  }
                   final rider = visibleRiders[index];
                   final isSelected = _selectedRiderUid == rider.uid;
                   return _RiderCard(
@@ -1094,42 +1825,74 @@ class _AssignRiderPageState extends ConsumerState<AssignRiderPage> {
                     isSelected: isSelected,
                     onSelect: () => _selectRider(rider),
                     animalProfile: animalProfile,
+                    tripAnimals: tripAnimals,
                   );
                 },
               ),
             ),
 
-            // Fixed bottom action — always visible; "Next" is simply disabled
-            // until an available transporter is selected. No Back button
-            // here — the app-bar back arrow is the only way to leave this page.
+          ],
+        ],
+            ),
+          ),
+        ],
+      ),
+      // Fixed bottom action, outside the scroll so it stays reachable.
+      bottomNavigationBar: blockingOffer != null
+          ? null
+          : // Fixed bottom action — always visible; "Send offer" stays
+            // disabled until a clinic (rescue pickup), an available
+            // transporter and, for high-risk animals, the risk
+            // acknowledgement are all in place.
             Container(
-              padding: const EdgeInsets.all(16),
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
               decoration: BoxDecoration(
                 color: AppColors.background,
                 border: Border(top: BorderSide(color: AppColors.slaterspwn)),
               ),
-              child: SizedBox(
-                width: double.infinity,
-                child: ElevatedButton(
-                  onPressed: (_selectedRiderUid == null || _isAssigning) ? null : () => _handleNext(visibleRiders),
-                  style: AppButtons.primary,
-                  child: _isAssigning
-                      ? const SizedBox(
-                      height: 20,
-                      width: 20,
-                      child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.textPrimary))
-                      : Text('Next',
-                      style: GoogleFonts.tiltWarp(
-                          fontSize: 15,
-                          color: _selectedRiderUid == null
-                              ? AppColors.textSecondary
-                              : AppColors.textPrimary)),
+              child: SafeArea(
+                top: false,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    if (highRisk.isNotEmpty)
+                      CheckboxListTile(
+                        value: _riskAcknowledged,
+                        onChanged: (v) => setState(() => _riskAcknowledged = v ?? false),
+                        dense: true,
+                        contentPadding: EdgeInsets.zero,
+                        controlAffinity: ListTileControlAffinity.leading,
+                        title: Text('I\'ve told the transporter about the bite/escape risk above.',
+                            style: GoogleFonts.zain(fontSize: 13, color: AppColors.textPrimary)),
+                      ),
+                    if (needsClinic)
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 6),
+                        child: Text('Choose where the animal goes to send the offer.',
+                            style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary)),
+                      ),
+                    SizedBox(
+                      width: double.infinity,
+                      child: ElevatedButton(
+                        onPressed: !canSend ? null : () => _handleNext(visibleRiders),
+                        style: AppButtons.primary,
+                        child: _isAssigning
+                            ? const SizedBox(
+                                height: 20,
+                                width: 20,
+                                child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.textPrimary))
+                            : Text(
+                                _selectedRiderUid == null ? 'Select a transporter' : 'Send offer',
+                                style: GoogleFonts.tiltWarp(
+                                    fontSize: 15,
+                                    color: canSend ? AppColors.textPrimary : AppColors.textSecondary),
+                              ),
+                      ),
+                    ),
+                  ],
                 ),
               ),
             ),
-          ],
-        ],
-      ),
     );
   }
 }
@@ -1139,12 +1902,14 @@ class _RiderCard extends StatelessWidget {
   final bool isSelected;
   final VoidCallback onSelect;
   final AnimalTransportProfile animalProfile;
+  final int tripAnimals;
 
   const _RiderCard({
     required this.rider,
     required this.isSelected,
     required this.onSelect,
     required this.animalProfile,
+    required this.tripAnimals,
   });
 
   // Same tel: launch pattern as transporter_details_card.dart's _launchCall.
@@ -1200,67 +1965,40 @@ class _RiderCard extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Row(
+                  // The name gets the full width (two lines if needed);
+                  // the labels wrap underneath instead of squeezing it.
+                  Text(rider.name,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: GoogleFonts.zain(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                          color: AppColors.textPrimary)),
+                  const SizedBox(height: 4),
+                  Wrap(
+                    spacing: 4,
+                    runSpacing: 4,
+                    crossAxisAlignment: WrapCrossAlignment.center,
                     children: [
-                      Expanded(
-                        child: Text(rider.name,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: GoogleFonts.zain(
-                                fontSize: 14,
-                                fontWeight: FontWeight.w600,
-                                color: AppColors.textPrimary)),
-                      ),
-                      const SizedBox(width: 6),
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 8, vertical: 2),
-                        decoration: BoxDecoration(
-                          color: AppColors.yellowrspwn,
-                          borderRadius: BorderRadius.circular(20),
-                        ),
-                        child: Text(rider.type,
-                            style: GoogleFonts.zain(
-                                fontSize: 10,
-                                fontWeight: FontWeight.bold,
-                                color: AppColors.textPrimary)),
-                      ),
-                      if (rider.isDemo) ...[
-                        const SizedBox(width: 4),
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                          decoration: BoxDecoration(
-                            color: Colors.transparent,
-                            borderRadius: BorderRadius.circular(20),
-                            border: Border.all(color: AppColors.textSecondary.withValues(alpha: 0.5)),
-                          ),
-                          child: Text('DEMO',
-                              style: GoogleFonts.zain(
-                                  fontSize: 9,
-                                  fontWeight: FontWeight.bold,
-                                  color: AppColors.textSecondary)),
-                        ),
-                      ],
+                      // Selection is shown only by the card border; this
+                      // always reflects true Available/Pending/Busy state.
+                      _pill(statusLabel, fill: statusColor, text: statusTextColor),
+                      _pill(rider.type, fill: AppColors.yellowrspwn, text: AppColors.textPrimary),
+                      // Transporter Ranking spec — "Preferred" is shown as an
+                      // explicit reason, never a silent reordering.
+                      if (rider.isPreferred)
+                        _pill('Preferred',
+                            fill: AppColors.greenrspwn.withValues(alpha: 0.18), text: AppColors.greenrspwn),
+                      if (!rider.suitability.suitable)
+                        _pill('Not suitable', fill: AppColors.error.withValues(alpha: 0.12), text: AppColors.error),
+                      if (rider.isDemo)
+                        _pill('DEMO',
+                            fill: Colors.transparent,
+                            text: AppColors.textSecondary,
+                            border: AppColors.textSecondary.withValues(alpha: 0.5)),
                     ],
                   ),
-                  // Transporter Ranking spec — "Preferred" is shown as an
-                  // explicit reason, never a silent reordering; every other
-                  // eligible transporter is still listed (and tappable)
-                  // below, just without this badge.
-                  if (rider.isPreferred) ...[
-                    const SizedBox(height: 2),
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                      decoration: BoxDecoration(
-                        color: AppColors.greenrspwn.withValues(alpha: 0.18),
-                        borderRadius: BorderRadius.circular(20),
-                      ),
-                      child: Text('Preferred',
-                          style: GoogleFonts.zain(
-                              fontSize: 10, fontWeight: FontWeight.bold, color: AppColors.greenrspwn)),
-                    ),
-                  ],
-                  const SizedBox(height: 2),
+                  const SizedBox(height: 4),
                   Text(rider.distanceLabel,
                       style: GoogleFonts.zain(
                           fontSize: 12, color: AppColors.textSecondary)),
@@ -1274,51 +2012,52 @@ class _RiderCard extends StatelessWidget {
                       overflow: TextOverflow.ellipsis,
                       style: GoogleFonts.zain(
                           fontSize: 11, color: AppColors.textSecondary)),
+                  // Why this transporter is (or isn't) suitable: declared
+                  // capacity against the animals in this trip.
+                  Text(
+                    '${rider.suitability.declaredCapacity == null ? 'Capacity not declared' : 'Carries up to ${rider.suitability.declaredCapacity}'}'
+                    ' · this trip: $tripAnimals',
+                    style: GoogleFonts.zain(fontSize: 11, color: AppColors.textSecondary),
+                  ),
+                  Text(
+                    rider.suitability.reason,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: GoogleFonts.zain(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      color: rider.suitability.suitable ? AppColors.greenrspwn : AppColors.error,
+                    ),
+                  ),
                 ],
               ),
             ),
 
-            const SizedBox(width: 8),
-
-            // Contact + one status chip — no "Selected" state here at all;
-            // selection is shown only by the card border above.
-            Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                // Message removed — redundant with the shared case-level
-                // Messages thread on Track Case (spec: only Call stays on
-                // a transporter card). Hidden when there's no number to dial
-                // (demo transporters, or accounts that never saved one).
-                if ((rider.phone ?? '').trim().isNotEmpty) ...[
-                  GestureDetector(
-                    onTap: () => _launchCall(context),
-                    child: Container(
-                      padding: const EdgeInsets.all(4),
-                      child: const Icon(Icons.phone_outlined,
-                          size: 20, color: AppColors.textPrimary),
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                ],
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-                  decoration: BoxDecoration(
-                    color: statusColor,
-                    borderRadius: BorderRadius.circular(20),
-                  ),
-                  child: Text(statusLabel,
-                      style: GoogleFonts.zain(
-                          fontSize: 12,
-                          fontWeight: FontWeight.w600,
-                          color: statusTextColor)),
-                ),
-              ],
-            ),
+            // Call only (messages live on Track Case). Hidden when there's
+            // no number to dial (demo transporters).
+            if ((rider.phone ?? '').trim().isNotEmpty)
+              IconButton(
+                onPressed: () => _launchCall(context),
+                tooltip: 'Call',
+                visualDensity: VisualDensity.compact,
+                icon: const Icon(Icons.phone_outlined, size: 20, color: AppColors.textPrimary),
+              ),
           ],
         ),
       ),
     );
   }
+
+  Widget _pill(String label, {required Color fill, required Color text, Color? border}) => Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+        decoration: BoxDecoration(
+          color: fill,
+          borderRadius: BorderRadius.circular(20),
+          border: border == null ? null : Border.all(color: border),
+        ),
+        child: Text(label,
+            style: GoogleFonts.zain(fontSize: 11, fontWeight: FontWeight.w700, color: text)),
+      );
 }
 
 class _Avatar extends StatelessWidget {
@@ -1351,688 +2090,4 @@ class _Avatar extends StatelessWidget {
     ),
     child: const Icon(Icons.directions_car, color: AppColors.textSecondary),
   );
-}
-
-/// What the modal resolved to, once it closes — drives what
-/// _AssignRiderPageState._handleNext does next (navigate to Track Case,
-/// clear the selection, or just stay put).
-///
-/// [cancelled] is the pre-offer Cancel/Close path (nothing was ever
-/// written — the caller keeps the current selection as-is). [offerCancelled]
-/// is the "Back" path out of an already-created pending offer (the offer
-/// itself is cancelled in Firestore — the caller clears the selection, same
-/// as [declined], since the transporter is no longer the one on this case).
-/// [viewExisting] covers both conflict resolutions that leave this screen
-/// without writing anything new here — "View Pending" (an existing pending
-/// offer) and "Track Case" (an existing accepted assignment) both just open
-/// Track Case, which already renders the right pending/accepted view.
-// [acceptedStayHere] (Keep Assign Transporter on the list screen spec §6) —
-// the assignment IS accepted/persisted exactly like [accepted], but the
-// admin chose "Close" instead of "View Transport Tracking": the caller must
-// NOT navigate away, staying on this same list with the accepted card shown
-// in its own clear state, so continuing to tracking is always a separate,
-// manual action rather than automatic.
-enum _DialogOutcome { cancelled, accepted, acceptedStayHere, declined, offerCancelled, viewExisting }
-
-enum _ModalPhase { confirmation, creating, cancelling, pending, accepted, declined, expired, cancelled, error, conflict }
-
-/// The single dialog instance that carries the admin from "Confirm
-/// Transporter Assignment" through Pending and into Accepted/Declined/Error
-/// — it is never closed and replaced with another page. Watches the
-/// created assignment doc directly (a raw Firestore stream, not a
-/// Riverpod provider) so it keeps reacting even though this widget's own
-/// lifecycle is just "however long the dialog is open," and reflects
-/// persisted Firestore state rather than any assumption about how the
-/// demo timer resolves.
-class _TransporterAssignmentDialog extends ConsumerStatefulWidget {
-  final String caseId;
-  final _RiderVm rider;
-  const _TransporterAssignmentDialog({required this.caseId, required this.rider});
-
-  @override
-  ConsumerState<_TransporterAssignmentDialog> createState() => _TransporterAssignmentDialogState();
-}
-
-class _TransporterAssignmentDialogState extends ConsumerState<_TransporterAssignmentDialog> {
-  _ModalPhase _phase = _ModalPhase.confirmation;
-  String? _errorMessage;
-  String? _rejectionReason;
-
-  /// Set only when [_confirm] hits [ActiveAssignmentConflictException] —
-  /// drives the conflict phase's identity display and its
-  /// View Pending / Track Case / Reassign Transporter actions.
-  ActiveAssignmentConflictException? _conflict;
-
-  /// Guards "Confirm"/"Retry-when-no-offer-exists" against a second tap
-  /// creating a second offer — cleared only when a create attempt
-  /// actually fails, so Retry can try again.
-  bool _hasCreatedOffer = false;
-
-  /// Set once the offer is created, never cleared — this is what makes
-  /// "real transporter stuck in Pending forever" actually recoverable:
-  /// Back/Retry both act on this same assignment id instead of ever
-  /// needing a second offer.
-  String? _assignmentId;
-
-  StreamSubscription<DocumentSnapshot<Map<String, dynamic>>>? _assignmentSub;
-
-  // Elapsed-waiting-time display + the "hasn't responded yet" nudge. Purely
-  // informational — see the class doc comment on why this never auto-
-  // rejects anything on its own.
-  DateTime? _pendingSince;
-  Timer? _elapsedTimer;
-  Duration _elapsed = Duration.zero;
-  bool _showTimeoutMessage = false;
-  static const _timeoutThreshold = Duration(seconds: 30);
-
-  /// The offer's own deadline, read from the assignment doc. Shorter for
-  /// Critical cases (transportOfferTtlFor), so it's never assumed here.
-  DateTime? _expiresAt;
-
-  @override
-  void dispose() {
-    _assignmentSub?.cancel();
-    _elapsedTimer?.cancel();
-    super.dispose();
-  }
-
-  Future<void> _confirm({bool allowReassign = false}) async {
-    if (_hasCreatedOffer) return; // prevents a duplicate confirm action
-    _hasCreatedOffer = true;
-    setState(() {
-      _phase = _ModalPhase.creating;
-      _errorMessage = null;
-      _conflict = null;
-    });
-
-    try {
-      final assignmentId = await ref.read(rescueCaseRepositoryProvider).createAssignmentOffer(
-        caseId: widget.caseId,
-        riderId: widget.rider.uid,
-        riderName: widget.rider.name,
-        riderType: widget.rider.type,
-        isDemo: widget.rider.isDemo,
-        allowReassign: allowReassign,
-        vehicle: widget.rider.vehicle,
-        plate: widget.rider.plate,
-      );
-      if (!mounted) return;
-
-      _assignmentId = assignmentId;
-      if (widget.rider.isDemo) {
-        _scheduleDemoResponse(caseId: widget.caseId, assignmentId: assignmentId, riderId: widget.rider.uid);
-      }
-      setState(() => _phase = _ModalPhase.pending);
-      _startElapsedTimer();
-      _listenForResponse(assignmentId);
-    } on ActiveAssignmentConflictException catch (e) {
-      _hasCreatedOffer = false; // let Reassign/View actually attempt again
-      if (mounted) {
-        setState(() {
-          _phase = _ModalPhase.conflict;
-          _conflict = e;
-        });
-      }
-    } on FirebaseException catch (error, stackTrace) {
-      _hasCreatedOffer = false; // let Retry actually attempt again
-      // Diagnostics for development — never shown to the admin, whose
-      // dialog only ever gets the generic message below.
-      debugPrint('Assign transporter failed');
-      debugPrint('code: ${error.code}');
-      debugPrint('message: ${error.message}');
-      debugPrint('plugin: ${error.plugin}');
-      debugPrintStack(stackTrace: stackTrace);
-      if (mounted) {
-        setState(() {
-          _phase = _ModalPhase.error;
-          _errorMessage = 'Could not assign this transporter. The previous offer may not have been cleared. Please retry.';
-        });
-      }
-    } catch (e) {
-      _hasCreatedOffer = false; // let Retry actually attempt again
-      if (mounted) {
-        setState(() {
-          _phase = _ModalPhase.error;
-          _errorMessage = 'Could not assign transporter: $e';
-        });
-      }
-    }
-  }
-
-  /// "Reassign Transporter" — the explicit workflow that's allowed to
-  /// supersede an existing accepted assignment (see
-  /// RescueCaseRepository.createAssignmentOffer's allowReassign doc
-  /// comment). Only offered when the conflict is itself an accepted
-  /// assignment, never a merely-pending one.
-  Future<void> _reassign() => _confirm(allowReassign: true);
-
-  /// Reacts to the persisted assignment doc rather than any local timer —
-  /// this is what lets the demo auto-response (running completely detached
-  /// from this dialog) still update the UI the moment it resolves, and
-  /// what would just as correctly reflect a real transporter's own
-  /// accept/reject action if one existed. Re-attaching (e.g. from Retry)
-  /// is safe — any prior subscription is cancelled first.
-  void _listenForResponse(String assignmentId) {
-    _assignmentSub?.cancel();
-    _assignmentSub = FirebaseFirestore.instance
-        .collection('cases')
-        .doc(widget.caseId)
-        .collection('transportAssignments')
-        .doc(assignmentId)
-        .snapshots()
-        .listen(
-          (snap) {
-        if (!mounted) return;
-        final data = snap.data();
-        if (data == null) return;
-        _applyAssignmentStatus(data['status'] as String?, data);
-      },
-      onError: (Object e) {
-        if (!mounted) return;
-        _elapsedTimer?.cancel();
-        setState(() {
-          _phase = _ModalPhase.error;
-          _errorMessage = 'Could not check transporter response: $e';
-        });
-      },
-    );
-  }
-
-  /// Single place that turns a persisted assignment status into a modal
-  /// phase — used by both the live listener and Retry's one-shot re-read,
-  /// so the two never disagree about what a given status means.
-  void _applyAssignmentStatus(String? status, Map<String, dynamic> data) {
-    final expiresAt = data['expiresAt'];
-    if (expiresAt is Timestamp) _expiresAt = expiresAt.toDate();
-    switch (status) {
-      case 'accepted':
-        if (_phase == _ModalPhase.accepted) return;
-        _elapsedTimer?.cancel();
-        // Shows the success state and stays open — the admin closes this
-        // (and only then does the caller navigate to Track Case) by
-        // pressing "View Transport Tracking" below, never automatically.
-        setState(() => _phase = _ModalPhase.accepted);
-        break;
-      case 'rejected':
-        if (_phase == _ModalPhase.declined) return;
-        _elapsedTimer?.cancel();
-        setState(() {
-          _phase = _ModalPhase.declined;
-          _rejectionReason = data['rejectionReason'] as String? ?? 'No reason given';
-        });
-        break;
-      case 'expired':
-      // No answer before the offer's deadline — marked by the
-      // expireTransportOffers function or a reconcile. Same next step as
-      // a decline: choose another transporter.
-        if (_phase == _ModalPhase.expired) return;
-        _elapsedTimer?.cancel();
-        setState(() => _phase = _ModalPhase.expired);
-        break;
-      case 'cancelled':
-      // Normally only reached via our own _back() — handled defensively
-      // in case the offer is ever cancelled by some other path. Stays
-      // open until the admin presses OK below — never auto-closes.
-        if (_phase == _ModalPhase.cancelled) return;
-        _elapsedTimer?.cancel();
-        setState(() => _phase = _ModalPhase.cancelled);
-        break;
-      case 'pending':
-      // Nothing to do — already showing the pending UI (or about to).
-        break;
-    }
-  }
-
-  void _startElapsedTimer() {
-    _pendingSince ??= DateTime.now(); // preserve original wait time across Retry
-    _elapsedTimer?.cancel();
-    _elapsedTimer = Timer.periodic(const Duration(seconds: 1), (_) {
-      if (!mounted) return;
-      setState(() {
-        _elapsed = DateTime.now().difference(_pendingSince!);
-        if (_elapsed >= _timeoutThreshold) _showTimeoutMessage = true;
-      });
-    });
-  }
-
-  /// "Back" — stops waiting and, after confirmation, cancels the pending
-  /// offer (never deletes it) rather than leaving the organization stuck
-  /// behind a nondismissible modal for a real transporter with no
-  /// accept/reject UI of their own yet. See RescueCaseRepository.cancelAssignment.
-  Future<void> _back() async {
-    // No offer was created (the create itself failed): nothing to cancel,
-    // just close.
-    if (_assignmentId == null) {
-      Navigator.of(context).pop(_DialogOutcome.cancelled);
-      return;
-    }
-    final confirmed = await showConfirmActionDialog(context, title: 'Stop waiting for this transporter?', message: 'The pending offer will be cancelled, and you can select another transporter.', confirmLabel: 'Stop and Cancel', cancelLabel: 'Keep Waiting', destructive: true);
-    if (confirmed != true || !mounted || _assignmentId == null) return;
-
-    _elapsedTimer?.cancel();
-    _assignmentSub?.cancel();
-    setState(() => _phase = _ModalPhase.cancelling);
-    try {
-      await ref.read(rescueCaseRepositoryProvider).cancelAssignment(
-        caseId: widget.caseId,
-        assignmentId: _assignmentId!,
-        reason: 'Cancelled by organization while waiting',
-      );
-      // Cancellation is confirmed written — show the cancelled state and
-      // wait for the admin to press OK (below) before closing. Never
-      // auto-closes, and never leaves the modal in a loading state.
-      if (mounted) setState(() => _phase = _ModalPhase.cancelled);
-    } catch (e) {
-      // The write actually failed — surface it with Retry rather than
-      // silently pretending the offer was cancelled (that would leave it
-      // still 'pending' in Firestore while the admin believes it's clear
-      // to pick another transporter).
-      if (mounted) {
-        setState(() {
-          _phase = _ModalPhase.error;
-          _errorMessage = 'Could not cancel this offer. The previous offer may not have been cleared. Please retry.';
-        });
-      }
-    }
-  }
-
-  /// Guards against a double-tap firing two concurrent retries — the
-  /// button is disabled while this is true (see _actions()).
-  bool _isRetrying = false;
-
-  /// "Retry" — never creates a second offer. If one already exists, re-reads
-  /// it fresh and re-attaches the listener; only attempts creation if no
-  /// offer exists yet at all (i.e. Retry from the [creating]-failure error
-  /// state, where [_confirm] never actually succeeded).
-  Future<void> _retry() async {
-    if (_isRetrying) return;
-    if (_assignmentId == null) {
-      await _confirm();
-      return;
-    }
-    setState(() {
-      _isRetrying = true;
-      _phase = _ModalPhase.pending;
-      _errorMessage = null;
-    });
-    try {
-      final doc = await FirebaseFirestore.instance
-          .collection('cases')
-          .doc(widget.caseId)
-          .collection('transportAssignments')
-          .doc(_assignmentId)
-          .get();
-      if (!mounted) return;
-      final data = doc.data();
-      if (!doc.exists || data == null) {
-        setState(() {
-          _phase = _ModalPhase.error;
-          _errorMessage = 'This assignment no longer exists.';
-        });
-        return;
-      }
-      final status = data['status'] as String?;
-      if (status == 'pending') {
-        _startElapsedTimer();
-        _listenForResponse(_assignmentId!);
-        setState(() => _phase = _ModalPhase.pending);
-      } else {
-        _applyAssignmentStatus(status, data);
-      }
-    } catch (e) {
-      if (mounted) {
-        setState(() {
-          _phase = _ModalPhase.error;
-          _errorMessage = 'Could not check transporter response: $e';
-        });
-      }
-    } finally {
-      if (mounted) setState(() => _isRetrying = false);
-    }
-  }
-
-  String get _title => switch (_phase) {
-    _ModalPhase.confirmation ||
-    _ModalPhase.creating ||
-    _ModalPhase.pending =>
-    'Confirm Transporter Assignment',
-    _ModalPhase.cancelling => 'Cancelling Offer',
-    _ModalPhase.accepted => 'Assignment Accepted',
-    _ModalPhase.declined => 'Assignment Declined',
-    _ModalPhase.expired => 'Offer Expired',
-    _ModalPhase.cancelled => 'Offer Cancelled',
-    _ModalPhase.error => _assignmentId == null ? 'Could Not Assign Transporter' : 'Could Not Check Response',
-    _ModalPhase.conflict => 'Active Transporter Assignment',
-  };
-
-  Widget _content(BuildContext context) => switch (_phase) {
-    _ModalPhase.confirmation => _confirmationContent(),
-    _ModalPhase.creating => _loadingContent('Creating assignment…'),
-    _ModalPhase.cancelling => _loadingContent('Cancelling the pending offer…'),
-    _ModalPhase.pending => _pendingContent(),
-    _ModalPhase.accepted => _acceptedContent(),
-    _ModalPhase.declined => _declinedContent(),
-    _ModalPhase.expired => _expiredContent(),
-    _ModalPhase.cancelled => _cancelledContent(),
-    _ModalPhase.error => _errorContent(),
-    _ModalPhase.conflict => _conflictContent(),
-  };
-
-  /// Replaces the old generic "This case already has an active rider
-  /// assignment." error with the actual transporter's identity/status when
-  /// resolvable, plus assignment id/status for development debugging when
-  /// it isn't (see ActiveAssignmentConflictException.hasKnownIdentity).
-  Widget _conflictContent() {
-    final c = _conflict!;
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(c.userMessage,
-            style: GoogleFonts.zain(fontSize: 14, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
-        const SizedBox(height: 10),
-        if (c.hasKnownIdentity) ...[
-          _infoRow('Status', c.status == TransportAssignmentStatus.pending ? 'Pending' : 'Accepted'),
-          if ((c.vehicle ?? '').isNotEmpty || (c.plate ?? '').isNotEmpty)
-            _infoRow('Vehicle', '${c.plate ?? 'Not provided'}  ${c.vehicle ?? 'Not provided'}'),
-          if (c.acceptedAt != null)
-            _infoRow('Accepted', _formatDialogTimestamp(c.acceptedAt!))
-          else if (c.offeredAt != null)
-            _infoRow('Offered', _formatDialogTimestamp(c.offeredAt!)),
-        ],
-        if (kDebugMode) _infoRow('Assignment ID (debug)', '${c.assignmentId} · ${c.status.name}'),
-      ],
-    );
-  }
-
-  String _formatDialogTimestamp(DateTime dt) =>
-      formatDateTime(dt);
-
-  Widget _confirmationContent() {
-    // Live case data, not a stale snapshot — a clinic saved moments ago
-    // should already show up here.
-    final liveData = ref.watch(caseDetailProvider(widget.caseId)).asData?.value?.raw ?? const <String, dynamic>{};
-    final clinicName = liveData['vetClinicName'] as String?;
-    final clinicAddress = liveData['vetClinicAddress'] as String?;
-
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        _infoRow('Transporter', '${widget.rider.name} (${widget.rider.type})'),
-        _infoRow(
-          'Distance',
-          widget.rider.distanceKm == null ? 'Location not shared' : '${widget.rider.distanceKm!.toStringAsFixed(1)} km',
-        ),
-        _infoRow('Vehicle', '${widget.rider.plate}  ${widget.rider.vehicle}'),
-        _infoRow(
-          'Selected Clinic',
-          (clinicName != null && clinicName.isNotEmpty)
-              ? (clinicAddress != null && clinicAddress.isNotEmpty ? '$clinicName\n$clinicAddress' : clinicName)
-              : 'No clinic selected',
-        ),
-      ],
-    );
-  }
-
-  Widget _loadingContent(String message) => Column(
-    mainAxisSize: MainAxisSize.min,
-    children: [
-      const SizedBox(
-          width: 36, height: 36, child: CircularProgressIndicator(strokeWidth: 3)),
-      const SizedBox(height: 16),
-      Text(message, textAlign: TextAlign.center, style: GoogleFonts.zain(fontSize: 13, color: AppColors.textSecondary)),
-    ],
-  );
-
-  Widget _pendingContent() => Column(
-    mainAxisSize: MainAxisSize.min,
-    children: [
-      const SizedBox(
-          width: 36, height: 36, child: CircularProgressIndicator(strokeWidth: 3, color: AppColors.yellowrspwn)),
-      const SizedBox(height: 16),
-      Text(widget.rider.name,
-          textAlign: TextAlign.center,
-          style: GoogleFonts.zain(fontSize: 15, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
-      const SizedBox(height: 8),
-      Container(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 5),
-        decoration: BoxDecoration(color: AppColors.yellowrspwn, borderRadius: BorderRadius.circular(20)),
-        child: Text('Pending',
-            style: GoogleFonts.zain(fontSize: 12, fontWeight: FontWeight.bold, color: AppColors.textPrimary)),
-      ),
-      const SizedBox(height: 16),
-      Text('Waiting for the transporter to respond…',
-          textAlign: TextAlign.center, style: GoogleFonts.zain(fontSize: 13, color: AppColors.textSecondary)),
-      if (_pendingSince != null) ...[
-        const SizedBox(height: 6),
-        Text('Waiting for ${_formatElapsed(_elapsed)}',
-            textAlign: TextAlign.center, style: GoogleFonts.zain(fontSize: 11, color: AppColors.textSecondary)),
-      ],
-      if (_expiresAt != null) ...[
-        const SizedBox(height: 2),
-        Text(offerExpiryLabel(_expiresAt, DateTime.now()),
-            textAlign: TextAlign.center, style: GoogleFonts.zain(fontSize: 11, color: AppColors.textSecondary)),
-      ],
-      // Purely informational — this never rejects anything on its own,
-      // it just tells the org their options instead of leaving them
-      // guessing behind an indefinite spinner.
-      if (_showTimeoutMessage) ...[
-        const SizedBox(height: 12),
-        Container(
-          padding: const EdgeInsets.all(10),
-          decoration: BoxDecoration(
-            color: AppColors.warning.withValues(alpha: 0.15),
-            borderRadius: BorderRadius.circular(10),
-            border: Border.all(color: AppColors.warning),
-          ),
-          child: Text(
-            'The transporter has not responded yet.\n'
-                'You may continue waiting, retry, or go back and select another transporter.',
-            textAlign: TextAlign.center,
-            style: GoogleFonts.zain(fontSize: 12, color: const Color(0xFF9C6B10)),
-          ),
-        ),
-      ],
-    ],
-  );
-
-  String _formatElapsed(Duration d) {
-    if (d.inMinutes < 1) return '${d.inSeconds}s';
-    return '${d.inMinutes}m ${d.inSeconds % 60}s';
-  }
-
-  Widget _cancelledContent() => Column(
-    mainAxisSize: MainAxisSize.min,
-    children: [
-      const Icon(Icons.cancel_outlined, color: AppColors.textSecondary, size: 40),
-      const SizedBox(height: 12),
-      Text('The pending offer to ${widget.rider.name} was cancelled.',
-          textAlign: TextAlign.center, style: GoogleFonts.zain(fontSize: 14, color: AppColors.textPrimary)),
-    ],
-  );
-
-  Widget _acceptedContent() => Column(
-    mainAxisSize: MainAxisSize.min,
-    children: [
-      const Icon(Icons.check_circle, color: AppColors.greenrspwn, size: 40),
-      const SizedBox(height: 12),
-      Text('Transporter accepted the assignment.',
-          textAlign: TextAlign.center, style: GoogleFonts.zain(fontSize: 14, color: AppColors.textPrimary)),
-    ],
-  );
-
-  Widget _declinedContent() => Column(
-    mainAxisSize: MainAxisSize.min,
-    crossAxisAlignment: CrossAxisAlignment.start,
-    children: [
-      Text('${widget.rider.name} declined the assignment.',
-          style: GoogleFonts.zain(fontSize: 14, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),
-      const SizedBox(height: 10),
-      _infoRow('Reason', _rejectionReason ?? 'No reason given'),
-    ],
-  );
-
-  Widget _expiredContent() => Text(
-    '${widget.rider.name} did not respond before the offer expired. Choose another transporter.',
-    style: GoogleFonts.zain(fontSize: 14, fontWeight: FontWeight.w600, color: AppColors.textPrimary),
-  );
-
-  Widget _errorContent() => Text(
-    _errorMessage ?? 'Could not check transporter response.',
-    style: GoogleFonts.zain(fontSize: 13, color: AppColors.error),
-  );
-
-  Widget _infoRow(String label, String value) => Padding(
-    padding: const EdgeInsets.only(bottom: 8),
-    child: Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(label,
-            style: GoogleFonts.zain(
-                fontSize: 11, fontWeight: FontWeight.w700, color: AppColors.textSecondary)),
-        Text(value, style: GoogleFonts.zain(fontSize: 14, color: AppColors.textPrimary)),
-      ],
-    ),
-  );
-
-  List<Widget> _actions(BuildContext context) => switch (_phase) {
-    _ModalPhase.confirmation => [
-      TextButton(
-        onPressed: () => Navigator.of(context).pop(_DialogOutcome.cancelled),
-        child: Text('Cancel',
-            style: GoogleFonts.zain(color: AppColors.textSecondary, fontWeight: FontWeight.w600)),
-      ),
-      ElevatedButton(
-        onPressed: _confirm,
-        style: AppButtons.primary,
-        child: Text('Confirm', style: GoogleFonts.zain(fontWeight: FontWeight.w700)),
-      ),
-    ],
-  // No dismiss affordance while a write is actually in flight — this
-  // is what "disable dismissal while the assignment write is being
-  // created" means in practice, alongside barrierDismissible:false
-  // at the call site.
-    _ModalPhase.creating || _ModalPhase.cancelling => const [],
-  // Accepted/cancelled never auto-close (see _applyAssignmentStatus/
-  // _back) — the admin closes them explicitly here, which is also
-  // the one moment the caller is allowed to navigate to Track Case.
-    _ModalPhase.accepted => [
-      // "Close" keeps the admin on Assign Transporter — the accepted
-      // card/state stays visible there, and continuing to tracking
-      // becomes a separate, deliberate next step instead of automatic.
-      TextButton(
-        onPressed: () => Navigator.of(context).pop(_DialogOutcome.acceptedStayHere),
-        child: Text('Close', style: GoogleFonts.zain(color: AppColors.textSecondary, fontWeight: FontWeight.w600)),
-      ),
-      ElevatedButton(
-        onPressed: () => Navigator.of(context).pop(_DialogOutcome.accepted),
-        style: AppButtons.primary,
-        child: Text('View Transport Tracking', style: GoogleFonts.zain(fontWeight: FontWeight.w700)),
-      ),
-    ],
-    _ModalPhase.cancelled => [
-      ElevatedButton(
-        onPressed: () => Navigator.of(context).pop(_DialogOutcome.offerCancelled),
-        style: AppButtons.primary,
-        child: Text('OK', style: GoogleFonts.zain(fontWeight: FontWeight.w700)),
-      ),
-    ],
-    _ModalPhase.pending => [
-      OutlinedButton(
-        onPressed: _back,
-        style: AppButtons.outline,
-        child: Text('Back', style: GoogleFonts.zain(fontWeight: FontWeight.w700)),
-      ),
-      ElevatedButton(
-        onPressed: _isRetrying ? null : _retry,
-        style: AppButtons.primary,
-        child: Text('Retry', style: GoogleFonts.zain(fontWeight: FontWeight.w700)),
-      ),
-    ],
-    _ModalPhase.declined || _ModalPhase.expired => [
-      ElevatedButton(
-        onPressed: () => Navigator.of(context).pop(_DialogOutcome.declined),
-        style: AppButtons.primary,
-        child: Text('Choose Another Transporter', style: GoogleFonts.zain(fontWeight: FontWeight.w700)),
-      ),
-    ],
-    // Always closable: an error must never trap the admin. A pending
-    // offer left behind stays visible on Assign Transporter, with its own
-    // View Pending / Cancel Offer.
-    _ModalPhase.error => [
-      TextButton(
-        onPressed: () => Navigator.of(context).pop(_DialogOutcome.cancelled),
-        child: Text('Close', style: GoogleFonts.zain(color: AppColors.textSecondary, fontWeight: FontWeight.w600)),
-      ),
-      if (_assignmentId != null)
-        OutlinedButton(
-          onPressed: _back,
-          style: AppButtons.outline,
-          child: Text('Cancel Offer', style: GoogleFonts.zain(fontWeight: FontWeight.w700)),
-        ),
-      ElevatedButton(
-        onPressed: _isRetrying ? null : _retry,
-        style: AppButtons.primary,
-        child: Text('Retry', style: GoogleFonts.zain(fontWeight: FontWeight.w700)),
-      ),
-    ],
-  // Never sends the admin back to an assign screen that will only
-  // fail the same way again: Pending offers only offer "View
-  // Pending"; Accepted assignments offer "Track Case" (bail out) and
-  // "Reassign Transporter" (the one path allowed to supersede it).
-    _ModalPhase.conflict => [
-      TextButton(
-        onPressed: () => Navigator.of(context).pop(_DialogOutcome.cancelled),
-        child: Text('Cancel',
-            style: GoogleFonts.zain(color: AppColors.textSecondary, fontWeight: FontWeight.w600)),
-      ),
-      if (_conflict!.status == TransportAssignmentStatus.pending)
-        ElevatedButton(
-          onPressed: () => Navigator.of(context).pop(_DialogOutcome.viewExisting),
-          style: AppButtons.primary,
-          child: Text('View Pending', style: GoogleFonts.zain(fontWeight: FontWeight.w700)),
-        )
-      else ...[
-        OutlinedButton(
-          onPressed: () => Navigator.of(context).pop(_DialogOutcome.viewExisting),
-          style: AppButtons.outline,
-          child: Text('Track Case', style: GoogleFonts.zain(fontWeight: FontWeight.w700)),
-        ),
-        ElevatedButton(
-          onPressed: _reassign,
-          style: AppButtons.primary,
-          child: Text('Reassign Transporter', style: GoogleFonts.zain(fontWeight: FontWeight.w700)),
-        ),
-      ],
-    ],
-  };
-
-  @override
-  Widget build(BuildContext context) {
-    // Blocks the system back gesture/button from dismissing the dialog
-    // while a write is in flight or it's about to auto-close — mirrors
-    // barrierDismissible:false's effect on barrier taps. Pending/error
-    // still block the system gesture specifically (the explicit in-dialog
-    // Back button is the sanctioned way out of those two, since it goes
-    // through the cancel-the-offer confirmation rather than abandoning the
-    // dialog with the offer left dangling).
-    final canPop =
-        _phase == _ModalPhase.confirmation ||
-        _phase == _ModalPhase.declined ||
-        _phase == _ModalPhase.expired ||
-        _phase == _ModalPhase.error ||
-        _phase == _ModalPhase.conflict;
-
-    return PopScope(
-      canPop: canPop,
-      child: AlertDialog(
-        backgroundColor: AppColors.background,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: Text(_title, style: GoogleFonts.tiltWarp(fontSize: 17, color: AppColors.textPrimary)),
-        content: SizedBox(width: 320, child: _content(context)),
-        actions: _actions(context),
-      ),
-    );
-  }
 }

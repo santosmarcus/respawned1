@@ -320,4 +320,13 @@ void main() {
       expect(kFailedOfferStatuses, isNot(contains('cancelled')));
     });
   });
+  group('transporter reachability', () {
+    test('needs a phone number and a shared location', () {
+      expect(isTransporterReachable(phone: '09171234567', lastLat: 14.6, lastLng: 121.0), isTrue);
+      expect(isTransporterReachable(phone: '  ', lastLat: 14.6, lastLng: 121.0), isFalse);
+      expect(isTransporterReachable(phone: null, lastLat: 14.6, lastLng: 121.0), isFalse);
+      expect(isTransporterReachable(phone: '09171234567', lastLat: null, lastLng: 121.0), isFalse);
+      expect(isTransporterReachable(phone: '09171234567', lastLat: 14.6, lastLng: null), isFalse);
+    });
+  });
 }

@@ -259,13 +259,56 @@ describe('system admin console', () => {
   });
 
   test('cannot change profiles or approve organizations directly', async () => {
-    await assertFails(as('sysadmin').doc('users/rider').update({ transporterVerificationStatus: 'approved', isVerified: true }));
+    await assertFails(as('sysadmin').doc('users/rider').update({ name: 'Changed' }));
+    await assertFails(as('sysadmin').doc('users/rider').update({ role: 'general' }));
     await assertFails(as('sysadmin').doc('organizations/orgD').update({ verificationStatus: 'approved' }));
+  });
+
+  test('reviews volunteer and transporter applications', async () => {
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      const db = ctx.firestore();
+      await db.doc('volunteerApplications/stranger').set({ uid: 'stranger', status: 'pending' });
+      await db.doc('transporterApplications/rider').set({ uid: 'rider', status: 'pending' });
+    });
+    const review = (status) => ({ status, reviewedBy: 'sysadmin', reviewedAt: new Date() });
+
+    await assertSucceeds(as('sysadmin').collection('volunteerApplications').where('status', '==', 'pending').get());
+    await assertSucceeds(as('sysadmin').doc('volunteerApplications/stranger').update(review('approved')));
+    await assertFails(as('sysadmin').doc('volunteerApplications/stranger').update({ status: 'approved', reviewedBy: 'someoneElse' }));
+
+    await assertSucceeds(as('sysadmin').collection('transporterApplications').where('status', '==', 'pending').get());
+    await assertSucceeds(as('sysadmin').doc('transporterApplications/rider').update(review('approved')));
+    // Verifying the transporter's account: only the two verification fields.
+    await assertSucceeds(as('sysadmin').doc('users/rider').update({ transporterVerificationStatus: 'approved', isVerified: true }));
+    await assertFails(as('sysadmin').doc('users/rider').update({ transporterVerificationStatus: 'approved', isVerified: false }));
+    // Only an account that applied.
+    await assertFails(as('sysadmin').doc('users/rider2').update({ transporterVerificationStatus: 'approved', isVerified: true }));
   });
 
   test('nobody can give themselves the role', async () => {
     await assertFails(as('newcomer').doc('users/newcomer').set({ role: 'system_admin' }));
     await assertFails(as('stranger').doc('users/stranger').update({ role: 'system_admin' }));
+  });
+});
+
+describe('one mobile number, one account', () => {
+  const withPhone = (uid, phone) => env.authenticatedContext(uid, { phone_number: phone }).firestore();
+
+  test('a profile can only list the number verified on the account', async () => {
+    await assertSucceeds(withPhone('stranger', '+639171234567').doc('users/stranger').update({ phone: '+639171234567' }));
+    await assertFails(withPhone('stranger', '+639171234567').doc('users/stranger').update({ phone: '+639189999999' }));
+    await assertFails(as('reporter').doc('users/reporter').update({ phone: '+639171234567' }));
+    await assertSucceeds(as('reporter').doc('users/reporter').update({ phone: '' }));
+  });
+
+  test('onboarding saves only the verified number', async () => {
+    const profile = { uid: 'fresh', role: 'general', isVerified: false };
+    await assertFails(as('fresh').doc('users/fresh').set({ ...profile, phone: '+639171234567' }));
+    await assertSucceeds(withPhone('fresh', '+639171234567').doc('users/fresh').set({ ...profile, phone: '+639171234567' }));
+  });
+
+  test('other profile changes still work without a verified number', async () => {
+    await assertSucceeds(as('reporter').doc('users/reporter').update({ displayName: 'R' }));
   });
 });
 

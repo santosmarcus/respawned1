@@ -7,6 +7,8 @@ import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import 'package:respawnd1/features/admin/animals/promote_adoptions_page.dart';
+import 'package:respawnd1/features/admin/donation/cash_out_sheets.dart';
 import 'package:respawnd1/core/models/rescue/rescue_status.dart';
 import 'package:respawnd1/core/utils/case_access.dart';
 import 'package:respawnd1/features/admin/adoption/post_adoption_details_page.dart';
@@ -186,6 +188,9 @@ class NotificationService {
     }
   }
 
+  /// Public so in-app notification lists route the same way as a tapped push.
+  static Future<Widget?> pageFor(Map<String, dynamic> data) => _pageFor(data);
+
   static Future<Widget?> _pageFor(Map<String, dynamic> data) async {
     final type = data['type'] as String? ?? '';
     final db = FirebaseFirestore.instance;
@@ -208,9 +213,38 @@ class NotificationService {
       case 'quarantine_ended':
       // respondToReferralShare: someone answered a referral link.
       case 'referral_response':
+      // notifyOrgAssistanceRequested: a reporter-led neglect/abuse report
+      // now asks the organization for help.
+      case 'org_assistance_requested':
+      // Staff pushes about one case (functions/dashboard_ops.js and
+      // functions/index.js): specialized handling needed, an unreviewed
+      // critical report, a rescue adoption request or a missed pickup.
+      case 'needs_specialized_assistance':
+      case 'critical_report_escalated':
+      case 'rescue_adoption_request':
+      case 'rescue_adoption_pickup_missed':
+      // The reporter is asked for a new photo; a rider is asked to check a
+      // reported location.
+      case 'case_live_proof_requested':
+      case 'verification_visit':
         final caseId = data['caseId'] as String?;
         if (caseId == null || caseId.isEmpty) return null;
         return _casePageFor(caseId);
+
+      // notifyCashOut (functions/index.js): money taken out needs a fund,
+      // or someone assigned one.
+      case 'cash_out_needs_assignment':
+      case 'cash_out_assigned':
+      case 'cash_out_returned':
+        return CashOutsPage(openId: data['cashOutId'] as String?);
+
+      // remindAdoptionPromotions (functions/adoption_promotion.js): time to
+      // post animals open for adoption to the Facebook Page.
+      case 'adoption_promotion_due':
+        return PromoteAdoptionsPage(
+          organizationId: data['organizationId'] as String?,
+          preselectedIds: promotionIdsFrom(data['animalIds']),
+        );
 
     // A transport offer was declined or expired (notifyStaffOfOfferOutcome,
     // functions/index.js): staff go straight to Assign Transporter while the
@@ -260,8 +294,8 @@ class NotificationService {
           isOwner: true,
         );
 
-      // sendFollowUpReminders (functions/index.js): the adopter's
-      // post-adoption check-ins, or staff's post-adoption details.
+    // sendFollowUpReminders (functions/index.js): the adopter's
+    // post-adoption check-ins, or staff's post-adoption details.
       case 'follow_up_reminder':
         final adoptionId = data['adoptionId'] as String?;
         if (adoptionId == null || adoptionId.isEmpty) return null;
@@ -271,8 +305,8 @@ class NotificationService {
         if (adoptionId == null || adoptionId.isEmpty) return null;
         return PostAdoptionDetailsPage(applicationId: adoptionId);
 
-      // functions/adoptions.js tellApplicant: no-show, booking reminder or
-      // withdrawal of the applicant's own application.
+    // functions/adoptions.js tellApplicant: no-show, booking reminder or
+    // withdrawal of the applicant's own application.
       case 'adoption_no_show_rebook':
       case 'adoption_no_show_closed':
       case 'adoption_booking_reminder':
@@ -281,7 +315,7 @@ class NotificationService {
         if (adoptionId == null || adoptionId.isEmpty) return null;
         return adopterPageForAdoption(adoptionId);
 
-      // reviewOrganization (functions/index.js): the owner's live status page.
+    // reviewOrganization (functions/index.js): the owner's live status page.
       case 'organization_review':
         final organizationId = data['organizationId'] as String?;
         if (organizationId == null || organizationId.isEmpty) return null;
