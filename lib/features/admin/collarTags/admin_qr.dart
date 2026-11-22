@@ -6,11 +6,11 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:qr_flutter/qr_flutter.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 import 'dart:io';
 import 'package:respawnd1/app_theme.dart';
+import 'package:respawnd1/core/widgets/tag_qr_image.dart';
 import 'package:respawnd1/features/collartag/collar_tag_data_model.dart';
 import 'package:respawnd1/core/constants/app.links.dart';
 import 'package:respawnd1/core/widgets/app_messages.dart';
@@ -142,7 +142,9 @@ class _AdminQrGeneratorScreenState extends State<AdminQrGeneratorScreen> {
   }
 
   // QR helpers
-  String _qrData(CollarTagData tag) => AppLinks.tagUrl(tag.tagId!);
+  // Null (no QR drawn) rather than a link with no tag id in it.
+  String? _qrData(CollarTagData tag) =>
+      (tag.tagId ?? '').isEmpty ? null : AppLinks.tagUrl(tag.tagId!);
 
   Future<Uint8List?> _captureQr() async {
     try {
@@ -627,7 +629,7 @@ class _StatusPill extends StatelessWidget {
 // QR preview card
 class _QrPreviewCard extends StatelessWidget {
   final CollarTagData tag;
-  final String qrData;
+  final String? qrData;
   final GlobalKey cardKey;
   const _QrPreviewCard(
       {required this.tag, required this.qrData, required this.cardKey});
@@ -676,20 +678,7 @@ class _QrPreviewCard extends StatelessWidget {
                 color: Colors.white,
                 borderRadius: BorderRadius.circular(10),
               ),
-              child: QrImageView(
-                data: qrData,
-                version: QrVersions.auto,
-                size: 160,
-                backgroundColor: Colors.white,
-                eyeStyle: const QrEyeStyle(
-                  eyeShape: QrEyeShape.square,
-                  color: Colors.black,
-                ),
-                dataModuleStyle: const QrDataModuleStyle(
-                  dataModuleShape: QrDataModuleShape.square,
-                  color: Colors.black,
-                ),
-              ),
+              child: TagQrImage(data: qrData),
             ),
             const SizedBox(height: 6),
             Text(

@@ -1967,6 +1967,10 @@ Object.assign(exports, require('./referral_shares')({notifyStaff, orgStaffUids})
 // Public copy of each animal for non-staff readers — see functions/public_animals.js.
 exports.syncPublicAnimal = require('./public_animals').syncPublicAnimal;
 
+// Sponsorship listings: open / fully funded from their recorded money
+// (functions/sponsorship_funding.js).
+exports.syncSponsorshipFunding = require('./sponsorship_funding').syncSponsorshipFunding;
+
 // ---- Organization verification review ------------------------------------
 //
 // Platform staff (users/{uid}.role 'admin' or 'ngo_staff') and system admins

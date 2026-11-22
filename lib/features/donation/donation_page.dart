@@ -349,6 +349,9 @@ class _DonationPageState extends State<DonationPage> {
 
         final campaigns = snapshot.data!.docs.map((doc) => DonationListing.fromFirestore(doc)).where((c) {
           if (c.isEnded) return false; // drafts, archived and finished listings
+          // Fully funded animals leave the open opportunities until their
+          // funds run low again (sponsorship_funding_rules.js).
+          if (c.isFullyFunded) return false;
           final q = _searchQuery.toLowerCase();
           return q.isEmpty || (c.animalName?.toLowerCase().contains(q) ?? false) || c.organizer.toLowerCase().contains(q);
         }).toList();

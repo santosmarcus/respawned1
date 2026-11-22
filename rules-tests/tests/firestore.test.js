@@ -506,20 +506,87 @@ describe('animals', () => {
     await assertSucceeds(as('staffA').doc('animals/animalA/vaccinations/v1').set({ name: 'Rabies' }));
   });
 
-  // Animal Management > Add QR Tag / New Code / Remove
-  // (AnimalRecordRepository.ensureQrTag, regenerateQrTag, removeQrTag).
-  test("the owning organization's records staff add, replace and remove QR tags", async () => {
+  // Collar tags (QR and NFC): animalTags/{code} registry + the animal's
+  // qrTagId / nfcTagId (AnimalRecordRepository.registerTag / removeTag).
+  const reg = (code, animalId = 'animalA', type = 'qr', organizationId = 'orgA') =>
+    ({ code, animalId, organizationId, type, active: true, createdAt: FieldValue.serverTimestamp() });
+
+  async function registerAs(uid, animalId, code, type = 'qr', extra = {}) {
+    const db = as(uid);
+    const batch = db.batch();
+    batch.set(db.doc(`animalTags/${code}`), reg(code, animalId, type));
+    batch.update(db.doc(`animals/${animalId}`), { [type === 'qr' ? 'qrTagId' : 'nfcTagId']: code, ...extra });
+    return batch.commit();
+  }
+
+  test("the owning organization's records staff register, replace and remove QR and NFC tags", async () => {
     const log = (eventType) => ({ animalId: 'animalA', eventType, action: eventType, timestamp: FieldValue.serverTimestamp() });
-    await assertSucceeds(as('staffA').doc('animals/animalA').update({ qrTagId: 'ABCD2345', updatedAt: FieldValue.serverTimestamp() }));
+    await assertSucceeds(registerAs('staffA', 'animalA', 'ABCD2345', 'qr'));
     await assertSucceeds(as('staffA').collection('animals/animalA/managementLogs').add(log('qrAssigned')));
-    await assertSucceeds(as('staffA').doc('animals/animalA').update({ qrTagId: 'WXYZ6789', updatedAt: FieldValue.serverTimestamp() }));
-    await assertSucceeds(as('staffA').collection('animals/animalA/managementLogs').add(log('qrRegenerated')));
-    await assertSucceeds(as('staffA').doc('animals/animalA').update({ qrTagId: FieldValue.delete(), updatedAt: FieldValue.serverTimestamp() }));
-    await assertSucceeds(as('staffA').collection('animals/animalA/managementLogs').add(log('qrRemoved')));
+    await assertSucceeds(registerAs('staffA', 'animalA', 'NFCC2345', 'nfc'));
+    // Replace: new code registered, old one retired.
+    const db = as('staffA');
+    const batch = db.batch();
+    batch.set(db.doc('animalTags/WXYZ6789'), reg('WXYZ6789'));
+    batch.update(db.doc('animals/animalA'), { qrTagId: 'WXYZ6789' });
+    batch.update(db.doc('animalTags/ABCD2345'), { active: false, deactivatedAt: FieldValue.serverTimestamp() });
+    await assertSucceeds(batch.commit());
     for (const uid of ['carerA', 'staffB', 'stranger']) {
-      await assertFails(as(uid).doc('animals/animalA').update({ qrTagId: 'ABCD2345' }));
+      await assertFails(registerAs(uid, 'animalA', 'EFGH2345'));
       await assertFails(as(uid).collection('animals/animalA/managementLogs').add(log('qrAssigned')));
     }
+  });
+
+  test('a tag code on an animal must be registered to that animal', async () => {
+    await assertFails(as('staffA').doc('animals/animalA').update({ qrTagId: 'ABCD2345' }));
+    await assertFails(as('staffA').doc('animals/animalA').update({ nfcTagId: 'ABCD2345' }));
+    await env.withSecurityRulesDisabled((ctx) => ctx.firestore().doc('animalTags/OTHR2345').set(reg('OTHR2345', 'animalB', 'qr', 'orgB')));
+    await assertFails(as('staffA').doc('animals/animalA').update({ qrTagId: 'OTHR2345' }));
+  });
+
+  test('a code belongs to one animal: no duplicates, no moving, no reuse', async () => {
+    await assertSucceeds(registerAs('staffA', 'animalA', 'ABCD2345'));
+    await env.withSecurityRulesDisabled((ctx) => ctx.firestore().doc('animals/animalA2').set({ name: 'Two', organizationId: 'orgA' }));
+    // Registering the same code again for another animal is an update of the existing doc: refused.
+    await assertFails(registerAs('staffA', 'animalA2', 'ABCD2345'));
+    await assertFails(as('staffA').doc('animalTags/ABCD2345').update({ animalId: 'animalA2' }));
+    await assertSucceeds(as('staffA').doc('animalTags/ABCD2345').update({ active: false, deactivatedAt: FieldValue.serverTimestamp() }));
+    await assertFails(as('staffA').doc('animalTags/ABCD2345').update({ active: true }));
+    await assertFails(as('staffA').doc('animalTags/ABCD2345').delete());
+    // Anyone signed in can resolve a scanned code; nobody signed out.
+    await assertSucceeds(as('stranger').doc('animalTags/ABCD2345').get());
+  });
+
+  test('adoptable needs a registered collar tag', async () => {
+    await env.withSecurityRulesDisabled((ctx) =>
+      ctx.firestore().doc('animals/notReady').set({ name: 'N', organizationId: 'orgA', adoptionStatus: 'not_ready' }));
+    const ready = { adoptionStatus: 'adoptable', adoptionReadiness: { checked: true } };
+    await assertFails(as('staffA').doc('animals/notReady').update(ready));
+    await assertSucceeds(registerAs('staffA', 'notReady', 'NFCA2345', 'nfc'));
+    await assertSucceeds(as('staffA').doc('animals/notReady').update(ready));
+    // A new record can't be created adoptable or with a tag.
+    await assertFails(as('staffA').collection('animals').add({ name: 'K', organizationId: 'orgA', ...ready }));
+    await assertFails(as('staffA').collection('animals').add({ name: 'K', organizationId: 'orgA', qrTagId: 'NFCA2345' }));
+  });
+
+  test('removing the only tag takes the animal off adoption', async () => {
+    await env.withSecurityRulesDisabled((ctx) =>
+      ctx.firestore().doc('animals/tagged').set({ name: 'T', organizationId: 'orgA', adoptionStatus: 'not_ready' }));
+    await assertSucceeds(registerAs('staffA', 'tagged', 'QRQR2345', 'qr', { adoptionStatus: 'adoptable', adoptionReadiness: { checked: true } }));
+    const db = as('staffA');
+    const keepListed = db.batch();
+    keepListed.update(db.doc('animalTags/QRQR2345'), { active: false, deactivatedAt: FieldValue.serverTimestamp() });
+    keepListed.update(db.doc('animals/tagged'), { qrTagId: FieldValue.delete() });
+    await assertFails(keepListed.commit());
+    const unlist = db.batch();
+    unlist.update(db.doc('animalTags/QRQR2345'), { active: false, deactivatedAt: FieldValue.serverTimestamp() });
+    unlist.update(db.doc('animals/tagged'), { qrTagId: FieldValue.delete(), adoptionStatus: 'not_ready' });
+    await assertSucceeds(unlist.commit());
+  });
+
+  test('an animal listed before the tag rule can still be re-saved without touching tags', async () => {
+    // animalA is seeded adoptable with no tag.
+    await assertSucceeds(as('staffA').doc('animals/animalA').update({ name: 'Mochi B' }));
   });
 });
 
@@ -591,21 +658,33 @@ describe('animal records and public profiles', () => {
 describe('adoption readiness gate', () => {
   const readiness = { confirmedBy: 'staffA', items: ['health'] };
 
-  test('a new adoptable record needs the readiness checklist', async () => {
+  const tag = (animalId, code) => env.withSecurityRulesDisabled(async (ctx) => {
+    const db = ctx.firestore();
+    await db.doc(`animalTags/${code}`).set({ code, animalId, organizationId: 'orgA', type: 'qr', active: true });
+    await db.doc(`animals/${animalId}`).update({ qrTagId: code });
+  });
+
+  // A new record has no registered collar tag yet, so it is never created
+  // adoptable, checklist or not.
+  test('a new record is created not ready, never adoptable', async () => {
     await assertFails(as('staffA').doc('animals/n1').set({ organizationId: 'orgA', adoptionStatus: 'adoptable' }));
-    await assertSucceeds(as('staffA').doc('animals/n2').set({ organizationId: 'orgA', adoptionStatus: 'adoptable', adoptionReadiness: readiness }));
+    await assertFails(as('staffA').doc('animals/n2').set({ organizationId: 'orgA', adoptionStatus: 'adoptable', adoptionReadiness: readiness }));
     await assertSucceeds(as('staffA').doc('animals/n3').set({ organizationId: 'orgA', adoptionStatus: 'not_ready' }));
   });
 
-  test('flipping not_ready to adoptable needs it; re-saves and releases do not', async () => {
+  test('flipping not_ready to adoptable needs the checklist and a tag; re-saves do not', async () => {
     await env.withSecurityRulesDisabled(async (ctx) => {
       const db = ctx.firestore();
       await db.doc('animals/nr').set({ organizationId: 'orgA', adoptionStatus: 'not_ready' });
       await db.doc('animals/res').set({ organizationId: 'orgA', adoptionStatus: 'reserved' });
     });
+    await tag('nr', 'NRNR2345');
     await assertFails(as('staffA').doc('animals/nr').update({ adoptionStatus: 'adoptable' }));
     await assertSucceeds(as('staffA').doc('animals/nr').update({ adoptionStatus: 'adoptable', adoptionReadiness: readiness }));
     await assertSucceeds(as('staffA').doc('animals/animalA').update({ name: 'Mochi II' }));
+    // A released reservation skips the checklist but still needs a tag.
+    await assertFails(as('staffA').doc('animals/res').update({ adoptionStatus: 'adoptable' }));
+    await tag('res', 'RESR2345');
     await assertSucceeds(as('staffA').doc('animals/res').update({ adoptionStatus: 'adoptable' }));
   });
 });

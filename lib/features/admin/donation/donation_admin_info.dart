@@ -106,6 +106,20 @@ class _InfoBodyState extends ConsumerState<_InfoBody> {
           ].join(' · '),
           style: GoogleFonts.zain(fontSize: 13, color: AppColors.textSecondary),
         ),
+        // Sponsorship funding: available balance against the monthly amount
+        // (functions/sponsorship_funding_rules.js). Reopens on its own when
+        // spending brings it back under.
+        if (isSponsorship && !c.isEnded)
+          Padding(
+            padding: const EdgeInsets.only(top: 6),
+            child: _tag(
+              c.isFullyFunded
+                  ? 'Fully funded · ${formatPesoExact(c.availableBalance)} available'
+                  : 'Open for sponsorship · ${formatPesoExact(c.availableBalance)} of '
+                      '${c.monthlyAmount != null ? formatPesoExact(c.monthlyAmount!) : '—'} a month',
+              c.isFullyFunded ? AppColors.lavenderrspwn : AppColors.greenrspwn,
+            ),
+          ),
         if (c.purposeTags.isNotEmpty || c.restricted)
           Padding(
             padding: const EdgeInsets.only(top: 6),

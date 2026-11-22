@@ -118,23 +118,14 @@ class AdoptionApplicationService {
     final uid = _au.currentUser!.uid;
     final docRef = _adoptions.doc();
 
-    // Government ID / Proof of Address are the only two single-file
-    // uploads left in this Future.wait — this list's length must always
-    // match the two unpack lines directly below it. Home Photos is a
-    // variable-length list and is uploaded separately via
-    // _uploadHomePhotos precisely so it can never desync this fixed-size
-    // unpack again (this positional mismatch — a disabled third upload
-    // shrinking this list without the indices below being renumbered —
-    // was the exact cause of the RangeError this replaces).
-    final results = await Future.wait([
-      _uploadFile(form.governmentIdFile, 'government_id', docRef.id),
-      _uploadFile(form.proofOfAddressFile, 'proof_of_address', docRef.id),
-      //_uploadFile(_digitalSignatureFile, 'digital_signature', docRef.id),
-    ]);
+    // Government ID is the only single-file upload. (Proof of Address is
+    // no longer asked for.) Home Photos is a variable-length list,
+    // uploaded separately via _uploadHomePhotos.
+    final governmentIdUrl =
+        await _uploadFile(form.governmentIdFile, 'government_id', docRef.id);
 
     // Nothing newly picked: keep the file uploaded in an earlier session.
-    form.governmentIdUrl = results[0] ?? form.governmentIdUrl;
-    form.proofOfAddressUrl = results[1] ?? form.proofOfAddressUrl;
+    form.governmentIdUrl = governmentIdUrl ?? form.governmentIdUrl;
 
     ///_digitalSignatureUrl = results[2];
 
@@ -218,6 +209,9 @@ class AdoptionApplicationService {
     },
     'uploads': {
     'governmentId': form.governmentIdUrl,
+    // No longer asked for; only carried over from an application resumed
+    // from an earlier session that already had one.
+    if ((form.proofOfAddressUrl ?? '').isNotEmpty)
     'proofOfAddress': form.proofOfAddressUrl,
     //'digitalSignature': _digitalSignatureUrl,
     // A list, not a single URL — every uploaded home photo is kept,

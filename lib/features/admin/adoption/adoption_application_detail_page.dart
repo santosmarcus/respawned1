@@ -1043,13 +1043,14 @@ class _DocumentsSection extends StatefulWidget {
   final bool initiallyExpanded;
   const _DocumentsSection({super.key, required this.app, this.initiallyExpanded = false});
 
-  /// Government ID, Proof of Address, Home Photos.
-  static const kDocumentCount = 3;
+  /// The required documents: Government ID and Home Photos. (Proof of
+  /// Address is no longer asked for; an older application's is still
+  /// shown, but not counted.)
+  static const kDocumentCount = 2;
 
   /// How many of the [kDocumentCount] documents have at least one file.
   static int providedCount(Map uploads) => [
         _urlsFor(uploads['governmentId']),
-        _urlsFor(uploads['proofOfAddress']),
         _urlsFor(uploads['homePhotos']),
       ].where((urls) => urls.isNotEmpty).length;
 
@@ -1119,7 +1120,9 @@ class _DocumentsSectionState extends State<_DocumentsSection> {
           if (expanded) ...[
             const SizedBox(height: 8),
             _DocumentRow(label: 'Government ID', urls: governmentId),
-            _DocumentRow(label: 'Proof of Address', urls: proofOfAddress),
+            // Older applications only: no longer asked for.
+            if (proofOfAddress.isNotEmpty)
+              _DocumentRow(label: 'Proof of Address', urls: proofOfAddress),
             const SizedBox(height: 4),
             Text('Home Photos${homePhotos.length > 1 ? ' (${homePhotos.length})' : ''}',
                 style: GoogleFonts.zain(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.textPrimary)),

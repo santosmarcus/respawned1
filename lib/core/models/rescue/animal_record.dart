@@ -183,6 +183,9 @@ class AnimalRecord {
   final bool publicProfileHidden;
   /// Printed/attached QR tag for this animal (P3-23). Null until assigned.
   final String? qrTagId;
+  /// Code written to this animal's NFC collar chip. Null until registered.
+  /// Both codes are registered in `animalTags` (animal_tag_codes.dart).
+  final String? nfcTagId;
   /// Day-to-day shelter status set by an admin; null until first set.
   final CareStatus? careStatus;
   final DateTime? deceasedAt;
@@ -244,6 +247,7 @@ class AnimalRecord {
     required this.archived,
     this.publicProfileHidden = false,
     this.qrTagId,
+    this.nfcTagId,
     this.careStatus,
     required this.deceasedAt,
     required this.deceasedCause,
@@ -264,6 +268,17 @@ class AnimalRecord {
 
   bool get hasSourceCase => linkedCaseId.isNotEmpty;
   bool get isAdoptable => adoptionStatus == 'adoptable';
+
+  /// Has a QR or NFC collar tag code. firestore.rules only accepts a code
+  /// here that is registered to this animal; codes from before the registry
+  /// are registered on first use (AnimalRecordRepository.hasRegisteredCollarTag).
+  bool get hasCollarTag => (qrTagId ?? '').isNotEmpty || (nfcTagId ?? '').isNotEmpty;
+
+  /// "QR · NFC", "QR", "NFC" or "None": which collar tags are registered.
+  String get collarTagSummary {
+    final parts = [if ((qrTagId ?? '').isNotEmpty) 'QR', if ((nfcTagId ?? '').isNotEmpty) 'NFC'];
+    return parts.isEmpty ? 'None' : parts.join(' · ');
+  }
   bool get isReserved => adoptionStatus == 'reserved';
   bool get isAdopted => adoptionStatus == 'adopted';
   bool get isDeceased => adoptionStatus == 'deceased' || status == 'deceased';
@@ -413,6 +428,7 @@ class AnimalRecord {
       archived: parseBool(data['archived']),
       publicProfileHidden: parseBool(data['publicProfileHidden']),
       qrTagId: parseOptionalString(data['qrTagId']),
+      nfcTagId: parseOptionalString(data['nfcTagId']),
       careStatus: CareStatus.fromFirestoreValue(parseOptionalString(data['careStatus'])),
       deceasedAt: deceasedAtRaw is Timestamp ? deceasedAtRaw.toDate() : null,
       deceasedCause: parseOptionalString(data['deceasedCause']),

@@ -1366,6 +1366,45 @@ service cloud.firestore {
         request.resource.data.get('adoptionReadiness', null) is map;
     }
 
+    // ---- Collar tags (QR and NFC; core/utils/animal_tag_codes.dart) ----
+    // animalTags/{code} registers each code to one animal. getAfter, so the
+    // registry entry and the animal update written in one transaction
+    // (AnimalRecordRepository.registerTag) are checked together.
+    function tagPath(code) {
+      return /databases/$(database)/documents/animalTags/$(code);
+    }
+
+    function tagRegisteredTo(animalId, code) {
+      return code is string && code != '' &&
+        existsAfter(tagPath(code)) &&
+        getAfter(tagPath(code)).data.get('animalId', '') == animalId &&
+        getAfter(tagPath(code)).data.get('active', false) == true;
+    }
+
+    function hasRegisteredTag(animalId) {
+      return tagRegisteredTo(animalId, request.resource.data.get('qrTagId', '')) ||
+        tagRegisteredTo(animalId, request.resource.data.get('nfcTagId', ''));
+    }
+
+    // A new or changed tag code on the animal must be registered to it.
+    function tagFieldsOk(animalId) {
+      return (!changedAny(['qrTagId']) || request.resource.data.get('qrTagId', '') == '' ||
+          tagRegisteredTo(animalId, request.resource.data.qrTagId)) &&
+        (!changedAny(['nfcTagId']) || request.resource.data.get('nfcTagId', '') == '' ||
+          tagRegisteredTo(animalId, request.resource.data.nfcTagId));
+    }
+
+    // Adoptable needs a registered collar tag: to become adoptable (from
+    // any other status, a released reservation included), and to stay
+    // adoptable while a tag is changed or removed. An animal listed before
+    // this rule, without a tag, can still be re-saved as long as its tags
+    // aren't touched. Not overridable, unlike the readiness checklist.
+    function collarTagOnUpdateOk(animalId) {
+      return request.resource.data.get('adoptionStatus', '') != 'adoptable' ||
+        (resource.data.get('adoptionStatus', '') == 'adoptable' && !changedAny(['qrTagId', 'nfcTagId'])) ||
+        hasRegisteredTag(animalId);
+    }
+
     // The full animal record: the owning organization's staff and carers,
     // platform staff, and the user it is reserved for or adopted by. Staff
     // list queries filter on organizationId (AnimalRecordRepository's
@@ -1389,10 +1428,14 @@ service cloud.firestore {
 
     match /animals/{animalId} {
       allow read: if canReadAnimal(resource.data);
+      // A new record has no registered tag yet (tags are registered to an
+      // existing record), so it can't be created adoptable.
       allow create: if canRecordOf(request.resource.data.get('organizationId', ''), ['rescue', 'animals', 'adoptions']) &&
-        readinessOnCreateOk();
+        readinessOnCreateOk() &&
+        request.resource.data.get('adoptionStatus', '') != 'adoptable' &&
+        request.resource.data.get('qrTagId', '') == '' && request.resource.data.get('nfcTagId', '') == '';
       allow update: if canStaffAnimal(resource.data) && orgStampOk(['rescue', 'animals', 'adoptions']) &&
-        readinessOnUpdateOk();
+        readinessOnUpdateOk() && tagFieldsOk(animalId) && collarTagOnUpdateOk(animalId);
       allow delete: if isPlatformStaff();
 
       // Dose records: daily care staff of the owning org record the doses
@@ -1439,6 +1482,32 @@ service cloud.firestore {
     // function (functions/public_animals.js): the fields meant for the
     // public and a yes/no health summary. Exists while the animal is not
     // archived, hidden or deceased.
+    // Collar tag registry (AnimalRecordRepository.registerTag): one doc per
+    // QR/NFC code, the doc id being the code. Anyone signed in may look up
+    // a scanned code (it only names the animal, whose public profile is
+    // readable anyway). The animal's staff register codes for it and
+    // retire them; a code never moves to another animal, is never
+    // reactivated and never deleted, so it can't be reused for a
+    // different animal.
+    match /animalTags/{code} {
+      allow get: if signedIn();
+      allow list: if signedIn() && canStaffAnimal(resource.data);
+      allow create: if code.matches('^[A-Z0-9]{6,16}$') &&
+        request.resource.data.get('code', '') == code &&
+        request.resource.data.get('type', '') in ['qr', 'nfc'] &&
+        request.resource.data.get('active', false) == true &&
+        request.resource.data.get('animalId', '') is string &&
+        request.resource.data.animalId != '' &&
+        canStaffAnimal(get(animalPath(request.resource.data.animalId)).data) &&
+        request.resource.data.get('organizationId', '') ==
+          get(animalPath(request.resource.data.animalId)).data.get('organizationId', '');
+      allow update: if canStaffAnimal(get(animalPath(resource.data.animalId)).data) &&
+        resource.data.get('active', false) == true &&
+        request.resource.data.get('active', true) == false &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['active', 'deactivatedAt']);
+      allow delete: if false;
+    }
+
     match /publicAnimals/{animalId} {
       allow read: if signedIn();
       allow write: if false;
@@ -2007,7 +2076,9 @@ service cloud.firestore {
         'transporterApplications', 'auditLogs', 'orgExpenses', 'communityAdoptionCheckIns',
         'communityAdoptionRequests',
         'referralShares', 'possibleMatches', 'petAlertChats',
-        'collarTags', 'rescueSessions'
+        'collarTags', 'rescueSessions',
+        // Shelter animal collar tag registry: its own block above.
+        'animalTags'
       ]);
     }
   }

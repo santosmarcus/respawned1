@@ -220,7 +220,9 @@ class _AdoptionFilters {
 
     if (documentsComplete != null) {
       final uploads = (a.raw['uploads'] as Map?) ?? const {};
-      final complete = _hasUpload(uploads['governmentId']) && _hasUpload(uploads['proofOfAddress']);
+      // The required uploads: Government ID and Home Photos (Proof of
+      // Address is no longer asked for).
+      final complete = _hasUpload(uploads['governmentId']) && _hasUpload(uploads['homePhotos']);
       if (complete != documentsComplete) return false;
     }
 

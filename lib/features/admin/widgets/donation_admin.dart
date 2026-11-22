@@ -331,6 +331,11 @@ class CampaignCard extends StatelessWidget {
                           overflow: TextOverflow.ellipsis),
                     ),
                     if (listing.status != 'active') ...[const SizedBox(width: 6), CampaignStatusChip(listing.status)],
+                    // Sponsorship funding (sponsorship_funding_rules.js).
+                    if (listing.type == 'sponsorship' && !listing.isEnded && listing.isFullyFunded) ...[
+                      const SizedBox(width: 6),
+                      DonationPill('Fully funded', const Color(0xFF2E7D32)),
+                    ],
                     const Icon(Icons.chevron_right, size: 20, color: AppColors.textPrimary),
                   ],
                 ),

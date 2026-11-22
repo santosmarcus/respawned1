@@ -5,7 +5,7 @@
 // re-runs the staff checks, so a long schedule must still fit Firestore's
 // per-request limits.
 import { after, before, beforeEach, test } from 'node:test';
-import { assertSucceeds } from '@firebase/rules-unit-testing';
+import { assertFails, assertSucceeds } from '@firebase/rules-unit-testing';
 import firebase from 'firebase/compat/app';
 import { createEnv, seed } from './setup.js';
 
@@ -51,11 +51,10 @@ test('a release with a year of weekly follow-ups is allowed', async () => {
   await assertSucceeds(releaseBatch(as('staffA'), 52));
 });
 
-test('unreserve returns a reserved animal to adoptable', async () => {
-  const db = as('staffA');
+const unreserveBatch = (db, adoptionStatus) => {
   const batch = db.batch();
   batch.update(db.doc('animals/animalA'), {
-    adoptionStatus: 'adoptable',
+    adoptionStatus,
     reservedForUserId: FieldValue.delete(), reservedApplicationId: FieldValue.delete(), reservedAt: FieldValue.delete(),
     updatedAt: FieldValue.serverTimestamp(),
   });
@@ -63,5 +62,21 @@ test('unreserve returns a reserved animal to adoptable', async () => {
     reservedAt: FieldValue.delete(),
     statusHistory: FieldValue.arrayUnion({ status: 'Reservation cleared.' }),
   });
-  await assertSucceeds(batch.commit());
+  return batch.commit();
+};
+
+test('unreserve returns a tagged animal to adoptable', async () => {
+  await env.withSecurityRulesDisabled(async (ctx) => {
+    const db = ctx.firestore();
+    await db.doc('animalTags/ABCD2345').set({ code: 'ABCD2345', animalId: 'animalA', organizationId: 'orgA', type: 'qr', active: true });
+    await db.doc('animals/animalA').update({ qrTagId: 'ABCD2345' });
+  });
+  await assertSucceeds(unreserveBatch(as('staffA'), 'adoptable'));
+});
+
+// AdoptionApplicationRepository._statusAfterReservation: without a
+// registered collar tag the animal goes back to not_ready instead.
+test('unreserve of an untagged animal goes to not_ready, never adoptable', async () => {
+  await assertFails(unreserveBatch(as('staffA'), 'adoptable'));
+  await assertSucceeds(unreserveBatch(as('staffA'), 'not_ready'));
 });

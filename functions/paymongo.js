@@ -15,6 +15,7 @@ const {recountActiveSponsors, recountAllSponsorships} = require('./sponsor_count
 const admin = require('firebase-admin');
 const {requireOrgPermission} = require('./org_access');
 const cashOutRules = require('./cash_out_rules');
+const sponsorshipFunding = require('./sponsorship_funding_rules');
 const {completedCampaignFields, certificateBenefit, issueCertificate, formatPeso} = require('./donation_common');
 
 // index.js calls admin.initializeApp() before requiring this module.
@@ -482,6 +483,20 @@ exports.createDonationCheckout = onCall({secrets: [paymongoSecretKey]}, async (r
   }
   if (c.isActive === false || (c.date instanceof Timestamp && c.date.toMillis() < Date.now())) {
     throw new HttpsError('failed-precondition', 'This campaign has ended.');
+  }
+  // A fully funded sponsorship is out of the open opportunities: no new
+  // sponsors until spending brings it under its monthly amount again.
+  // Someone already sponsoring it can keep renewing.
+  if (!sponsorshipFunding.acceptsNewSponsor(c)) {
+    const mine = await db.collection('donations')
+      .where('userId', '==', uid)
+      .where('campaignId', '==', campaignId)
+      .limit(1)
+      .get();
+    if (mine.empty) {
+      throw new HttpsError('failed-precondition',
+        'This animal is fully funded for now. Please sponsor another animal; it reopens if its funds run low.');
+    }
   }
   const min = typeof c.minAmount === 'number' ? c.minAmount : DEFAULT_MIN_AMOUNT;
   const max = typeof c.maxAmount === 'number' ? c.maxAmount : DEFAULT_MAX_AMOUNT;

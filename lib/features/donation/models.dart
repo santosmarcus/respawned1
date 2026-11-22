@@ -181,6 +181,9 @@ class DonationListing {
   final String? organizationId;
   final String? linkedCaseId;
   final DateTime? startDate;
+  /// Sponsorships: 'open' | 'fully_funded', kept current by
+  /// functions/sponsorship_funding.js. Null until it first runs.
+  final String? fundingStatus;
   bool favorited;
   bool donated;
 
@@ -220,6 +223,7 @@ class DonationListing {
     this.organizationId,
     this.linkedCaseId,
     this.startDate,
+    this.fundingStatus,
     this.favorited = false,
     this.donated = false,
   });
@@ -260,6 +264,21 @@ class DonationListing {
   /// Finished listings users can still open to see where funds went
   /// ("Past Campaigns"). Temporarily deactivated ones are excluded.
   bool get isPast => isEnded && !isDraft && !isArchived && status != 'paused';
+
+  /// A sponsorship whose available balance covers its monthly amount: out
+  /// of the open sponsorship opportunities until spending, a refund or a
+  /// transfer brings it back under (sponsorship_funding_rules.js, which
+  /// sets [fundingStatus]; the same rule is applied here for listings it
+  /// hasn't processed yet).
+  bool get isFullyFunded {
+    if (type != 'sponsorship') return false;
+    if (fundingStatus != null) return fundingStatus == 'fully_funded';
+    final month = monthlyAmount ?? 0;
+    return month > 0 && (availableBalance * 100).round() >= (month * 100).round();
+  }
+
+  /// Open to new sponsors: live and not fully funded.
+  bool get isOpenForSponsorship => type == 'sponsorship' && !isEnded && !isDraft && !isFullyFunded;
 
   /// collected + transferred in − transferred out − allocated. Transfers in
   /// are existing funds moved from another campaign, never donations.
@@ -341,6 +360,7 @@ class DonationListing {
       organizationId: data['organizationId'] as String?,
       linkedCaseId: data['linkedCaseId'] as String?,
       startDate: data['startDate'] is Timestamp ? (data['startDate'] as Timestamp).toDate() : null,
+      fundingStatus: data['fundingStatus'] as String?,
     );
   }
 

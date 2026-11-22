@@ -27,6 +27,8 @@ const PUBLIC_FIELDS = [
   'vaccinated', 'spayedNeutered', 'dewormed', 'specialNeeds', 'specialNeedsTypes',
   'adoptionStatus', 'status', 'currentStatus', 'organizationId', 'qrTagId',
   'createdAt', 'updatedAt',
+  // Open / fully funded, kept current by sponsorship_funding.js.
+  'sponsorshipFunding',
 ];
 
 // Legacy photo field names AnimalRecord falls back to; only download URLs

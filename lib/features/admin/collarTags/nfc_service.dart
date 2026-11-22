@@ -9,6 +9,7 @@ import 'package:nfc_manager/ndef_record.dart'; // NdefMessage, NdefRecord, TypeN
 import 'package:nfc_manager/nfc_manager_android.dart';
 import 'package:nfc_manager_ndef/nfc_manager_ndef.dart';
 import 'package:respawnd1/core/constants/app.links.dart';
+import 'package:respawnd1/core/utils/animal_tag_codes.dart';
 
 /// A problem the user should see (bad chip, timeout, nothing written, ...).
 class NfcException implements Exception {
@@ -21,6 +22,14 @@ class NfcException implements Exception {
 /// The user cancelled the scan (Cancel button, or closed the iOS sheet).
 class NfcCancelledException extends NfcException {
   const NfcCancelledException() : super('NFC scan cancelled.');
+}
+
+/// The chip already carries another animal tag ([existingCode]). Nothing
+/// was written; the caller decides whether that code is still in use.
+class NfcChipInUseException extends NfcException {
+  const NfcChipInUseException(this.existingCode)
+      : super('This chip already carries another animal tag.');
+  final String existingCode;
 }
 
 /// Reads and writes collar tag chips.
@@ -75,6 +84,39 @@ class NfcService {
         'The chip was written, but saving its status failed: $e',
       );
     }
+  }
+
+  /// Writes a shelter animal's tag ([animalTagPayload] of [code], the same
+  /// value as its QR code) to the next chip tapped, as a text record. If
+  /// the chip already carries a different animal tag, nothing is written
+  /// and [NfcChipInUseException] is thrown, unless [overwrite] is set (the
+  /// caller checked that the old code is no longer registered).
+  Future<void> writeAnimalTag(
+    String code, {
+    bool overwrite = false,
+    Duration timeout = _defaultTimeout,
+  }) async {
+    final payload = animalTagPayload(code); // never an empty value
+    final message = NdefMessage(records: [_textRecord(payload)]);
+    await _runSession(
+      timeout: timeout,
+      alertMessageIos: 'Hold the collar chip near the top of your iPhone.',
+      successMessageIos: 'Chip written.',
+      onTag: (tag) async {
+        if (!overwrite) {
+          final existing = Ndef.from(tag)?.cachedMessage;
+          for (final record in existing?.records ?? const <NdefRecord>[]) {
+            final value = _decodeText(record) ?? _decodeUri(record);
+            final other = value == null ? null : animalTagFromScan(value);
+            if (other != null && other != code.toUpperCase()) {
+              throw NfcChipInUseException(other);
+            }
+          }
+        }
+        await _writeMessage(tag, message);
+        return null;
+      },
+    );
   }
 
   /// Reads the next chip tapped and returns what is written on it (normally
@@ -241,6 +283,17 @@ class NfcService {
     'irdaobex://', 'file://', 'urn:epc:id:', 'urn:epc:tag:',
     'urn:epc:pat:', 'urn:epc:raw:', 'urn:epc:', 'urn:nfc:',
   ];
+
+  /// NDEF Text record (UTF-8, language "en").
+  static NdefRecord _textRecord(String text) {
+    final lang = utf8.encode('en');
+    return NdefRecord(
+      typeNameFormat: TypeNameFormat.wellKnown,
+      type: Uint8List.fromList([0x54]), // 'T'
+      identifier: Uint8List(0),
+      payload: Uint8List.fromList([lang.length, ...lang, ...utf8.encode(text)]),
+    );
+  }
 
   static NdefRecord _uriRecord(String uri) {
     // Longest matching prefix wins (e.g. https://www. before https://).

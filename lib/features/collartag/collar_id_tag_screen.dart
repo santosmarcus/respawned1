@@ -8,10 +8,10 @@ import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:qr_flutter/qr_flutter.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:respawnd1/app_theme.dart';
+import 'package:respawnd1/core/widgets/tag_qr_image.dart';
 import 'collar_tag_data_model.dart';
 import 'collar_tag_form_screen.dart';
 import 'package:respawnd1/core/constants/app.links.dart';
@@ -94,7 +94,10 @@ class _CollarIdTagCardScreenState extends State<CollarIdTagCardScreen> {
     } catch (_) {}
   }
 
-  String get _qrData => AppLinks.tagUrl(_tag.tagId ?? '');
+  // Null (no QR drawn) rather than a link with no tag id in it, which
+  // no scanner can resolve.
+  String? get _qrData =>
+      (_tag.tagId ?? '').isEmpty ? null : AppLinks.tagUrl(_tag.tagId!);
 
   Future<Uint8List?> _captureCard() async {
     try {
@@ -336,20 +339,7 @@ class _CollarIdTagCardScreenState extends State<CollarIdTagCardScreen> {
             color: Colors.white,
             borderRadius: BorderRadius.circular(10),
           ),
-          child: QrImageView(
-            data: _qrData,
-            version: QrVersions.auto,
-            size: 160,
-            backgroundColor: Colors.white,
-            eyeStyle: const QrEyeStyle(
-              eyeShape: QrEyeShape.square,
-              color: Colors.black,
-            ),
-            dataModuleStyle: const QrDataModuleStyle(
-              dataModuleShape: QrDataModuleShape.square,
-              color: Colors.black,
-            ),
-          ),
+          child: TagQrImage(data: _qrData),
         ),
         const SizedBox(height: 6),
         Text(

@@ -12,6 +12,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:respawnd1/core/constants/app.links.dart';
 import 'package:respawnd1/features/collartag/collar_id_tag_screen.dart';
 import 'package:respawnd1/features/collartag/scan_tag_flow.dart';
+import 'package:respawnd1/features/collartag/animal_tag_scan.dart';
 import 'package:respawnd1/features/collartag/pet_found_chat.dart';
 import 'package:respawnd1/core/models/rescue/report_verification.dart';
 import 'package:respawnd1/features/rescue/rescue_form_controller.dart';
@@ -452,6 +453,10 @@ class _RescuePageState extends State<RescuePage> {
   }
 
   Future<void> _handleScanResult(String result) async {
+    // A shelter animal's collar tag (QR or NFC, same payload) opens that
+    // animal; anything else goes through the owner collar-tag lookup.
+    if (await openScannedAnimalTag(context, result)) return;
+    if (!mounted) return;
     final tagId = AppLinks.tagIdFromScan(result);
     // The tag's id when the scan is a ResPAWnd tag link, not the whole link.
     setState(() => _form.scannedTagId = tagId ?? result);

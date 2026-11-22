@@ -66,7 +66,6 @@ class AdoptionFormController {
 
   //Required Uploads
   File? governmentIdFile;
-  File? proofOfAddressFile;
   //File? _digitalSignatureFile;
   // Home Photos supports multiple images — a newly-picked list plus,
   // when resuming an in-progress application, whatever was already
@@ -77,11 +76,13 @@ class AdoptionFormController {
   List<String> existingHomePhotoUrls = [];
 
   String? governmentIdUrl;
+
+  /// No longer asked for. Kept only so an application resumed from an
+  /// earlier session still saves the proof of address it already has.
   String? proofOfAddressUrl;
   //String? _digitalSignatureUrl;
 
   bool isUploadingGovId = false;
-  bool isUploadingProof = false;
   bool isUploadingSignature = false;
   bool isUploadingHomePhotos = false;
 
@@ -245,13 +246,12 @@ class AdoptionFormController {
   ];
 
   bool get hasGovernmentId => governmentIdFile != null || (governmentIdUrl ?? '').isNotEmpty;
-  bool get hasProofOfAddress => proofOfAddressFile != null || (proofOfAddressUrl ?? '').isNotEmpty;
   bool get hasHomePhotos => homePhotosFiles.isNotEmpty || existingHomePhotoUrls.isNotEmpty;
 
-  /// The required uploads still missing (all three are marked with a red *).
+  /// The required uploads still missing (both are marked with a red *).
+  /// Proof of Address is no longer required.
   List<String> missingUploads() => [
     if (!hasGovernmentId) 'Government ID',
-    if (!hasProofOfAddress) 'Proof of Address',
     if (!hasHomePhotos) 'Home Photos',
   ];
 
@@ -294,7 +294,6 @@ class AdoptionFormController {
     reasonCtrl.clear();
 
     governmentIdFile = null;
-    proofOfAddressFile = null;
     //_digitalSignatureFile = null;
     homePhotosFiles.clear();
     existingHomePhotoUrls = [];

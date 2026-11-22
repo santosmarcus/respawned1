@@ -19,6 +19,13 @@ const kOpenSponsorshipStatuses = {'draft', 'active', 'paused'};
 /// Why [a] can't get a new sponsorship listing, or null when it is ready to
 /// be sponsored. Mirrors sponsorshipBlocker() in functions/campaigns.js,
 /// which makes the real decision.
+///
+/// Every animal admitted through intake (it has an animal record) can be
+/// sponsored while it is in the organization's care, whatever its adoption
+/// status: adoptable, in treatment, awaiting medical clearance or not
+/// ready. Adoption readiness and collar tags never matter here. Only
+/// animals that have left care (adopted, deceased, being transferred) or
+/// archived records are excluded.
 String? sponsorshipReadiness(AnimalRecord a) {
   if (a.isMalformed) return 'Record could not be read';
   if (a.archived) return 'Archived';
@@ -128,8 +135,11 @@ class _SponsorAnimalPickerPageState extends ConsumerState<SponsorAnimalPickerPag
         children: [
           const DonationAdminHeader(
             title: 'Sponsor an Animal',
-            helpText: 'Only animals that are ready to be sponsored are listed: not archived, deceased, adopted or '
-                'being transferred, and without an open sponsorship. Choose one and the sponsorship form opens '
+            helpText: 'Every animal admitted through intake can be sponsored while in your care, whatever its '
+                'adoption status (in treatment, awaiting clearance, not ready or adoptable). Only archived, deceased, '
+                'adopted or transferring animals, and animals that already have an open sponsorship, are left out. '
+                'A sponsorship shows as Fully Funded while its balance covers its monthly amount, and reopens on its '
+                'own when spending brings it under. Choose an animal and the sponsorship form opens '
                 'filled in from its animal record — photo, name, species, description and suggested use of funds. '
                 'Review it, set the monthly amount and publish.',
           ),

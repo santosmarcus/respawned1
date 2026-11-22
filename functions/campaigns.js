@@ -68,9 +68,9 @@ const campaignsCol = () => db.collection('campaigns');
 
 // ── Small helpers ───────────────────────────────────────────────────────────
 
-const centavos = (pesos) => Math.round(Number(pesos) * 100);
-const pesos = (c) => c / 100;
-const num = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : 0);
+// Money arithmetic lives in campaign_money.js (shared with the
+// sponsorship funding rules).
+const {centavos, pesos, num, statusOf, moneyOf} = require('./campaign_money');
 
 function requireString(v, field, {max = 200, optional = false} = {}) {
   if (v === undefined || v === null || v === '') {
@@ -132,26 +132,6 @@ function displayName(userData) {
   if (!userData) return 'Admin';
   const full = `${userData.firstName || ''} ${userData.lastName || ''}`.trim();
   return full || userData.name || 'Admin';
-}
-
-// Same fallback as DonationListing.fromFirestore for docs without `status`.
-function statusOf(c) {
-  if (typeof c.status === 'string' && c.status) return c.status;
-  return c.isActive === false ? 'closed' : 'active';
-}
-
-function moneyOf(c) {
-  const collected = centavos(num(c.collectedAmount));
-  const target = centavos(num(c.targetAmount));
-  const allocated = centavos(num(c.allocatedAmount));
-  const out = centavos(num(c.transferredOutAmount));
-  const inn = centavos(num(c.transferredInAmount));
-  const available = collected + inn - out - allocated;
-  // Excess exists only above a real target, and never counts money that came
-  // in by transfer (that was already somebody else's excess).
-  const grossExcess = target > 0 ? Math.max(0, collected - target) : 0;
-  const eligibleExcess = Math.max(0, Math.min(grossExcess - out, available));
-  return {collected, target, allocated, out, inn, available, eligibleExcess};
 }
 
 function historyEntry(tx, campaignRef, actor, type, details) {
@@ -330,6 +310,9 @@ const OPEN_SPONSORSHIP_STATUSES = ['draft', 'active', 'paused'];
 // Why an animals/{id} doc can't get a new sponsorship listing, or null when
 // it is ready. Mirrors sponsorshipReadiness() in
 // lib/features/admin/donation/sponsorable_animals.dart.
+// Any animal admitted through intake (it has an animal record) qualifies
+// while in the organization's care, whatever its adoption status or collar
+// tags; only animals that left care, or archived records, are excluded.
 function sponsorshipBlocker(a) {
   if (!a) return 'does not exist.';
   if (a.archived === true) return 'is archived.';

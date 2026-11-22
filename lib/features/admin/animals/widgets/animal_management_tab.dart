@@ -4,7 +4,6 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:qr_flutter/qr_flutter.dart';
 
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/core/models/rescue/animal_record.dart';
@@ -18,7 +17,10 @@ import 'package:respawnd1/core/widgets/app_dialogs.dart';
 import 'package:respawnd1/core/utils/app_date_format.dart';
 import 'package:respawnd1/core/widgets/app_messages.dart';
 import 'package:respawnd1/core/widgets/reason_picker.dart';
-import 'package:respawnd1/features/collartag/animal_tag_scan.dart' show kAnimalTagPrefix;
+import 'package:respawnd1/core/repos/animal_record_repository.dart' show DuplicateTagException;
+import 'package:respawnd1/core/utils/animal_tag_codes.dart';
+import 'package:respawnd1/core/widgets/tag_qr_image.dart';
+import 'package:respawnd1/features/admin/collarTags/nfc_service.dart';
 
 /// Organization-management actions — deliberately separate from the
 /// Medical tab's clinical content. Only enabled when they make sense for
@@ -75,11 +77,14 @@ class _AnimalManagementTabState extends ConsumerState<AnimalManagementTab> {
     } catch (e) {
       final message = switch (e) {
         TimeoutException() =>
-          "The QR tag hasn't reached the server yet. Check your connection: it finishes saving once you're back online.",
+          "The tag hasn't reached the server yet. Check your connection: it finishes saving once you're back online.",
         FirebaseException(code: 'permission-denied') =>
-          "You don't have permission to change this animal's QR tag. Ask an Organization Admin for animal records access.",
-        FirebaseException(:final message) => 'Couldn’t save the QR tag: ${message ?? e}',
-        _ => 'Couldn’t save the QR tag: $e',
+          "You don't have permission to change this animal's collar tags. Ask an Organization Admin for animal records access.",
+        DuplicateTagException() => e.toString(),
+        NfcCancelledException() => 'NFC cancelled. Nothing was changed.',
+        NfcException(:final message) => message,
+        FirebaseException(:final message) => 'Couldn’t save the tag: ${message ?? e}',
+        _ => 'Couldn’t save the tag: $e',
       };
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(appSnackBar(message, kind: AppMessageKind.error));
@@ -101,6 +106,12 @@ class _AnimalManagementTabState extends ConsumerState<AnimalManagementTab> {
     final repo = ref.read(animalRecordRepositoryProvider);
     final name = animal.name.isEmpty ? 'this animal' : animal.name;
     var code = animal.qrTagId;
+    if (code != null && code.isNotEmpty) {
+      // A code from before the tag registry: register it so it counts as a
+      // registered collar tag and resolves when scanned.
+      await _saveQr(() => repo.ensureLegacyQrRegistered(animal).then((_) => true));
+      if (!mounted) return;
+    }
     if (code == null || code.isEmpty) {
       code = await _saveQr(() => repo.ensureQrTag(
             animalId: animal.id,
@@ -149,18 +160,17 @@ class _AnimalManagementTabState extends ConsumerState<AnimalManagementTab> {
             destructive: true,
           );
           if (!ok || !mounted) continue;
-          final removed = await _saveQr(() async {
-            await repo.removeQrTag(
-              animalId: animal.id,
-              previous: shown,
-              actorId: _actorId,
-              actorName: _actorName,
-              actorEmail: _actorEmail,
-            );
-            return true;
-          });
-          if (removed == true && mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(appSnackBar('QR tag removed.'));
+          final unlisted = await _saveQr(() => repo.removeQrTag(
+                animalId: animal.id,
+                previous: shown,
+                actorId: _actorId,
+                actorName: _actorName,
+                actorEmail: _actorEmail,
+              ));
+          if (unlisted != null && mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(appSnackBar(unlisted
+                ? 'QR tag removed. No collar tag is left, so the animal is no longer listed as adoptable.'
+                : 'QR tag removed.'));
           }
           return;
         case null:
@@ -266,10 +276,125 @@ class _AnimalManagementTabState extends ConsumerState<AnimalManagementTab> {
     await showAnimalRecordExportSheet(context, animal: widget.animal);
   }
 
-  void _generateTag() {
-    ScaffoldMessenger.of(context).showSnackBar(
-      appSnackBar('QR/NFC tag generation is not available yet.'),
-    );
+  final _nfc = NfcService();
+
+  /// NFC collar tag: write a registered code (the same payload format as
+  /// the QR code) to a chip, or replace / remove the current one.
+  Future<void> _nfcTag() async {
+    if (_busy) return;
+    final animal = widget.animal;
+    final repo = ref.read(animalRecordRepositoryProvider);
+    final name = animal.name.isEmpty ? 'this animal' : animal.name;
+    final current = animal.nfcTagId;
+
+    if (current != null && current.isNotEmpty) {
+      final choice = await showDialog<_NfcAction>(
+        context: context,
+        builder: (_) => _NfcTagDialog(title: 'NFC tag for $name', code: current),
+      );
+      if (!mounted || choice == null) return;
+      switch (choice) {
+        case _NfcAction.rewrite:
+          // A replacement chip with the same registered code.
+          await _writeNfc(current, register: false);
+        case _NfcAction.remove:
+          final ok = await showConfirmActionDialog(
+            context,
+            title: 'Remove this NFC tag?',
+            message: 'Chips carrying $current will stop opening $name. The old code stays in View Logs.',
+            confirmLabel: 'Remove Tag',
+            destructive: true,
+          );
+          if (!ok || !mounted) return;
+          final unlisted = await _saveQr(() => repo.removeTag(
+                animalId: animal.id,
+                type: AnimalTagType.nfc,
+                actorId: _actorId,
+                actorName: _actorName,
+                actorEmail: _actorEmail,
+              ));
+          if (unlisted != null && mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(appSnackBar(unlisted
+                ? 'NFC tag removed. No collar tag is left, so the animal is no longer listed as adoptable.'
+                : 'NFC tag removed.'));
+          }
+      }
+      return;
+    }
+
+    final code = await _saveQr(repo.newUnusedTagCode);
+    if (code == null || !mounted) return;
+    await _writeNfc(code, register: true);
+  }
+
+  /// Writes [code] to the next chip tapped and, when [register], registers
+  /// it as this animal's NFC tag. A chip carrying another animal's
+  /// registered tag is refused (one chip, one animal).
+  Future<void> _writeNfc(String code, {required bool register}) async {
+    final animal = widget.animal;
+    final repo = ref.read(animalRecordRepositoryProvider);
+    final messenger = ScaffoldMessenger.of(context);
+    messenger.showSnackBar(appSnackBar('Hold the NFC chip against the back of the phone…',
+        duration: const Duration(seconds: 30)));
+    var overwrite = false;
+    while (true) {
+      try {
+        await _nfc.writeAnimalTag(code, overwrite: overwrite);
+        break;
+      } on NfcChipInUseException catch (e) {
+        messenger.hideCurrentSnackBar();
+        final owner = await repo.tagRegistration(e.existingCode);
+        if (!mounted) return;
+        if (owner != null && owner['active'] == true) {
+          final sameAnimal = owner['animalId'] == animal.id;
+          messenger.showSnackBar(appSnackBar(
+            sameAnimal
+                ? 'This chip already carries this animal\'s tag (${e.existingCode}). Nothing was changed.'
+                : 'This chip is registered to another animal (${e.existingCode}). Remove it from that animal first, or use a new chip.',
+            kind: AppMessageKind.error,
+          ));
+          return;
+        }
+        // An old, no longer registered tag: safe to reuse the chip.
+        final ok = await showConfirmActionDialog(
+          context,
+          title: 'Reuse this chip?',
+          message: 'It carries ${e.existingCode}, which no longer belongs to any animal. '
+              'Tap the chip again to write the new tag over it.',
+          confirmLabel: 'Write Over It',
+        );
+        if (!ok || !mounted) return;
+        overwrite = true;
+        messenger.showSnackBar(appSnackBar('Hold the NFC chip against the back of the phone…',
+            duration: const Duration(seconds: 30)));
+      } on NfcCancelledException {
+        messenger.hideCurrentSnackBar();
+        return;
+      } on NfcException catch (e) {
+        messenger.hideCurrentSnackBar();
+        if (mounted) messenger.showSnackBar(appSnackBar('NFC write failed: ${e.message}', kind: AppMessageKind.error));
+        return;
+      }
+    }
+    messenger.hideCurrentSnackBar();
+    if (!register) {
+      messenger.showSnackBar(appSnackBar('Chip written with $code.', kind: AppMessageKind.success));
+      return;
+    }
+    final saved = await _saveQr(() => repo.registerTag(
+          animalId: animal.id,
+          type: AnimalTagType.nfc,
+          code: code,
+          actorId: _actorId,
+          actorName: _actorName,
+          actorEmail: _actorEmail,
+        ));
+    if (!mounted) return;
+    messenger.showSnackBar(saved == null
+        ? appSnackBar('The chip was written, but registering it failed. Tap NFC Tag to try again.',
+            kind: AppMessageKind.error)
+        : appSnackBar('NFC tag $saved registered to ${animal.name.isEmpty ? 'this animal' : animal.name}.',
+            kind: AppMessageKind.success));
   }
 
   // Composer: pick details, photos and descriptions, then post to the
@@ -319,12 +444,22 @@ class _AnimalManagementTabState extends ConsumerState<AnimalManagementTab> {
             enabled: !_busy,
             onTap: _toggleArchive,
           ),
+          _CollarTagStatus(animal: animal),
           _ActionTile(
             icon: Icons.qr_code_2,
             label: (animal.qrTagId ?? '').isEmpty ? 'Add QR Tag' : 'Show QR Tag',
-            subtitle: _qrSaving ? 'Saving QR tag…' : null,
+            subtitle: _qrSaving ? 'Saving tag…' : null,
             enabled: !_busy,
             onTap: _showQrTag,
+          ),
+          _ActionTile(
+            icon: Icons.nfc,
+            label: (animal.nfcTagId ?? '').isEmpty ? 'Add NFC Tag' : 'NFC Tag',
+            subtitle: (animal.nfcTagId ?? '').isEmpty
+                ? 'Write a tag to an NFC collar chip (NTAG213/215/216)'
+                : 'Registered: ${animal.nfcTagId}',
+            enabled: !_busy,
+            onTap: _nfcTag,
           ),
           _ActionTile(
             icon: animal.publicProfileHidden ? Icons.visibility_outlined : Icons.visibility_off_outlined,
@@ -367,13 +502,6 @@ class _AnimalManagementTabState extends ConsumerState<AnimalManagementTab> {
                 ? 'Post to the Page, or share a link to the full profile'
                 : 'Share a link to the full profile. Posting to the Page needs permission from an Organization Admin.',
             onTap: _shareToFacebook,
-          ),
-          _ActionTile(
-            icon: Icons.qr_code_2_outlined,
-            label: 'Generate Tag',
-            enabled: false,
-            subtitle: 'Not available yet',
-            onTap: _generateTag,
           ),
           _ActionTile(
             icon: Icons.history,
@@ -423,6 +551,98 @@ class _ActionTile extends StatelessWidget {
 
 enum _QrTagAction { regenerate, remove }
 
+enum _NfcAction { rewrite, remove }
+
+/// Which collar tags the animal has. A registered QR or NFC tag is
+/// required before it can be listed as adoptable.
+class _CollarTagStatus extends StatelessWidget {
+  const _CollarTagStatus({required this.animal});
+  final AnimalRecord animal;
+
+  @override
+  Widget build(BuildContext context) {
+    final ok = animal.hasCollarTag;
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: (ok ? AppColors.success : AppColors.error).withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: (ok ? AppColors.success : AppColors.error).withValues(alpha: 0.4)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(ok ? Icons.verified_outlined : Icons.label_off_outlined,
+              size: 20, color: ok ? AppColors.success : AppColors.error),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('Collar tag: ${animal.collarTagSummary}',
+                    style: GoogleFonts.zain(fontSize: 14, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
+                Text(
+                  ok
+                      ? [
+                          if ((animal.qrTagId ?? '').isNotEmpty) 'QR ${animal.qrTagId}',
+                          if ((animal.nfcTagId ?? '').isNotEmpty) 'NFC ${animal.nfcTagId}',
+                        ].join(' · ')
+                      : 'Add a QR or NFC tag. One is required before this animal can be listed as adoptable.',
+                  style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// The animal's NFC tag code, with Rewrite (a replacement chip, same code)
+/// and Remove.
+class _NfcTagDialog extends StatelessWidget {
+  const _NfcTagDialog({required this.title, required this.code});
+  final String title;
+  final String code;
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      backgroundColor: AppColors.background,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      title: Text(title, style: GoogleFonts.tiltWarp(fontSize: 17, color: AppColors.textPrimary)),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Icon(Icons.nfc, size: 48, color: AppColors.textPrimary),
+          const SizedBox(height: 8),
+          SelectableText(code, style: GoogleFonts.zain(fontSize: 16, fontWeight: FontWeight.w700)),
+          const SizedBox(height: 6),
+          Text('Write it to a replacement chip, or remove it so chips carrying it stop opening this animal.',
+              textAlign: TextAlign.center, style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary)),
+        ],
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context, _NfcAction.remove),
+          child: Text('Remove', style: GoogleFonts.zain(color: AppColors.error, fontWeight: FontWeight.w600)),
+        ),
+        TextButton(
+          onPressed: () => Navigator.pop(context, _NfcAction.rewrite),
+          child: Text('Write to Chip', style: GoogleFonts.zain(color: AppColors.textPrimary, fontWeight: FontWeight.w600)),
+        ),
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: Text('Close', style: GoogleFonts.zain(color: AppColors.textPrimary, fontWeight: FontWeight.w700)),
+        ),
+      ],
+    );
+  }
+}
+
 /// Shows an animal's QR tag, with Replace and Remove. Pops a [_QrTagAction],
 /// or null for Close.
 class _QrTagDialog extends StatelessWidget {
@@ -445,19 +665,7 @@ class _QrTagDialog extends StatelessWidget {
           // QrImageView is a LayoutBuilder, which can't report one: unsized,
           // the dialog throws during layout and only its dimmed barrier
           // shows. A fixed-size box answers the question for it.
-          SizedBox.square(
-            dimension: _qrSize,
-            child: QrImageView(
-              data: '$kAnimalTagPrefix$code',
-              size: _qrSize,
-              backgroundColor: Colors.white,
-              errorStateBuilder: (_, _) => Center(
-                child: Text('Couldn’t draw this QR code.',
-                    textAlign: TextAlign.center,
-                    style: GoogleFonts.zain(fontSize: 13, color: AppColors.textSecondary)),
-              ),
-            ),
-          ),
+          TagQrImage(data: animalTagPayload(code), size: _qrSize),
           const SizedBox(height: 10),
           SelectableText(code, style: GoogleFonts.zain(fontSize: 16, fontWeight: FontWeight.w700)),
           const SizedBox(height: 6),

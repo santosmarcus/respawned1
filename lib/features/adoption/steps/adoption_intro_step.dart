@@ -419,19 +419,6 @@ class AdoptionIntroStep extends StatelessWidget {
                   form.governmentIdUrl = null;
                 }),
               ),
-              AdoptionUploadRow(
-                label: 'Proof of Address',
-                file: form.proofOfAddressFile,
-                url: form.proofOfAddressUrl,
-                isUploading: form.isUploadingProof,
-                onPick: () => onPickUploadFile(
-                  onPicked: (f) => _set(() => form.proofOfAddressFile = f),
-                ),
-                onRemove: () => _set(() {
-                  form.proofOfAddressFile = null;
-                  form.proofOfAddressUrl = null;
-                }),
-              ),
 
               // Home Photos — multiple images, not a single fixed slot: add
               // more afterward, remove any one before submitting, every

@@ -797,6 +797,20 @@ class _CreateAnimalRecordPageState extends State<CreateAnimalRecordPage> {
   /// adoptable record off and back on just restores it.
   bool get _wasAdoptable => widget.isEditing && widget.existingData?['adoptionStatus'] == 'adoptable';
 
+  /// Whether the saved record has a registered QR or NFC collar tag (read
+  /// fresh, since a tag may have been added after this page opened). A new,
+  /// unsaved record never has one.
+  Future<bool> _hasRegisteredCollarTag() async {
+    final id = widget.existingAnimalId;
+    if (!widget.isEditing || id == null || id.isEmpty) return false;
+    try {
+      final snap = await FirebaseFirestore.instance.collection('animals').doc(id).get();
+      return await AnimalRecordRepository().hasRegisteredCollarTag(id, snap.data() ?? const {});
+    } catch (_) {
+      return false;
+    }
+  }
+
   /// The Adoptable switch. Off always works. On works straight away when
   /// every readiness item is met; otherwise it opens the checklist sheet,
   /// and only an override with a reason turns it on.
@@ -812,6 +826,26 @@ class _CreateAnimalRecordPageState extends State<CreateAnimalRecordPage> {
       setState(() => _isAdoptable = true);
       return;
     }
+    // A registered collar tag (QR or NFC) is required to be adoptable, on
+    // top of the readiness checklist and not overridable (firestore.rules
+    // enforces it too).
+    if (!await _hasRegisteredCollarTag()) {
+      if (!mounted) return;
+      await showDialog<void>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('Collar tag required'),
+          content: Text(widget.isEditing
+              ? '$_animalDisplayName needs a registered QR or NFC collar tag before it can be listed as '
+                  'adoptable. Add one in the animal record under Management, then try again.'
+              : 'Save this record first, then add a QR or NFC collar tag under Management. '
+                  'A registered tag is required before an animal can be listed as adoptable.'),
+          actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('OK'))],
+        ),
+      );
+      return;
+    }
+    if (!mounted) return;
     await _loadReadinessFacts();
     if (!mounted) return;
     final checks = _readinessChecks;

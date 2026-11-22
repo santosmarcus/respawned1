@@ -737,6 +737,26 @@ class AdoptionApplicationRepository {
     );
   }
 
+  /// Where a cleared reservation leaves the animal: 'adoptable' again
+  /// when it still has a registered collar tag (QR or NFC, animalTags),
+  /// otherwise 'not_ready', since firestore.rules only lets a tagged animal
+  /// become adoptable. Reads inside [tx] before any write.
+  Future<String> _statusAfterReservation(
+    Transaction tx,
+    DocumentSnapshot<Map<String, dynamic>> animalSnap,
+  ) async {
+    final data = animalSnap.data() ?? const {};
+    for (final field in const ['qrTagId', 'nfcTagId']) {
+      final code = (data[field] as String?)?.trim() ?? '';
+      if (code.isEmpty) continue;
+      final reg = await tx.get(_db.collection('animalTags').doc(code));
+      if (reg.exists && reg.data()?['animalId'] == animalSnap.id && reg.data()?['active'] == true) {
+        return 'adoptable';
+      }
+    }
+    return 'not_ready';
+  }
+
   /// Clears only the reservation that matches [applicationId] — never
   /// another applicant's. Returns the animal to 'adoptable'. The
   /// application itself is untouched (stays approved).
@@ -764,7 +784,7 @@ class AdoptionApplicationRepository {
       }
 
       tx.update(animalRef, {
-        'adoptionStatus': 'adoptable',
+        'adoptionStatus': await _statusAfterReservation(tx, animalSnap),
         'reservedForUserId': FieldValue.delete(),
         'reservedApplicationId': FieldValue.delete(),
         'reservedAt': FieldValue.delete(),
@@ -870,7 +890,7 @@ class AdoptionApplicationRepository {
       if (animalData['reservedApplicationId'] != applicationId) return;
       if (animalData['adoptionStatus'] == 'adopted') return; // already released — do not reverse
       tx.update(animalRef, {
-        'adoptionStatus': 'adoptable',
+        'adoptionStatus': await _statusAfterReservation(tx, animalSnap),
         'reservedForUserId': FieldValue.delete(),
         'reservedApplicationId': FieldValue.delete(),
         'reservedAt': FieldValue.delete(),
