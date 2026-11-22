@@ -78,6 +78,7 @@ dependencies:
   #Scan/Write NFC and QR
   mobile_scanner: ^5.0.0      # QR scanning
   flutter_nfc_kit: ^3.3.0
+  ndef: ^0.4.0               # NDEF records for flutter_nfc_kit (collar tag links)
   nfc_manager: ^4.1.0
   nfc_manager_ndef: ^1.1.0
   qr_flutter: ^4.1.0

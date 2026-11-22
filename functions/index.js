@@ -2030,6 +2030,8 @@ exports.syncVolunteerStats = require('./volunteer_stats').syncVolunteerStats;
 exports.syncPublicCase = require('./public_cases').syncPublicCase;
 // Each rider's newest offer status on their user doc, for staff of every organization — see functions/rider_status.js.
 exports.syncRiderTransportStatus = require('./rider_status').syncRiderTransportStatus;
+// Collar ID tag of each animal record (collarTags/animal-{id}) — see functions/animal_collar_tags.js.
+exports.syncAnimalCollarTag = require('./animal_collar_tags').syncAnimalCollarTag;
 
 // ---- Rescue adoptions (Rescue gaps 6 and 10) ----------------------------
 //

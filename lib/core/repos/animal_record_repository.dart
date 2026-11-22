@@ -9,6 +9,7 @@ import 'package:respawnd1/core/models/rescue/animal_record.dart';
 import 'package:respawnd1/core/models/rescue/care_record.dart';
 import 'package:respawnd1/core/models/rescue/medical_episode.dart';
 import 'package:respawnd1/core/models/rescue/vaccination_record.dart';
+import 'package:respawnd1/core/repos/animal_collar_tag_repository.dart';
 import 'package:respawnd1/core/repos/rescue_case_repository.dart';
 import 'package:respawnd1/core/utils/stream_combine.dart';
 
@@ -396,6 +397,15 @@ class AnimalRecordRepository {
     );
   }
 
+  /// Refreshes the animal's collar tag after a change it shows (name,
+  /// photo, health). functions/animal_collar_tags.js does the same on the
+  /// server for every write; this keeps the tag current right away.
+  void _refreshCollarTag(String animalId) {
+    unawaited(AnimalCollarTagRepository(db: _db).sync(animalId).then<void>((_) {}).catchError((Object e) {
+      debugPrint('Collar tag refresh failed for $animalId: $e');
+    }));
+  }
+
   Future<void> _refreshVaccineSummary(String animalId) async {
     final snap = await _vaccinationsOf(animalId).get();
     final records = snap.docs.map((d) => VaccinationRecord.fromFirestore(d, animalId)).toList();
@@ -409,6 +419,7 @@ class AnimalRecordRepository {
       'vaccinesGiven': names,
       'updatedAt': FieldValue.serverTimestamp(),
     });
+    _refreshCollarTag(animalId);
   }
 
   // ---- Health / profile editing ----------------------------------------
@@ -443,10 +454,12 @@ class AnimalRecordRepository {
       'microchipStatus': ?microchipStatus,
       'updatedAt': FieldValue.serverTimestamp(),
     });
+    _refreshCollarTag(animalId);
   }
 
   Future<void> updateProfile({required String animalId, required Map<String, dynamic> fields}) async {
     await _animalDoc(animalId).update({...fields, 'updatedAt': FieldValue.serverTimestamp()});
+    _refreshCollarTag(animalId);
   }
 
   // ---- Management tab ---------------------------------------------------

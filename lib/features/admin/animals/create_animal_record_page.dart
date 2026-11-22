@@ -4,6 +4,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/material.dart';
+import 'package:respawnd1/core/repos/animal_collar_tag_repository.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:respawnd1/app_theme.dart';
@@ -962,6 +963,16 @@ class _CreateAnimalRecordPageState extends State<CreateAnimalRecordPage> {
               'rescueDate': widget.prefillData!['rescueDate'],
           },
         });
+      }
+
+      // Collar ID tag (QR + NFC) for this animal, generated with the record
+      // and refreshed on every edit (functions/animal_collar_tags.js also
+      // keeps it in step with changes made elsewhere). Non-fatal: the
+      // record is saved either way.
+      try {
+        await AnimalCollarTagRepository().sync(docRef.id);
+      } catch (e) {
+        debugPrint('Collar tag sync failed for ${docRef.id}: $e');
       }
 
       final actorDisplayName = FirebaseAuth.instance.currentUser?.displayName
