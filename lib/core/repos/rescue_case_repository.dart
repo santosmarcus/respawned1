@@ -173,11 +173,13 @@ class RescueCaseRepository {
     required String reportId,
     required String actorUid,
     required String actorName,
+    String? reportCaseId,
   }) => status.approveLocationUpdate(
     caseId: caseId,
     reportId: reportId,
     actorUid: actorUid,
     actorName: actorName,
+    reportCaseId: reportCaseId,
   );
 
   /// Delegates to [CaseStatusRepository.rejectLocationUpdate].
@@ -187,12 +189,14 @@ class RescueCaseRepository {
     required String actorUid,
     required String actorName,
     String? reason,
+    String? reportCaseId,
   }) => status.rejectLocationUpdate(
     caseId: caseId,
     reportId: reportId,
     actorUid: actorUid,
     actorName: actorName,
     reason: reason,
+    reportCaseId: reportCaseId,
   );
 
   /// Delegates to [TransportAssignmentRepository.streamPetTransporters].
