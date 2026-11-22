@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -9,8 +10,6 @@ import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:respawnd1/app_theme.dart';
-import 'package:respawnd1/features/pettransporter/transporter_notif.dart';
-import 'package:respawnd1/features/pettransporter/transporter_profile.dart';
 import 'package:respawnd1/core/repos/directions_repository.dart';
 import 'package:respawnd1/features/pettransporter/services/transit_case_service.dart';
 import 'package:respawnd1/features/pettransporter/transit_rules.dart';
@@ -396,6 +395,57 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
       await _service.setStatus(status, statusLabel);
     } catch (e) {
       _showError('Error: $e');
+    } finally {
+      if (mounted) setState(() => _isActing = false);
+    }
+  }
+
+  /// Statuses the demo skip can move past.
+  static const _skippable = {
+    'accepted', 'ongoing', 'arrived', 'treatment', 'dropoff',
+    'in_transit_shelter', 'awaiting_adopter_pickup',
+  };
+
+  // DEMO / TESTING ONLY (debug builds) — the transporter's counterpart of
+  // the admin Track Case "Fast-forward to Clinic (Test)": moves the transit
+  // to its next step without driving there or taking the verification
+  // photos, so the whole flow can be shown in one sitting.
+  Future<void> _skipToNextStep() async {
+    final status = (_latestCase?['status'] as String?) ?? 'accepted';
+    setState(() => _isActing = true);
+    try {
+      switch (status) {
+        case 'accepted':
+          await _service.setStatus('ongoing', '[DEMO] Skipped — trip started.');
+          _beginLocationStreaming();
+        case 'ongoing':
+          await _service.setStatus('arrived', '[DEMO] Skipped — arrived at the pick up location.');
+        case 'arrived':
+          await _service.submitPickupVerification(const []);
+        case 'treatment':
+          await _service.setStatus('dropoff', '[DEMO] Skipped — arrived at the clinic.');
+        case 'dropoff':
+          if (await _service.acceptTreatment(const [])) {
+            _positionSub?.cancel();
+            _openResultPage(completed: true);
+          }
+        case 'in_transit_shelter':
+          await _service.completeShelterDropoff(const []);
+          _positionSub?.cancel();
+          _openResultPage(completed: true);
+        case 'awaiting_adopter_pickup':
+          await _service.confirmAdopterPickup();
+          _positionSub?.cancel();
+          _openResultPage(completed: true);
+        default:
+          _showError('Nothing to skip at this step.');
+      }
+    } on ShelterLocationMissing {
+      if (mounted) {
+        await showInfoDialog(context, title: 'Shelter location not set', message: kShelterLocationMissingMessage);
+      }
+    } catch (e) {
+      _showError('Skip failed: $e');
     } finally {
       if (mounted) setState(() => _isActing = false);
     }
@@ -845,7 +895,6 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
           data: AppTheme.rescuerTheme,
           child: Scaffold(
             backgroundColor: AppColors.background,
-            bottomNavigationBar: _buildBottomNav(),
             body: Column(
               children: [
                 // Map
@@ -866,6 +915,24 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
                         left: 16,
                         child: TransitOnlineBadge(),
                       ),
+
+                      // Demo skip (debug builds only), like the admin's
+                      // Fast-forward on Track Case.
+                      if (kDebugMode && _skippable.contains(status))
+                        Positioned(
+                          top: 44,
+                          right: 16,
+                          child: FloatingActionButton.extended(
+                            heroTag: 'demo_skip_btn',
+                            backgroundColor: AppColors.textPrimary,
+                            onPressed: _isActing ? null : _skipToNextStep,
+                            icon: const Icon(Icons.fast_forward, color: Colors.white),
+                            label: Text(
+                              'Skip (Demo)',
+                              style: GoogleFonts.tiltWarp(fontSize: 13, color: Colors.white),
+                            ),
+                          ),
+                        ),
 
                       // Navigate button — opens turn-by-turn driving
                       // directions in the native Google Maps app, the same
@@ -1032,45 +1099,5 @@ class _TransitProgressPageState extends State<TransitProgressPage> {
           onArriveAtClinic: _arriveAtClinic,
         );
     }
-  }
-
-  Widget _buildBottomNav() {
-    return BottomNavigationBar(
-      currentIndex: 0,
-      items: const [
-        BottomNavigationBarItem(
-          icon: Icon(Icons.home_outlined),
-          activeIcon: Icon(Icons.home),
-          label: 'Home',
-        ),
-        BottomNavigationBarItem(
-          icon: Icon(Icons.notifications_outlined),
-          activeIcon: Icon(Icons.notifications),
-          label: 'Notifications',
-        ),
-        BottomNavigationBarItem(
-          icon: Icon(Icons.person_outline),
-          activeIcon: Icon(Icons.person),
-          label: 'My Profile',
-        ),
-      ],
-      onTap: (index) {
-        if (index == 0) {
-          if (Navigator.canPop(context)) {
-            Navigator.pop(context);
-          }
-        } else if (index == 1) {
-          Navigator.push(
-            context,
-            MaterialPageRoute(builder: (_) => const TransporterNotifications()),
-          );
-        } else if (index == 2) {
-          Navigator.push(
-            context,
-            MaterialPageRoute(builder: (_) => const TransporterProfile()),
-          );
-        }
-      },
-    );
   }
 }

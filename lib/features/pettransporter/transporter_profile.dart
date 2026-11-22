@@ -1,11 +1,11 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:respawnd1/features/pettransporter/transporter_shell.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/core/repos/auth_service.dart';
-import 'package:respawnd1/features/pettransporter/service_screen.dart';
 import 'package:respawnd1/features/pettransporter/transit_progress_page.dart';
 import 'package:respawnd1/features/pettransporter/transporter_notif.dart';
 import 'package:respawnd1/core/utils/case_id.dart';
@@ -32,7 +32,8 @@ class TransporterProfile extends StatelessWidget {
           backgroundColor: AppColors.background,
           elevation: 0,
           scrolledUnderElevation: 0,
-          automaticallyImplyLeading: false,
+          // Back arrow only when opened outside the transporter shell.
+          automaticallyImplyLeading: TransporterShell.maybeOf(context) == null,
           centerTitle: true,
           toolbarHeight: 80,
           title: Text(
@@ -43,44 +44,6 @@ class TransporterProfile extends StatelessWidget {
               color: AppColors.textPrimary,
             ),
           ),
-        ),
-        bottomNavigationBar: BottomNavigationBar(
-          currentIndex: 2,
-          items: const [
-            BottomNavigationBarItem(
-              icon: Icon(Icons.home_outlined),
-              activeIcon: Icon(Icons.home),
-              label: 'Home',
-            ),
-            BottomNavigationBarItem(
-              icon: Icon(Icons.notifications_outlined),
-              activeIcon: Icon(Icons.notifications),
-              label: 'Notifications',
-            ),
-            BottomNavigationBarItem(
-              icon: Icon(Icons.person_outline),
-              activeIcon: Icon(Icons.person),
-              label: 'My Profile',
-            ),
-          ],
-          onTap: (index) {
-            if (index == 0) {
-              if (Navigator.canPop(context)) {
-                Navigator.pop(context);
-              } else {
-                Navigator.pushReplacement(
-                  context,
-                  MaterialPageRoute(builder: (_) => const ServiceScreen()),
-                );
-              }
-            } else if (index == 1) {
-              Navigator.pushReplacement(
-                context,
-                MaterialPageRoute(
-                    builder: (_) => const TransporterNotifications()),
-              );
-            }
-          },
         ),
         body: uid == null
             ? Center(
@@ -288,11 +251,15 @@ class TransporterProfile extends StatelessWidget {
                         icon: Icons.notifications_outlined,
                         label: 'Notifications',
                         onTap: () {
+                          // The Notifications tab under the same bar, when in the shell.
+                          final shell = TransporterShell.maybeOf(context);
+                          if (shell != null) {
+                            shell.select(1);
+                            return;
+                          }
                           Navigator.push(
                             context,
-                            MaterialPageRoute(
-                                builder: (_) =>
-                                const TransporterNotifications()),
+                            MaterialPageRoute(builder: (_) => const TransporterNotifications()),
                           );
                         },
                       ),
@@ -374,7 +341,7 @@ class TransporterProfile extends StatelessWidget {
     if (confirmed == true) {
       await AuthService().signOut();
       if (context.mounted) {
-        Navigator.of(context).popUntil((route) => route.isFirst);
+        Navigator.of(context, rootNavigator: true).popUntil((route) => route.isFirst);
       }
     }
   }

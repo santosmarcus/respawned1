@@ -3,6 +3,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
+import 'package:respawnd1/features/pettransporter/transporter_shell.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter_facebook_auth/flutter_facebook_auth.dart';
 import 'package:respawnd1/core/constants/facebook_config.dart';
@@ -16,7 +17,6 @@ import 'package:respawnd1/features/organization/organization_member_pending_page
 import 'package:respawnd1/core/repos/organization_repository.dart';
 import 'package:respawnd1/features/organization/signup/organization_about_screen.dart';
 import 'package:respawnd1/features/organization/signup/organization_verification_pending_page.dart';
-import 'package:respawnd1/features/pettransporter/service_screen.dart';
 import 'package:respawnd1/features/adoption/animal_link_page.dart';
 import 'package:respawnd1/features/pettransporter/transporter_verification_screen.dart';
 import 'package:respawnd1/firebase_options.dart';
@@ -336,7 +336,7 @@ class _UserDocRouterState extends State<_UserDocRouter> with WidgetsBindingObser
                 phone: data?['phone'] as String? ?? '',
               );
             }
-            return const ServiceScreen();
+            return const TransporterShell();
           case 'organization':
             final organizationId = data?['organizationId'] as String?;
             if (organizationId == null || organizationId.isEmpty) {

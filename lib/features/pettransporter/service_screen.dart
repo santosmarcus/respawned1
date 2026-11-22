@@ -6,8 +6,6 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:respawnd1/features/pettransporter/service_filter_sheet.dart';
 import 'package:respawnd1/features/pettransporter/rescue_request.dart';
 import 'package:respawnd1/features/pettransporter/transit_progress_page.dart';
-import 'package:respawnd1/features/pettransporter/transporter_notif.dart';
-import 'package:respawnd1/features/pettransporter/transporter_profile.dart';
 import 'package:respawnd1/features/pettransporter/verification_visit_page.dart';
 import 'package:respawnd1/features/pettransporter/transporter_eligibility.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
@@ -145,43 +143,6 @@ class _ServiceScreenState extends State<ServiceScreen> {
           ],
         ),
 
-        bottomNavigationBar: BottomNavigationBar(
-          currentIndex: 0,
-          items: const [
-            BottomNavigationBarItem(
-              icon: Icon(Icons.home_outlined),
-              activeIcon: Icon(Icons.home),
-              label: 'Home',
-            ),
-            BottomNavigationBarItem(
-              icon: Icon(Icons.notifications_outlined),
-              activeIcon: Icon(Icons.notifications),
-              label: 'Notifications',
-            ),
-            BottomNavigationBarItem(
-              icon: Icon(Icons.person_outline),
-              activeIcon: Icon(Icons.person),
-              label: 'My Profile',
-            ),
-          ],
-          onTap: (index) {
-            if (index == 1) {
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                    builder: (context) =>
-                    const TransporterNotifications()),
-              );
-            }
-            if (index == 2) {
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                    builder: (context) => const TransporterProfile()),
-              );
-            }
-          },
-        ),
         body: _isOnline ? _buildOnlineView() : _buildOfflineView(),
       ),
     );

@@ -1,9 +1,9 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:respawnd1/features/pettransporter/transporter_shell.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:respawnd1/app_theme.dart';
-import 'package:respawnd1/features/pettransporter/service_screen.dart';
 
 class TransporterSuccessScreen extends StatefulWidget {
   const TransporterSuccessScreen({super.key});
@@ -20,7 +20,7 @@ class _TransporterSuccessScreenState extends State<TransporterSuccessScreen> {
     Timer(const Duration(seconds: 3), () {
       if (!mounted) return;
       Navigator.of(context).pushAndRemoveUntil(
-        MaterialPageRoute(builder: (_) => const ServiceScreen()),
+        MaterialPageRoute(builder: (_) => const TransporterShell()),
             (route) => false,
       );
     });
