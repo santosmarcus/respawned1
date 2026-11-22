@@ -11,7 +11,7 @@ class GeofenceConfig {
 
   /// Transporter pickup / clinic / shelter arrival geofence.
   /// Same value as `_arrivalThresholdMeters` in transit_progress_page.dart.
-  static const double arrivalRadiusMeters = 150;
+  static const double arrivalRadiusMeters = 20;
 
   /// "Moved away" geofence around the user's last saved location. Leaving
   /// it refreshes users/{uid}.lastLat/lastLng in the background so the

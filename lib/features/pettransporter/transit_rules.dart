@@ -23,7 +23,7 @@ import 'package:respawnd1/core/models/rescue/rescue_status.dart';
 
 /// How close (by road, or straight line when Directions fails) the
 /// transporter must be before an "arrived" action is accepted.
-const double kArrivalThresholdMeters = 150;
+const double kArrivalThresholdMeters = 20;
 
 // There is no default shelter. The shelter leg needs the organization's
 // saved shelter pin (organizations/{orgId}.shelterLat/shelterLng, set in
