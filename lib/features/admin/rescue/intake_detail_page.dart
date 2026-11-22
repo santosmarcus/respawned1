@@ -1259,6 +1259,9 @@ class _AnimalRecordsSection extends StatelessWidget {
   final int completedCount;
   final bool received;
 
+  /// Quarantine/isolation is required: records wait until it has started.
+  final bool quarantineStarted;
+
   /// Set when this case was admitted from an animal that already has an
   /// Animal Record (RescueCase.raw['sourceAnimalRecordId'] — written by
   /// RescueCaseRepository.createAdmissionCase/createReturnIntakeCase). The
