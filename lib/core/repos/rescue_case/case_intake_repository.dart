@@ -858,14 +858,8 @@ class CaseIntakeRepository {
     });
   }
 
-  /// Explicitly records that the organization chose not to quarantine —
-  /// distinct from simply never having started one, so Intake Details
-  /// stops re-prompting "Start Quarantine / Skip" once a decision has been
-  /// made either way. Animal-record creation was never gated on this
-  /// either way.
-  Future<void> skipQuarantine({required String caseId}) async {
-    await _store.caseDoc(caseId).update({'quarantineStatus': 'skipped'});
-  }
+  // Quarantine/isolation is required: there is no skip. Cases skipped
+  // before that keep quarantineStatus 'skipped' and still read as decided.
 
   /// Client-derived automatic completion, persisted the next time the case
   /// is read/opened — RescueCase.isQuarantineActive applies the same
@@ -887,9 +881,9 @@ class CaseIntakeRepository {
   }
 
   /// Intake completion = animal received at the shelter AND every expected
-  /// animal record has been created — quarantine is optional and never
-  /// blocks this (its own status lives on independent fields and is never
-  /// read here). Reuses [RescueStatus.completed] as the "left the active
+  /// animal record has been created. Quarantine/isolation is required, but
+  /// it is enforced earlier (Intake Details only lets records be created
+  /// once it has started), so it isn't read here. Reuses [RescueStatus.completed] as the "left the active
   /// pipeline, still visible in case history" terminal state — the exact
   /// same status a deceased-case close already reaches (see
   /// RescueStatus.completed's queryValues including the legacy 'closed'
