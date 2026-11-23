@@ -107,6 +107,9 @@ class CaseIntakeRepository {
   /// AdoptionApplicationRepository.confirmAnimalRetrieved's "Proceed to
   /// Intake" step — never creates a new `animals/{id}` doc, only this
   /// `cases` doc pointing back at the existing one.
+  /// [lat]/[lng]/[shelterAddress] are the case's location: where the animal
+  /// was picked up from the adopter when that was pinned
+  /// (returnPickupLocation), else the shelter.
   Future<String> createReturnIntakeCase({
     required String sourceAnimalRecordId,
     required String animalName,

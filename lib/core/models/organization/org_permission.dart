@@ -1,3 +1,5 @@
+import 'package:respawnd1/core/constants/feature_flags.dart';
+
 /// What an organization's Staff member may do. Admins and the owner have
 /// every permission. Mirrors functions/org_permissions.json (kept in step by
 /// test/core/models/org_permission_sync_test.dart), which functions and
@@ -16,8 +18,15 @@ enum OrgPermission {
   financeManage('Manage money',
       'Record, allocate and refund donations; approve expenses; settle payments; general expenses and staff pay.',
       OrgPermissionGroup.money),
-  volunteers('Events, rescue volunteers & transporters',
-      'Events and their volunteers, external rescue volunteers and transporter verification.',
+  // Rescue volunteers are left out of the wording while they're off
+  // (FeatureFlags.independentRescuersEnabled).
+  volunteers(
+      FeatureFlags.independentRescuersEnabled
+          ? 'Events, rescue volunteers & transporters'
+          : 'Events & transporters',
+      FeatureFlags.independentRescuersEnabled
+          ? 'Events and their volunteers, external rescue volunteers and transporter verification.'
+          : 'Events and their volunteers, and transporter verification.',
       OrgPermissionGroup.other),
   insights('Analytics & audit', 'Dashboard analytics, reports and the audit log.', OrgPermissionGroup.other),
   facebookPublish('Post to Facebook', 'Share animal records to the organization\'s Facebook Page.',

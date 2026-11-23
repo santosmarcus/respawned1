@@ -47,6 +47,11 @@ class ReturnRequest {
   // below (set later by the org during scheduling).
   final String? contactNumber;
   final String? returnAddress;
+  /// The pickup pin, prefilled from the application's home pin. Where the
+  /// animal is retrieved from, and the returned animal's intake case
+  /// location (AdoptionApplicationRepository.proceedToIntake).
+  final double? returnLat;
+  final double? returnLng;
   final String? requestedBy;
   final DateTime? requestedAt;
 
@@ -96,6 +101,8 @@ class ReturnRequest {
     required this.images,
     this.contactNumber,
     this.returnAddress,
+    this.returnLat,
+    this.returnLng,
     this.requestedBy,
     this.requestedAt,
     required this.status,
@@ -136,6 +143,8 @@ class ReturnRequest {
       images: List<String>.from(map['images'] ?? const []),
       contactNumber: map['contactNumber'] as String?,
       returnAddress: map['returnAddress'] as String?,
+      returnLat: (map['returnLat'] as num?)?.toDouble(),
+      returnLng: (map['returnLng'] as num?)?.toDouble(),
       requestedBy: map['requestedBy'] as String?,
       requestedAt: ts(map['requestedAt']),
       status: ReturnRequestStatus.fromName(map['status'] as String?),
@@ -162,4 +171,38 @@ class ReturnRequest {
       internalNotes: map['internalNotes'] as String?,
     );
   }
+}
+
+/// A pinned place: where a returned animal is picked up from.
+class ReturnPickupLocation {
+  final double lat;
+  final double lng;
+  final String? address;
+  const ReturnPickupLocation({required this.lat, required this.lng, this.address});
+}
+
+/// Where a returned animal is picked up from, best first: the retrieval
+/// the organization scheduled, the adopter's return pin, then the home pin
+/// on the adoption application ([applicationData] is the `adoptions/{id}`
+/// doc). Null when none of them was pinned.
+ReturnPickupLocation? returnPickupLocation(Map<String, dynamic> applicationData, ReturnRequest? r) {
+  String? text(Object? v) => v is String && v.trim().isNotEmpty ? v.trim() : null;
+  final personal = applicationData['personal'] is Map ? applicationData['personal'] as Map : const {};
+  final homeAddress = text(personal['homeAddress']);
+  if (r?.retrievalLat != null && r?.retrievalLng != null) {
+    return ReturnPickupLocation(
+      lat: r!.retrievalLat!,
+      lng: r.retrievalLng!,
+      address: text(r.retrievalAddress) ?? text(r.returnAddress) ?? homeAddress,
+    );
+  }
+  if (r?.returnLat != null && r?.returnLng != null) {
+    return ReturnPickupLocation(lat: r!.returnLat!, lng: r.returnLng!, address: text(r.returnAddress) ?? homeAddress);
+  }
+  final lat = personal['homeLat'];
+  final lng = personal['homeLng'];
+  if (lat is num && lng is num) {
+    return ReturnPickupLocation(lat: lat.toDouble(), lng: lng.toDouble(), address: homeAddress);
+  }
+  return null;
 }

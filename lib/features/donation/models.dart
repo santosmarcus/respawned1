@@ -140,6 +140,27 @@ class InKindDonationReviewParams {
   });
 }
 
+/// Sponsorship renewal choices (functions/sponsorship_renewal_rules.js).
+const List<int> kRenewalNoticeDayChoices = [1, 3, 5, 7];
+const List<int> kRenewalGraceDayChoices = [0, 3, 5, 7];
+const int kDefaultRenewalNoticeDays = 3;
+const int kDefaultRenewalGraceDays = 3;
+
+/// How a sponsorship renews, in words for the sponsor.
+String sponsorshipRenewalText(DonationListing s) {
+  String days(int n) => '$n day${n == 1 ? '' : 's'}';
+  if (!s.autoRenew) {
+    return 'Each payment covers 30 days. ${days(s.renewalNoticeDays)} before it ends, we ask whether you want '
+        'to continue. If it is not renewed by then, the sponsorship ends.';
+  }
+  final grace = s.renewalGraceDays > 0
+      ? 'If a month is not paid within ${days(s.renewalGraceDays)} after it ends, the sponsorship ends.'
+      : 'If a month is not paid by the time it ends, the sponsorship ends.';
+  return 'Renews every month. ${days(s.renewalNoticeDays)} before each month ends, we send you the next '
+      'month\'s payment to pay with your chosen method; nothing is charged without you. $grace '
+      'You can stop renewing anytime.';
+}
+
 class DonationListing {
   final String id;
   final String title;
@@ -184,6 +205,14 @@ class DonationListing {
   /// Sponsorships: 'open' | 'fully_funded', kept current by
   /// functions/sponsorship_funding.js. Null until it first runs.
   final String? fundingStatus;
+  /// Sponsorships: renews every month (functions/sponsorship_renewal_rules.js).
+  /// The sponsor is sent each month's payment [renewalNoticeDays] before the
+  /// month ends and has [renewalGraceDays] after it to pay before it ends.
+  /// Off: the sponsor is asked whether to continue, with no grace period.
+  /// Listings saved before these existed renew with the defaults.
+  final bool autoRenew;
+  final int renewalNoticeDays;
+  final int renewalGraceDays;
   bool favorited;
   bool donated;
 
@@ -224,6 +253,9 @@ class DonationListing {
     this.linkedCaseId,
     this.startDate,
     this.fundingStatus,
+    this.autoRenew = true,
+    this.renewalNoticeDays = kDefaultRenewalNoticeDays,
+    this.renewalGraceDays = kDefaultRenewalGraceDays,
     this.favorited = false,
     this.donated = false,
   });
@@ -361,6 +393,15 @@ class DonationListing {
       linkedCaseId: data['linkedCaseId'] as String?,
       startDate: data['startDate'] is Timestamp ? (data['startDate'] as Timestamp).toDate() : null,
       fundingStatus: data['fundingStatus'] as String?,
+      autoRenew: data['autoRenew'] != false,
+      renewalNoticeDays: kRenewalNoticeDayChoices.contains(data['renewalNoticeDays'])
+          ? data['renewalNoticeDays'] as int
+          : kDefaultRenewalNoticeDays,
+      renewalGraceDays: data['autoRenew'] == false
+          ? 0
+          : kRenewalGraceDayChoices.contains(data['renewalGraceDays'])
+          ? data['renewalGraceDays'] as int
+          : kDefaultRenewalGraceDays,
     );
   }
 
@@ -392,6 +433,9 @@ class DonationListing {
       'restricted': restricted,
       'monthlyAmount': monthlyAmount,
       'intendedUse': intendedUse,
+      'autoRenew': autoRenew,
+      'renewalNoticeDays': renewalNoticeDays,
+      'renewalGraceDays': renewalGraceDays,
       'allocatedAmount': allocatedAmount,
       'transferredOutAmount': transferredOutAmount,
       'transferredInAmount': transferredInAmount,

@@ -886,9 +886,11 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
     } catch (_) {}
   }
 
-  /// "Renew your sponsorship?" — sponsorships are one-time 30-day payments,
-  /// so the sponsor chooses: pay for another 30 days (the backend starts the
-  /// new period when the current one ends), stop, or decide later.
+  /// "Renew your sponsorship?" — each payment covers 30 days, so the sponsor
+  /// chooses: pay for another 30 days (the backend starts the new period
+  /// when the current one ends), stop, or decide later. On a listing that
+  /// renews monthly (functions/sponsorship_renewal_rules.js) this is the
+  /// month's payment: it continues unless they stop renewing.
   Future<void> _askToRenewSponsorship(_NotifItem item) async {
     final uid = _uid;
     final data = item.data ?? const <String, dynamic>{};
@@ -932,15 +934,23 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
         (donation['amount'] as num?)?.toDouble() ??
         0;
     final endText = endsAt == null ? 'soon' : 'on ${formatDate(endsAt)}';
+    final autoRenew = data['autoRenew'] == true || listing.autoRenew;
+    final graceText = listing.renewalGraceDays > 0
+        ? ' You have ${listing.renewalGraceDays} day${listing.renewalGraceDays == 1 ? '' : 's'} after that to pay.'
+        : '';
 
     final choice = await showDialog<String>(
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: AppColors.background,
-        title: Text('Continue sponsoring $name?', style: GoogleFonts.tiltWarp(color: AppColors.textPrimary)),
+        title: Text(autoRenew ? "This month's sponsorship of $name" : 'Continue sponsoring $name?',
+            style: GoogleFonts.tiltWarp(color: AppColors.textPrimary)),
         content: Text(
-          'Your current sponsorship ends $endText. Continue for another 30 days'
-              '${amount > 0 ? ' for ${formatPeso(amount)}' : ''}? The new period starts when the current one ends.',
+          autoRenew
+              ? 'Your sponsorship renews every month. Pay${amount > 0 ? ' ${formatPeso(amount)}' : ''} to keep it '
+                  'going after $endText.$graceText The new month starts when the current one ends.'
+              : 'Your current sponsorship ends $endText. Continue for another 30 days'
+                  '${amount > 0 ? ' for ${formatPeso(amount)}' : ''}? The new period starts when the current one ends.',
           style: GoogleFonts.zain(fontSize: 16, color: AppColors.textPrimary),
         ),
         actions: [
@@ -950,11 +960,12 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
           ),
           TextButton(
             onPressed: () => Navigator.pop(ctx, 'stop'),
-            child: Text('Stop sponsoring', style: GoogleFonts.zain(fontSize: 16, color: AppColors.error)),
+            child: Text(autoRenew ? 'Stop renewing' : 'Stop sponsoring',
+                style: GoogleFonts.zain(fontSize: 16, color: AppColors.error)),
           ),
           TextButton(
             onPressed: () => Navigator.pop(ctx, 'continue'),
-            child: Text('Continue',
+            child: Text(autoRenew ? 'Pay now' : 'Continue',
                 style: GoogleFonts.zain(fontSize: 16, fontWeight: FontWeight.w800, color: AppColors.textPrimary)),
           ),
         ],

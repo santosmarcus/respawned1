@@ -113,7 +113,9 @@ class RescueReadinessCard extends ConsumerWidget {
               : animalsNeedingCare(records, plans: plans, missedDoses: missed, vaccinations: vax);
           final care = _continuingCareSection(needing);
           final supplies = _suppliesSection(stockAsync, settings);
-          final sections = [space, transport, carers, care, supplies];
+          // Carers (care rounds) don't count while care tasks are hidden
+          // (FeatureFlags.careTasksEnabled).
+          final sections = [space, transport, if (FeatureFlags.careTasksEnabled) carers, care, supplies];
 
           final limiting = sections.where((s) => s.state == ReadinessState.constrained).map((s) => s.title).toList();
           final message = limiting.isNotEmpty

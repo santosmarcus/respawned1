@@ -28,6 +28,13 @@ class AdoptionFormController {
   final phoneCtrl = TextEditingController();
   final homeAddressCtrl = TextEditingController();
 
+  /// The home's map pin (required). The return form and a returned animal's
+  /// intake case start from it (post_adoption_page.dart AdoptionReturnForm,
+  /// AdoptionApplicationRepository.proceedToIntake).
+  double? homeLat;
+  double? homeLng;
+  bool get hasHomePin => homeLat != null && homeLng != null;
+
   // Household & Living Information
   String? residenceType;
   final residenceOtherCtrl = TextEditingController();
@@ -141,6 +148,8 @@ class AdoptionFormController {
             personal['adopterHomeAddress']?.toString() ??
             personal['adopterCity']?.toString() ??
             '';
+    homeLat = (personal['homeLat'] as num?)?.toDouble();
+    homeLng = (personal['homeLng'] as num?)?.toDouble();
 
     // Household & Living Information
     residenceType = household['residenceType'] as String?;
@@ -234,6 +243,7 @@ class AdoptionFormController {
   /// `formKey.validate()` never sees them — these are the unanswered ones.
   /// The current-pet questions count only when the applicant has pets.
   List<String> missingRequiredAnswers() => [
+    if (!hasHomePin) 'your home address pin on the map',
     if (residenceType == null) 'Residence Type',
     if (ownershipStatus == null) 'Ownership Status',
     if (hasCurrentPets && totalCurrentPets == 0) 'how many current pets you have',

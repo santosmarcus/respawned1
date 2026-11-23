@@ -5,6 +5,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/core/models/rescue/animal_record.dart';
 import 'package:respawnd1/core/models/rescue/care_record.dart';
+import 'package:respawnd1/core/constants/feature_flags.dart';
 import 'package:respawnd1/core/models/rescue/medical_episode.dart';
 import 'package:respawnd1/core/models/rescue/rescue_case.dart';
 import 'package:respawnd1/core/models/rescue/rescue_status.dart';
@@ -61,8 +62,12 @@ class AnimalMedicalTab extends ConsumerWidget {
           IllnessLogSection(animal: animal),
           const SizedBox(height: 20),
           MedicationSection(animal: animal),
-          const SizedBox(height: 20),
-          CareUpdatesSection(animal: animal),
+          // Daily care updates are hidden with care tasks
+          // (FeatureFlags.careTasksEnabled).
+          if (FeatureFlags.careTasksEnabled) ...[
+            const SizedBox(height: 20),
+            CareUpdatesSection(animal: animal),
+          ],
           const SizedBox(height: 8),
           // Backfill for animals whose paper health list is out of date.
           Align(

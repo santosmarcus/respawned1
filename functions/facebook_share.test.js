@@ -132,3 +132,14 @@ test('referral posts: only referred cases, photo from the report', () => {
   assert.strictEqual(recordPhotoUrl('campaign', {imageUrl: 'https://x/c.jpg'}), 'https://x/c.jpg');
   assert.strictEqual(recordPhotoUrl('campaign', {imageUrl: 'http://x/c.jpg'}), null);
 });
+
+test('a referral no organization owns is linked to the organization sharing it', () => {
+  const {recordPostOrganization} = require('./facebook_share_rules');
+  assert.deepStrictEqual(recordPostOrganization('referral', {organizationId: 'orgA'}, 'orgA'), {linkedBySharer: false});
+  assert.deepStrictEqual(recordPostOrganization('referral', {organizationId: ''}, 'orgA'), {linkedBySharer: true});
+  assert.deepStrictEqual(recordPostOrganization('referral', {}, 'orgA'), {linkedBySharer: true});
+  assert.match(recordPostOrganization('referral', {organizationId: 'orgB'}, 'orgA').error, /another organization/);
+  // Campaigns and events still need their own organization.
+  assert.match(recordPostOrganization('campaign', {organizationId: ''}, 'orgA').error, /not linked/);
+  assert.match(recordPostOrganization('event', {organizationId: 'orgB'}, 'orgA').error, /another organization/);
+});

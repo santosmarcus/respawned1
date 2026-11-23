@@ -105,14 +105,20 @@ class _ReturnDetailsPageState extends ConsumerState<ReturnDetailsPage> {
     final result = await showRetrievalScheduleSheet(
       context,
       initialDateTime: existing?.retrievalDateTime,
-      initialAddress: existing?.retrievalAddress,
+      // Starts at the adopter's pickup address (from their application).
+      initialAddress: existing?.retrievalAddress ?? existing?.returnAddress,
       initialNotes: existing?.retrievalNotes,
     );
     if (result == null) return;
+    // The adopter's pin still marks the place while the address is theirs.
+    final samePlace = existing?.returnLat != null &&
+        result.address.trim() == (existing?.returnAddress ?? '').trim();
     await _run(() => ref.read(adoptionApplicationRepositoryProvider).setRetrievalSchedule(
           applicationId: widget.applicationId,
           dateTime: result.dateTime,
           address: result.address,
+          lat: samePlace ? existing!.returnLat : null,
+          lng: samePlace ? existing!.returnLng : null,
           notes: result.notes,
           actorName: _actorName,
         ));
@@ -224,6 +230,8 @@ class _ReturnDetailsPageState extends ConsumerState<ReturnDetailsPage> {
                         _row('Requested', _fmtDate(r.requestedAt)),
                         _row('Reason', r.reason + (r.reasonOther != null && r.reasonOther!.isNotEmpty ? ' — ${r.reasonOther}' : '')),
                         _row('Desired timeframe', r.urgency),
+                        if ((r.returnAddress ?? '').isNotEmpty)
+                          _row('Pickup address', '${r.returnAddress}${r.returnLat != null ? '  (pinned)' : ''}'),
                         const SizedBox(height: 8),
                         Text('Detailed Explanation', style: GoogleFonts.zain(fontSize: 12, fontWeight: FontWeight.w700, color: AppColors.textSecondary)),
                         const SizedBox(height: 4),

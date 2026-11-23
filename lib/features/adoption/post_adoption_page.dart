@@ -1796,6 +1796,11 @@ class _AdoptionReturnFormState extends State<AdoptionReturnForm> {
   final _contactNumberCtrl = TextEditingController();
   final _returnAddressCtrl = TextEditingController();
   bool _prefilling = true;
+  /// The name on the adoption application (falls back to [widget.adopterName]).
+  String? _applicantName;
+  /// Pickup pin, prefilled from the application's home pin.
+  double? _returnLat;
+  double? _returnLng;
 
   static const _reasonOptions = [
     'Financial Difficulties',
@@ -1829,11 +1834,11 @@ class _AdoptionReturnFormState extends State<AdoptionReturnForm> {
     super.dispose();
   }
 
-  // Priority (spec §7): current authenticated user's own profile phone/
-  // location -> the adoption application's own personal.adopterPhone/
-  // homeAddress -> nothing (left blank, never guessed). Deliberately never
-  // falls back to the original rescue location, clinic, or organization
-  // address — those aren't a return pickup location.
+  // Contact number: the profile's phone, else the application's. Name and
+  // pickup location come from the adoption application (its home address
+  // and map pin), else the profile's location text; never the original
+  // rescue location, clinic, or organization address — those aren't a
+  // return pickup location. Everything stays editable.
   Future<void> _prefillContactAndAddress() async {
     try {
       final uid = FirebaseAuth.instance.currentUser?.uid;
@@ -1847,18 +1852,49 @@ class _AdoptionReturnFormState extends State<AdoptionReturnForm> {
 
       final appSnap = await FirebaseFirestore.instance.collection('adoptions').doc(widget.adoptionId).get();
       final app = appSnap.exists ? AdoptionApplication.fromFirestore(appSnap) : null;
+      final pin = app == null ? null : returnPickupLocation(app.raw, null);
 
       if (!mounted) return;
       setState(() {
         _contactNumberCtrl.text = (profilePhone?.trim().isNotEmpty ?? false) ? profilePhone!.trim() : (app?.adopterPhone ?? '');
         final personal = (app?.raw['personal'] as Map?) ?? const {};
-        final appHomeAddress = personal['homeAddress'] as String? ?? app?.adopterCity ?? '';
-        _returnAddressCtrl.text = (profileLocation?.trim().isNotEmpty ?? false) ? profileLocation!.trim() : appHomeAddress;
+        final appName = (personal['adopterName'] as String?)?.trim();
+        if (appName != null && appName.isNotEmpty) _applicantName = appName;
+        final appHomeAddress = (personal['homeAddress'] as String?)?.trim().isNotEmpty == true
+            ? (personal['homeAddress'] as String).trim()
+            : (app?.adopterCity ?? '');
+        _returnAddressCtrl.text = appHomeAddress.isNotEmpty ? appHomeAddress : (profileLocation?.trim() ?? '');
+        _returnLat = pin?.lat;
+        _returnLng = pin?.lng;
         _prefilling = false;
       });
     } catch (_) {
       if (mounted) setState(() => _prefilling = false);
     }
+  }
+
+  Future<void> _pickReturnPin() async {
+    final picked = await Navigator.push<PickedLostLocation>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => LastSeenLocationPicker(
+          petName: widget.animalName,
+          title: 'Where can ${widget.animalName} be picked up?',
+          instructionText: 'Starts at the home you pinned on your adoption application. Move the pin if '
+              'the animal will be picked up somewhere else.',
+          pinLabel: 'Pickup location',
+          confirmLabel: 'Use This Location',
+          initialLat: _returnLat,
+          initialLng: _returnLng,
+        ),
+      ),
+    );
+    if (picked == null || !mounted) return;
+    setState(() {
+      _returnLat = picked.lat;
+      _returnLng = picked.lng;
+      _returnAddressCtrl.text = picked.address;
+    });
   }
 
   bool _isValidPhone(String value) {
@@ -1885,6 +1921,10 @@ class _AdoptionReturnFormState extends State<AdoptionReturnForm> {
     }
     if (_returnAddressCtrl.text.trim().isEmpty) {
       _showSnack('Please enter a return/pickup address.');
+      return;
+    }
+    if (_returnLat == null || _returnLng == null) {
+      _showSnack('Please pin the pickup location on the map.');
       return;
     }
     if (_reason == null) {
@@ -1936,6 +1976,8 @@ class _AdoptionReturnFormState extends State<AdoptionReturnForm> {
         actorUid: FirebaseAuth.instance.currentUser?.uid ?? '',
         contactNumber: _contactNumberCtrl.text.trim(),
         returnAddress: _returnAddressCtrl.text.trim(),
+        returnLat: _returnLat,
+        returnLng: _returnLng,
       );
 
       if (mounted) {
@@ -1985,12 +2027,12 @@ class _AdoptionReturnFormState extends State<AdoptionReturnForm> {
                       children: [
                         Expanded(
                           child: _ReadonlyField(
-                              label: 'Name', value: widget.adopterName),
+                              label: 'Name', value: _applicantName ?? widget.adopterName),
                         ),
                         const SizedBox(width: 16),
                         Expanded(
                           child: _ReadonlyField(
-                              label: 'Name', value: widget.animalName),
+                              label: 'Animal', value: widget.animalName),
                         ),
                       ],
                     ),
@@ -2039,6 +2081,27 @@ class _AdoptionReturnFormState extends State<AdoptionReturnForm> {
                         contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                         border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: AppColors.slaterspwn)),
                       ),
+                    ),
+                    Row(
+                      children: [
+                        Icon(_returnLat != null ? Icons.location_on : Icons.location_off_outlined,
+                            size: 18, color: _returnLat != null ? AppColors.greenrspwn : AppColors.error),
+                        const SizedBox(width: 6),
+                        Expanded(
+                          child: Text(
+                            _returnLat != null ? 'Pickup location pinned' : 'Pin the pickup location on the map *',
+                            style: GoogleFonts.zain(
+                                fontSize: 13, color: _returnLat != null ? AppColors.textPrimary : AppColors.error),
+                          ),
+                        ),
+                        TextButton.icon(
+                          onPressed: _prefilling ? null : _pickReturnPin,
+                          icon: const Icon(Icons.map_outlined, size: 18, color: AppColors.textPrimary),
+                          label: Text(_returnLat != null ? 'Change Pin' : 'Pin on Map',
+                              style: GoogleFonts.zain(
+                                  fontSize: 14, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
+                        ),
+                      ],
                     ),
                     const SizedBox(height: 18),
 

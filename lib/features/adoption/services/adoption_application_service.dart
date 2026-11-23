@@ -167,6 +167,8 @@ class AdoptionApplicationService {
     'adopterAge': form.ageCtrl.text.trim(),
     'adopterPhone': form.phoneCtrl.text.trim(),
     'homeAddress': form.homeAddressCtrl.text.trim(),
+    'homeLat': ?form.homeLat,
+    'homeLng': ?form.homeLng,
     // Legacy field kept for backward compatibility with older reads.
     'adopterCity': form.homeAddressCtrl.text.trim(),
     },

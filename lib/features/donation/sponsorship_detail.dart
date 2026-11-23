@@ -245,6 +245,7 @@ class _SponsorshipDetailState extends ConsumerState<SponsorshipDetail> {
                 myTotal: _myTotal,
                 myPayments: _myPayments,
                 collected: sponsorship.collected,
+                listing: sponsorship,
                 onStop: _stopSponsorship,
                 onReactivate: _reactivateSponsorship,
               ),
@@ -255,6 +256,9 @@ class _SponsorshipDetailState extends ConsumerState<SponsorshipDetail> {
             // (people already sponsoring keep their sponsorship).
             if (_activeSponsorship == null && !sponsorship.isEnded && !sponsorship.isFullyFunded) ...[
               Text('Monthly Sponsorship', style: GoogleFonts.tiltWarp(fontSize: 18, color: AppColors.textPrimary)),
+              const SizedBox(height: 6),
+              Text(sponsorshipRenewalText(sponsorship),
+                  style: GoogleFonts.zain(fontSize: 14, color: AppColors.textSecondary)),
               const SizedBox(height: 12),
               TextField(
                 controller: _amountController, keyboardType: TextInputType.number,
@@ -362,7 +366,10 @@ class _SponsorshipDetailState extends ConsumerState<SponsorshipDetail> {
     showCancelDialog(
       context: context,
       title: 'Are You Sure?',
-      message: 'You are about to cancel your sponsorship. It will remain active until $until.',
+      message: widget.sponsorship.autoRenew
+          ? 'You are about to stop renewing your sponsorship. No more monthly payments will be sent; '
+              'it stays active until $until.'
+          : 'You are about to cancel your sponsorship. It will remain active until $until.',
       onConfirm: () {
         ref.read(historyProvider.notifier).cancelSponsorship(s.id);
         setState(() => _activeSponsorship = s.copyWith(sponsorshipStatus: 'cancelled'));
@@ -430,6 +437,7 @@ class _YourSponsorshipCard extends StatelessWidget {
     required this.myTotal,
     required this.myPayments,
     required this.collected,
+    required this.listing,
     required this.onStop,
     required this.onReactivate,
   });
@@ -443,6 +451,9 @@ class _YourSponsorshipCard extends StatelessWidget {
 
   /// Everything collected for this animal, from every sponsor.
   final double collected;
+
+  /// The listing, for how it renews (set on the admin sponsorship form).
+  final DonationListing listing;
 
   @override
   Widget build(BuildContext context) {
@@ -479,8 +490,9 @@ class _YourSponsorshipCard extends StatelessWidget {
         children: [
           Text('Your sponsorship', style: GoogleFonts.tiltWarp(fontSize: 18, color: AppColors.textPrimary)),
           const SizedBox(height: 8),
-          row('Status', stopped ? 'Stopped' : 'Active', color: stopped ? AppColors.error : AppColors.greenrspwn),
-          if (next != null) row(stopped ? 'Ends on' : 'Next charge date', _date(next)),
+          row('Status', stopped ? (listing.autoRenew ? 'Not renewing' : 'Stopped') : 'Active', color: stopped ? AppColors.error : AppColors.greenrspwn),
+          if (!stopped) row('Renewal', listing.autoRenew ? 'Every month' : 'Asks you each month'),
+          if (next != null) row(stopped ? 'Ends on' : listing.autoRenew ? 'Next payment due' : 'Next charge date', _date(next)),
           if (!stopped && nextAmount != null) row('Next amount', _peso(nextAmount)),
           if (myPayments > 0) row('You have given', '${_peso(myTotal)} in ${myPayments == 1 ? '1 payment' : '$myPayments payments'}'),
           if (share != null && myPayments > 0)
@@ -489,8 +501,7 @@ class _YourSponsorshipCard extends StatelessWidget {
           Text(
             stopped
                 ? 'You stopped this sponsorship. It covers the animal until the date above, then ends.'
-                : 'You will be notified 3 days before the next charge date to continue or stop. If it is not '
-                'renewed by then, the sponsorship ends.',
+                : sponsorshipRenewalText(listing),
             style: GoogleFonts.zain(fontSize: 13, color: AppColors.textSecondary),
           ),
           const SizedBox(height: 4),
@@ -516,7 +527,8 @@ class _YourSponsorshipCard extends StatelessWidget {
                 : OutlinedButton(
               onPressed: onStop,
               style: AppButtons.dangerOutline,
-              child: Text('Cancel Sponsorship', style: GoogleFonts.tiltWarp(fontSize: 14, fontWeight: FontWeight.bold)),
+              child: Text(listing.autoRenew ? 'Stop Renewing' : 'Cancel Sponsorship',
+                  style: GoogleFonts.tiltWarp(fontSize: 14, fontWeight: FontWeight.bold)),
             ),
           ),
         ],
@@ -618,7 +630,8 @@ class _SponsorshipReviewSheetState extends State<SponsorshipReviewSheet> {
           const SizedBox(height: 16),
           Text('Review Sponsorship', style: GoogleFonts.tiltWarp(fontSize: 22, color: AppColors.textPrimary)),
           const SizedBox(height: 8),
-          Text('This payment covers 30 days of sponsorship. It does not renew automatically.', style: GoogleFonts.zain(fontSize: 14, color: AppColors.textSecondary)),
+          Text('This payment covers 30 days of sponsorship. ${sponsorshipRenewalText(widget.sponsorship)}',
+              style: GoogleFonts.zain(fontSize: 14, color: AppColors.textSecondary)),
           const SizedBox(height: 20),
           Row(
             children: [
@@ -630,7 +643,8 @@ class _SponsorshipReviewSheetState extends State<SponsorshipReviewSheet> {
               const SizedBox(width: 12),
               Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                 Text(widget.sponsorship.animalName ?? 'Rescue Pet', style: GoogleFonts.tiltWarp(fontSize: 16, color: AppColors.textPrimary)),
-                Text('Recurring Sponsorship - Every 30 days', style: GoogleFonts.zain(fontSize: 14, color: AppColors.textSecondary)),
+                Text(widget.sponsorship.autoRenew ? 'Monthly Sponsorship - Renews every month' : 'Sponsorship - 30 days',
+                    style: GoogleFonts.zain(fontSize: 14, color: AppColors.textSecondary)),
               ])),
               Text('₱${widget.amount.toInt()}', style: GoogleFonts.tiltWarp(fontSize: 18, color: AppColors.greenrspwn)),
             ],

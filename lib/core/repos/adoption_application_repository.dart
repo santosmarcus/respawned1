@@ -1404,6 +1404,8 @@ class AdoptionApplicationRepository {
     // never conflated with each other.
     String? contactNumber,
     String? returnAddress,
+    double? returnLat,
+    double? returnLng,
   }) async {
     await _adoptionDoc(applicationId).update({
       'returnRequest': {
@@ -1414,6 +1416,8 @@ class AdoptionApplicationRepository {
         'images': images,
         if (contactNumber != null && contactNumber.isNotEmpty) 'contactNumber': contactNumber,
         if (returnAddress != null && returnAddress.isNotEmpty) 'returnAddress': returnAddress,
+        'returnLat': ?returnLat,
+        'returnLng': ?returnLng,
         'requestedBy': actorUid,
         'requestedAt': Timestamp.now(),
         'status': ReturnRequestStatus.pendingReview.name,
@@ -1516,8 +1520,10 @@ class AdoptionApplicationRepository {
     'returnRequest.retrievalScheduledAt': now,
     'returnRequest.retrievalDateTime': Timestamp.fromDate(dateTime),
     if (address != null && address.isNotEmpty) 'returnRequest.retrievalAddress': address,
-    'returnRequest.retrievalLat': ?lat,
-    'returnRequest.retrievalLng': ?lng,
+    // A pin only when the place is pinned; a new address without one
+    // clears the old pin so it can't point somewhere else.
+    'returnRequest.retrievalLat': lat ?? FieldValue.delete(),
+    'returnRequest.retrievalLng': lng ?? FieldValue.delete(),
     if (notes != null && notes.isNotEmpty) 'returnRequest.retrievalNotes': notes,
     'returnRequest.scheduledBy': actorName,
     // A (re)schedule always resets the adopter's own acknowledgement —
@@ -1582,6 +1588,12 @@ class AdoptionApplicationRepository {
     final animalSnap = await _animals.doc(animalId).get();
     final species = animalSnap.data()?['species'] as String? ?? '';
 
+    // The case keeps where the animal was picked up: the scheduled
+    // retrieval pin, else the adopter's return pin, else the home pin on
+    // the application; the shelter only when none was pinned. The shelter
+    // stays the intake destination either way (IntakeDetailPage).
+    final pickup = returnPickupLocation(appData, returnRequest);
+
     final caseId = await _caseRepo.createReturnIntakeCase(
       sourceAnimalRecordId: animalId,
       animalName: application.animalName,
@@ -1593,9 +1605,9 @@ class AdoptionApplicationRepository {
       returnExplanation: returnRequest.explanation,
       returnPhotos: returnRequest.images,
       retrievedAt: returnRequest.retrievedAt ?? DateTime.now(),
-      lat: shelterLat,
-      lng: shelterLng,
-      shelterAddress: shelterAddress,
+      lat: pickup?.lat ?? shelterLat,
+      lng: pickup?.lng ?? shelterLng,
+      shelterAddress: pickup != null ? pickup.address : shelterAddress,
       actorUid: actorUid,
       actorName: actorName,
     );

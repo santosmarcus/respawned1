@@ -34,6 +34,7 @@ const {requireOrgPermission} = require('./org_access');
 const refundRules = require('./refund_rules');
 const {createPaymongoRefund, PaymongoRefundError} = require('./paymongo_refunds');
 const {recountActiveSponsors} = require('./sponsor_counts');
+const {parseRenewalSettings} = require('./sponsorship_renewal_rules');
 const {defineSecret} = require('firebase-functions/params');
 
 // Same secret paymongo.js uses; recordDonationReversal needs it to refund
@@ -380,11 +381,18 @@ async function buildListingFields(data, existing) {
     }
     fields.monthlyAmount = null;
     fields.intendedUse = null;
+    fields.autoRenew = null;
+    fields.renewalNoticeDays = null;
+    fields.renewalGraceDays = null;
   } else {
     // Sponsorships: title defaults to the animal's name (Austin's behaviour).
     fields.title = requireString(data.title, 'Title', {max: 200, optional: true}) || fields.animalName || 'Sponsorship';
     fields.monthlyAmount = requireAmount(data.monthlyAmount, 'Monthly amount');
     fields.intendedUse = requireString(data.intendedUse, 'Intended use of funds', {max: 1000});
+    // Monthly auto-renewal (sponsorship_renewal_rules.js).
+    const renewal = parseRenewalSettings(data);
+    if (renewal.error) throw new HttpsError('invalid-argument', renewal.error);
+    Object.assign(fields, renewal.value);
     fields.targetAmount = 0; // sponsorships have no funding goal
     fields.acceptInKind = false;
     fields.inKindItems = [];
@@ -397,7 +405,8 @@ async function buildListingFields(data, existing) {
 // Create (no campaignId) or edit (campaignId) a listing.
 // data: {type, title, description, imageUrl, animalId, fundKind, purposeTags,
 //        restricted, linkedCaseId, targetAmount, deadlineMs, acceptInKind,
-//        inKindItems, monthlyAmount, intendedUse}
+//        inKindItems, monthlyAmount, intendedUse, autoRenew,
+//        renewalNoticeDays, renewalGraceDays}
 // publish: true publishes immediately on create.
 exports.saveCampaign = onCall(async (request) => {
   const actor = await loadActor(request);

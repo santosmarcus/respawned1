@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 import 'package:respawnd1/app_theme.dart';
+import 'package:respawnd1/core/constants/feature_flags.dart';
 import 'package:respawnd1/core/repos/auth_service.dart';
 import 'package:respawnd1/core/widgets/app_messages.dart';
 import 'package:respawnd1/features/account/account_page.dart';
@@ -120,7 +121,15 @@ class _SystemAdminHomeScreenState extends State<SystemAdminHomeScreen> {
         labelTextStyle: WidgetStatePropertyAll(GoogleFonts.zain(fontSize: 13, color: AppColors.textPrimary)),
         destinations: [
           _pendingDestination(_pendingOrgs, Icons.verified_outlined, Icons.verified, 'Organizations'),
-          _pendingDestination(_pendingVolunteers, Icons.volunteer_activism_outlined, Icons.volunteer_activism, 'Volunteers'),
+          // Grayed out while rescue volunteers are off
+          // (FeatureFlags.independentRescuersEnabled).
+          _pendingDestination(
+            FeatureFlags.independentRescuersEnabled ? _pendingVolunteers : 0,
+            Icons.volunteer_activism_outlined,
+            Icons.volunteer_activism,
+            'Volunteers',
+            enabled: FeatureFlags.independentRescuersEnabled,
+          ),
           _pendingDestination(_pendingTransporters, Icons.local_shipping_outlined, Icons.local_shipping, 'Transporters'),
           const NavigationDestination(
             icon: Icon(Icons.people_outline),
@@ -133,8 +142,14 @@ class _SystemAdminHomeScreenState extends State<SystemAdminHomeScreen> {
   }
 
   /// A tab whose icon carries the number of applications waiting.
-  Widget _pendingDestination(int n, IconData icon, IconData selected, String label) {
+  Widget _pendingDestination(int n, IconData icon, IconData selected, String label, {bool enabled = true}) {
     Widget badged(IconData i) => Badge(isLabelVisible: n > 0, label: Text('$n'), child: Icon(i));
-    return NavigationDestination(icon: badged(icon), selectedIcon: badged(selected), label: label);
+    return NavigationDestination(
+      icon: badged(icon),
+      selectedIcon: badged(selected),
+      label: label,
+      enabled: enabled,
+      tooltip: enabled ? null : '$label: ${FeatureFlags.rescueVolunteersOffNote}',
+    );
   }
 }

@@ -1,0 +1,1016 @@
+﻿RESPAWND DEFENSE SCENARIOS
+Module scenarios, "what if" answers and known gaps, checked against the app code (Nov 2026)
+
+HOW TO USE THIS DOCUMENT
+- Part 1 is the main part: scenarios for every module. Each module starts with one complete, best-case scenario, followed by variations (what happens when something goes differently).
+- Part 2 is the priority list. If you only have 30 minutes, know these 15 answers well.
+- Part 3 is the Q&A cheat sheet, grouped by module.
+- Part 4 lists what is not built yet, with a line you can say if the panel asks.
+- The appendix lists what was changed from the original Scenario #1 so it matches the app.
+- Tags: BUILT = the app does this now. PARTIAL = mostly built, one part missing. GAP = not built; use the suggested answer.
+
+
+PART 1. SCENARIOS BY MODULE
+Each module starts with one complete, best-case scenario. The variations after it show what happens when something goes differently.
+
+MODULE 1: RESCUE
+- 1.1  A complete rescue  (main scenario)
+- 1.2  The report looks doubtful or fake
+- 1.3  Two people report the same animal
+- 1.4  No organization responds
+- 1.5  No transporter accepts
+- 1.6  Problems during the trip
+- 1.7  The clinic refuses the animal
+- 1.8  The case is referred to another organization or the LGU
+- 1.9  Other endings after treatment
+
+MODULE 2: ADOPTION
+- 2.1  A complete adoption  (main scenario)
+- 2.2  Several people apply for the same animal
+- 2.3  The applicant does not show up for the interview
+- 2.4  The applicant is rejected or withdraws
+- 2.5  Delivery problems
+- 2.6  Missed follow-ups and warnings
+- 2.7  The adopted animal is returned
+- 2.8  The reporter adopts the animal they reported
+- 2.9  Community adoption
+
+MODULE 3: LOST AND FOUND PETS AND COLLAR TAGS
+- 3.1  A lost pet comes home through its collar tag  (main scenario)
+- 3.2  Reunited without a collar tag (matching)
+- 3.3  The wrong person claims the pet
+- 3.4  The found pet needs rescue, or the owner is never found
+
+MODULE 4: DONATIONS AND FUNDRAISING
+- 4.1  A complete fundraiser for a rescue case  (main scenario)
+- 4.2  The goal is not met by the deadline
+- 4.3  The goal is exceeded
+- 4.4  A donor asks for a refund
+- 4.5  Cash or bank donation, and payment problems
+- 4.6  Sponsoring an animal
+- 4.7  Donating items (in-kind)
+
+MODULE 5: ORGANIZATIONS, RESCUERS AND ACCOUNTS
+- 5.1  A shelter joins and sets up its team  (main scenario)
+- 5.2  The organization is not approved
+- 5.3  An independent rescuer
+- 5.4  A pet transporter applies
+- 5.5  A user abuses the platform
+
+MODULE 6: EVENTS AND VOLUNTEERS
+- 6.1  A complete volunteer event  (main scenario)
+- 6.2  The event is full or cancelled
+
+
+------------------------------------------------------------
+MODULE 1: RESCUE
+Covers reporting, verification, accepting a case, transport, treatment and closing the case.
+
+MAIN SCENARIO
+SCENARIO 1.1: A COMPLETE RESCUE
+At 10:30 AM, Denise sees a white aspin limping on its left hind leg in front of the Enrique M. Razon Sports Center in Malate, Manila. She has a class, so she reports it for a rescue organization to handle.
+
+Reporter (Denise)
+1. Denise opens resPAWnd and taps Report a Rescue. The map centers on her location.
+2. She drags the pin to the exact spot.
+3. She selects Injury. The system sets urgency to Critical. (Injury, Illness, Neglect or Abuse, Aggressive Animal = Critical; Abandonment = Medium; Pet Surrender, Lost Pet = Low.)
+4. She takes photos with the camera, then fills in animal details, health, behavior, environment and safety, risk, and whether she can help with rescue or adoption.
+5. She ticks the Declaration of Accuracy and taps Submit Report. The case is created as Pending Review.
+6. Staff of the organizations covering that spot get "URGENT: Critical case in your service area". Nearby responders (10 km) and nearby users (5 km) are alerted.
+7. She opens Track Case and sees the timeline at "Case reported".
+
+Organization (admin)
+1. The admin opens Rescue Reports > Review and opens Denise's case.
+2. The Report Verification panel shows: her phone was at the pin, the photos came from the camera, the photo time and place match, and she has no false reports.
+3. The admin taps Record result > Confirmed remotely. The case gets a Verified badge.
+4. The admin taps Accept Case. Rescue Readiness shows Space, Transport, Care coverage, Vet access, Food & medicine, Funds and Continuing care. The admin confirms, and the status becomes Accepted.
+5. The admin selects the nearest clinic, and the system shows "Clinic saved". The status becomes Awaiting Assignment.
+6. The admin taps Assign Transporter. The list shows verified transporters seen in the last 5 minutes within 3 km (widening to 5, 10 and 20 km), each marked Available, Pending or Busy.
+7. The admin selects Juan de la Cruz and taps Send offer. Because the case is Critical, the offer waits up to 5 minutes.
+
+Pet transporter (Juan)
+1. Juan gets a push, opens the offer, reviews the photos and the clinic, and accepts. The admin sees his name and vehicle on Track Case.
+2. Juan starts the trip: "On the way to pickup location". The admin and Denise follow him on Transport Tracking.
+3. When Juan is within 150 m of the pin, the app marks "Arrived at pickup location", and Denise gets a push.
+4. He crates the dog and takes 1–2 verification photos on the spot (the camera only works within 150 m). Pickup is verified: "On the way to treatment".
+5. At the clinic (within 150 m) he adds clinic photos. The admin sees "Transporter is at the clinic — Proceed to Treatment".
+6. The vet accepts the dog, and Juan records Treatment Accepted.
+
+Treatment and closing (admin)
+1. The admin taps Proceed to Treatment. The case is In Treatment.
+2. Staff add treatment log entries: Assessment, Medication, Procedure, Vaccination, Follow-up Check. Entries cannot be edited or deleted.
+3. Staff record the vet bill as case expenses with a funding source (for example, Organization Budget).
+4. The vet clears the dog, and staff log Discharge.
+5. Staff choose Intake to the shelter. After the optional quarantine (it ends on its own), the animal record is created and the case becomes Completed.
+6. Denise's Track Case shows Completed. The dog can now be prepared for adoption (Module 2).
+
+
+VARIATION
+SCENARIO 1.2: THE REPORT LOOKS DOUBTFUL OR FAKE
+A report comes in with one gallery photo. The reporter's phone was 3 km from the pin.
+
+Organization (admin)
+1. The verification panel flags concerns: the phone was more than 2 km away, and the photo is from the gallery and 3 days old.
+2. The admin taps Ask for live proof and sends the request. The reporter gets a push: "A new photo is needed".
+3. The reporter can only answer with the camera. The photo arrives stamped with the time and place and is checked against the pin.
+
+IF...
+- IF the live photo matches the pin: The admin records Confirmed remotely and continues as in Scenario 1.1.
+- IF the admin still cannot confirm: Record result > Needs rider. A nearby rider gets "Location check requested", goes to the spot and reports Found or Not found.
+- IF the report is false: The admin rejects it with the reason "Invalid or false report". The reporter sees it on Track Case, and it counts on their track record (2 or more false reports shows a Concern to staff).
+- IF someone keeps sending false reports: A system admin can disable the account. There is no automatic ban (GAP).
+
+
+VARIATION
+SCENARIO 1.3: TWO PEOPLE REPORT THE SAME ANIMAL
+Ten minutes after Denise, Carlo reports a limping dog at the same spot.
+
+Organization (admin)
+1. The admin opens Carlo's report and taps Check for Duplicates. Denise's case appears: same species, about 15 m away.
+2. The admin taps Compare. The two reports show side by side and describe the same dog.
+3. The admin taps Merge. Carlo's report becomes Merged, and his photos, location and details are copied into Denise's case. Nothing is deleted.
+4. Both case timelines get a line saying the reports were merged.
+
+IF...
+- IF they are different animals: The admin taps Keep Separate. The report goes back to Pending Review and that pair is not suggested again.
+- IF the other report belongs to another organization: The merge is blocked.
+- IF does the reporter get a push about the merge?: No, only the timeline line (GAP).
+
+
+VARIATION
+SCENARIO 1.4: NO ORGANIZATION RESPONDS
+On a Saturday night a sick puppy is reported in an area with few organizations.
+
+What the system does
+1. The case is tagged to every approved organization whose service area covers the pin, and their staff are notified.
+2. If no one responds in 15 minutes, nearby users get "A nearby report still needs a responder", repeated every 20 minutes.
+3. Because the case is Critical, if it is still not reviewed after 30 minutes, every org admin gets "URGENT: critical report not reviewed". (Each organization can change the 30 minutes.)
+4. Nearby independent rescuers can see and accept it. For non-critical cases they wait 15 minutes so shelters get the first chance; Critical cases open to them right away.
+5. The first organization or rescuer to tap Accept Case gets it. A second accept is refused.
+
+IF...
+- IF no organization covers the pin, or all of them have paused new cases: The platform admin gets an "outside service area" or "no organization accepting" alert.
+- IF the organization cannot take it: It rejects with a reason (no riders, no shelter space, outside service area, and others) or refers it (Scenario 1.8).
+- IF the animal is healthy and low urgency: The organization rejects it with "Healthy animal, low urgency". The reporter can then rehome it through community adoption (Scenario 2.9).
+
+
+VARIATION
+SCENARIO 1.5: NO TRANSPORTER ACCEPTS
+At 9 PM a cat with a head wound is reported in Sampaloc. It is Critical, and few transporters are online.
+
+Organization (admin)
+1. The admin sends an offer to Transporter A, who declines: "Capacity is full". Staff get a push.
+2. The admin offers Transporter B. There is no answer in 5 minutes, the offer expires on the server, and staff get a push.
+3. The admin offers Transporter C, who declines: "Pickup location is too far".
+4. After the third failure the screen shows "No transporter available" with Refer Case (Organization / LGU), Organization Will Transport, and Keep Waiting for a Transporter. Because the case is Critical, all org admins get an urgent push.
+5. The admin picks Organization Will Transport. A staff member drives to the cat, then to the clinic, and taps "Arrived — Start Treatment". The case goes to In Treatment.
+
+IF...
+- IF the admin picks Keep Waiting: The prompt hides until the next failed offer.
+- IF a transporter comes online while staff are driving: Staff tap "Switch to a Transporter". The case goes back to Awaiting Assignment.
+- IF the admin picks Refer Case: See Scenario 1.8.
+- IF the search reaches 20 km with nobody online: The same prompt appears without waiting for 3 offers.
+- IF the case is not Critical: Each offer waits 20 minutes instead of 5.
+
+
+VARIATION
+SCENARIO 1.6: PROBLEMS DURING THE TRIP
+Juan accepts a case and reaches the pickup point, but something goes wrong. He ends the trip and picks an End Reason.
+
+What each End Reason does
+1. Animal/Reporter not found: Juan must search for 10 minutes, tick a box and add notes. The case becomes Unable to Locate Animal, and the reporter is notified.
+2. Reporter unreachable: the case becomes Pickup Attempt Unsuccessful, and the reporter is notified.
+3. Animal too aggressive to handle safely: the case becomes Needs Specialized Assistance, with an immediate push and dashboard alert to staff.
+4. Animal needs specialized transport: same as above, and Juan picks the service needed.
+5. Vehicle breakdown: the case goes back to Awaiting Assignment, Juan is removed, and staff assign someone else.
+6. Animal deceased: the case becomes Transit Stopped — Needs Decision. Staff are alerted, and the reporter is not told until staff confirm.
+7. Other: the case becomes Transit Stopped — Needs Decision.
+
+What staff do next
+1. Needs Specialized Assistance: Retry with a Different Transporter, Keep Transporter + Instructions, Escalate to Trained Responder / Authority, or Close Case.
+2. Transit Stopped: Confirm Death (Close Case, reason Died), Assign Another Transporter, Refer, or Close.
+3. Unable to Locate / Pickup Unsuccessful: the reporter has 48 hours to respond. With no response, the case is cancelled automatically.
+
+IF...
+- IF juan declines the offer before starting: He picks a reason, for example "Insufficient equipment". Staff get a push and can Retry or Choose Another.
+- IF something happens after pickup (on the way to the clinic or shelter): GAP: there is no End Reason on these legs. Staff use Reassign Transporter or Close Case.
+- IF juan wants to cancel after accepting but before leaving: GAP: there is no cancel button. Staff reassign the case.
+
+
+VARIATION
+SCENARIO 1.7: THE CLINIC REFUSES THE ANIMAL
+Juan arrives at the clinic with the dog, but the clinic is full.
+
+Pet transporter (Juan)
+1. Juan records Treatment Rejected and picks the reason "Clinic at full capacity".
+2. The app searches for the next vet clinic at 5 km, then 10, 20 and 40 km. It skips clinics that already refused this animal and clinics that have refused twice for lack of equipment or specialists.
+3. Juan is routed to the new clinic, and the admin sees the change on Track Case.
+4. The new clinic accepts, and the trip continues as in Scenario 1.1.
+
+IF...
+- IF other refusal reasons: Not enough supplies, needs specialist care, animal deceased, no vet available, or other.
+- IF no clinic is found within 40 km: The trip goes to the organization's shelter.
+- IF the organization has no shelter location saved: Staff get a push to set the shelter pin.
+- IF the admin chose a clinic that is closed: The app warns when the clinic is selected; the admin must tap Proceed Anyway.
+
+
+VARIATION
+SCENARIO 1.8: THE CASE IS REFERRED TO ANOTHER ORGANIZATION OR THE LGU
+Organization A accepts a report, but its shelter is full.
+
+Organization (admin)
+1. Organization A taps Refer > Another Organization and picks Organization B. The case shows Referred, and Organization B's staff get a push.
+2. Organization B accepts. It becomes the owner, and the case returns to Pending Review in its queue. The rescue continues as in Scenario 1.1.
+
+IF...
+- IF organization B declines: It gives a reason. The case goes back to Organization A, and A gets a push.
+- IF organization B does not answer: It gets a reminder at 24 hours. At 48 hours the case returns to Organization A automatically, and the referral is marked Expired.
+- IF organization A changes its mind: It taps Withdraw, and the case returns to its previous status.
+- IF the case is referred to an independent rescuer: The rescuer's case and animal limits are checked before they can accept.
+- IF the case is referred to the LGU / barangay: A one-way referral with a reason. A share link lets the LGU answer Will handle, Cannot handle or Need info. The case stays Referred until staff withdraw it.
+- IF who pays for treatment: GAP: there is no rule in the app. The cost records move with the case to the organization that accepts it. Suggested answer: the organization holding the case when a cost is incurred pays it, helped by a restricted fundraiser for the case (Scenario 4.1).
+
+
+VARIATION
+SCENARIO 1.9: OTHER ENDINGS AFTER TREATMENT
+Not every rescued animal goes to shelter intake.
+
+Organization (admin)
+1. Animal dies during treatment: staff log a Death Report with the cause. The case closes, and the close screen shows any unpaid expenses.
+2. Owner is found: staff close the case with the reason "Return / Reunite with Owner".
+3. Another organization, clinic or volunteer will care for it: staff choose Transfer.
+4. Reporter takes it home temporarily: staff choose Release to Reporter.
+5. Reporter wants to adopt it: see Scenario 2.8.
+
+IF...
+- IF the case has several animals: It closes only when every animal is discharged or deceased.
+- IF euthanasia: It is recorded as a Death Report with the cause written in.
+- IF foster or trap-neuter-return: GAP: not offered as an outcome.
+
+
+------------------------------------------------------------
+MODULE 2: ADOPTION
+Covers listing an animal, applications, interviews, release, post-adoption follow-ups and returns. Adoption is free.
+
+MAIN SCENARIO
+SCENARIO 2.1: A COMPLETE ADOPTION
+Choco, a rescued dog, has finished treatment at the shelter. Maria wants to adopt a dog.
+
+Listing (admin)
+1. Staff open Choco's animal record. His adoption status is Not Ready.
+2. Staff complete the readiness checklist: not in treatment, vaccinated, dewormed, spayed or neutered, vet checkup done, temperament assessed, photo added.
+3. When every item is met, staff set Choco to Adoptable, and he appears in Adopt a Rescue.
+
+Application (Maria)
+1. Maria taps Adopt. The app checks that Choco is still available.
+2. She fills in personal, household, pet experience and lifestyle details, uploads her ID, proof of address and home photos, and ticks the agreements.
+3. She books an interview, either on-site or online (a Zoom meeting is created). Sundays are closed. Her application is Pending.
+
+Interview and approval (admin)
+1. Staff confirm the interview. The application becomes Interview, and Maria gets a push.
+2. Maria attends. Staff mark the interview complete and rate her fit as Good candidate, next to the app's own fit score.
+3. Staff approve Maria and tap Reserve. Choco becomes Reserved for her.
+
+Release
+1. Staff print the adoption agreement. It says adoption is free and that the organization takes the animal back if Maria cannot keep him. Maria signs, and staff attach a photo of the signed copy.
+2. Staff set the follow-up schedule (for example, 2 weeks, 1 month, 3 months). The app will not release Choco without at least one follow-up.
+3. Staff tap Release Animal. Choco and Maria's application both become Adopted.
+4. Choco is delivered. Maria can now see his record and link or create a collar tag for him.
+
+Post-adoption follow-ups
+1. On each due date at 8 AM, Maria gets a reminder and submits Choco's check-in in the app.
+2. Staff review each check-in and confirm and complete it.
+3. When every follow-up is done, staff tap Mark Post-Adoption Complete. The adoption moves to the Complete tab and reminders stop.
+
+
+VARIATION
+SCENARIO 2.2: SEVERAL PEOPLE APPLY FOR THE SAME ANIMAL
+Maria, Ben and Liza all apply for Choco.
+
+Organization (admin)
+1. All three applications run side by side. Each applicant books an interview.
+2. Staff compare the fit scores and their own ratings after the interviews.
+3. Staff approve Maria and tap Reserve. Reserving is one locked step, so only one application can hold Choco.
+4. The server closes Ben's and Liza's applications with "Animal no longer available", and each gets a push.
+
+IF...
+- IF staff later unreserve Choco: He goes back to Adoptable. The closed applications are not reopened; Ben and Liza can apply again.
+- IF someone applies after Choco is reserved: The app blocks the application.
+- IF maria already has an open application for Choco: She continues that one instead of starting a new one.
+
+
+VARIATION
+SCENARIO 2.3: THE APPLICANT DOES NOT SHOW UP FOR THE INTERVIEW
+Ben booked an on-site interview for Saturday at 10 AM, and staff confirmed it.
+
+First no-show
+1. Ben does not come. Staff open his application and tap Mark No-show.
+2. His application goes back to Pending, his appointment is cleared, and he gets a push saying he can book once more.
+3. Ben books a new slot, this time online.
+
+Second no-show
+1. Ben misses the online interview too. Staff tap Mark No-show again.
+2. His application is rejected automatically with the reason "Did not attend the interview twice", and he gets a push.
+3. Staff will see this in his Applicant History if he applies again.
+
+IF...
+- IF an applicant submits but never books an interview: They get a reminder after 3 days. After 14 days with no booking, the application is withdrawn automatically.
+- IF the organization is an independent rescuer: Staff can tap Accept Without Interview, and the 3-day and 14-day reminders do not apply.
+
+
+VARIATION
+SCENARIO 2.4: THE APPLICANT IS REJECTED OR WITHDRAWS
+After Liza's interview, staff learn her apartment does not allow dogs.
+
+Organization (admin)
+1. Staff rate her fit as Not recommended.
+2. Staff tap Reject and pick the reason "Housing not suitable", with a note. The reason, note and fit rating are saved.
+3. Liza sees the result on her application tracking screen in the app.
+
+IF...
+- IF other rejection reasons: Financial concerns, unable to verify information, animal not a good match, incomplete application, failed interview, animal not available, duplicate application, or other.
+- IF maria withdraws before release: Her application becomes Withdrawn and Choco's reservation is cleared, so staff can approve someone else.
+- IF maria withdraws after release: It becomes a return request instead (Scenario 2.7).
+- IF is the applicant pushed about a rejection?: They see it in the app. There is no push for a staff rejection (GAP).
+
+
+VARIATION
+SCENARIO 2.5: DELIVERY PROBLEMS
+Staff try to deliver Choco to Maria, but nobody is home.
+
+Organization (admin)
+1. Staff record a failed delivery attempt.
+2. Maria asks to reschedule in the app, and staff set a new date.
+3. The second attempt succeeds.
+
+IF...
+- IF all 3 delivery attempts fail: The delivery button is disabled. Staff decide the next step with the adopter.
+- IF choco is reserved for someone else or already adopted: Release is blocked.
+
+
+VARIATION
+SCENARIO 2.6: MISSED FOLLOW-UPS AND WARNINGS
+Choco's one-month check-in is due, but Maria has not submitted it.
+
+What happens
+1. Maria gets a reminder on the due day and again 3 days later.
+2. At 7 days overdue, staff get a push and a dashboard alert.
+3. Staff tap Send Reminder (it cannot be sent twice within 5 minutes) or reschedule the follow-up.
+4. Maria submits the check-in, and staff complete it.
+
+IF...
+- IF maria stops responding completely: Staff can close the follow-up without a check-in, with a reason, so the record is still complete.
+- IF the check-in shows a problem (for example, Choco looks neglected): Staff send Maria a formal warning, recorded on the adoption. When it is fixed, staff mark it resolved. If it is serious, staff start a return (Scenario 2.7).
+
+
+VARIATION
+SCENARIO 2.7: THE ADOPTED ANIMAL IS RETURNED
+Three months later, Maria is moving abroad and cannot bring Choco.
+
+Adopter (Maria)
+1. Maria opens her adoption and taps Request Return. She picks a reason and urgency and adds details. The request is Pending Review.
+
+Organization (admin)
+1. Staff approve the request, schedule the retrieval and tell Maria the date.
+2. Staff pick Choco up and tap Confirm Retrieved.
+3. Staff tap Proceed to Intake. A new intake case opens, and Choco goes back to Not Ready, linked to his previous adoption.
+4. Follow-up reminders to Maria stop. Choco must pass the readiness checklist again before he is listed.
+
+IF...
+- IF the organization starts the return (for example, after unresolved warnings): Staff use Initiate Return. It goes through the same review, retrieval and intake steps.
+- IF staff decline the return: The request becomes Declined, and Choco stays with Maria.
+- IF the organization is an independent rescuer at its animal limit: Staff see a warning before approving.
+- IF maria applies to adopt again later: There is no ban, but staff see the return in her Applicant History.
+
+
+VARIATION
+SCENARIO 2.8: THE REPORTER ADOPTS THE ANIMAL THEY REPORTED
+Denise said in her report that she is interested in adopting the aspin.
+
+Steps
+1. On Track Case, Denise registers interest. Only one person can hold this spot: the reporter, or the first other person to register.
+2. She submits the request and accepts six agreements, including paying vet fees from confirmation and picking the dog up on time.
+3. The organization confirms, and Denise gets a push.
+4. After treatment, staff mark the dog ready for pickup. Denise has 72 hours and gets a reminder 24 hours before the deadline.
+5. Denise picks the dog up. Staff confirm, the animal record is created, and the case is Completed.
+
+IF...
+- IF denise misses the 72-hour pickup: Her request is withdrawn. The dog goes to shelter intake if there is space; otherwise the case is flagged for referral.
+- IF the organization declines her request: Denise gets a push, and the dog continues on the normal path (intake, then regular adoption).
+
+
+VARIATION
+SCENARIO 2.9: COMMUNITY ADOPTION
+A healthy stray puppy was reported, and the organization rejected the case as "Healthy animal, low urgency".
+
+Steps
+1. Because the case is not a lost pet, the reporter can now list the puppy for community adoption.
+2. Interested people send requests. The reporter picks one, and both sign with their typed names.
+3. When both have signed, the adoption is recorded. The case closes when every animal in it is claimed.
+4. After 14 days, the adopter is asked for a check-in.
+
+IF...
+- IF several people want the same puppy: GAP: the reporter chooses, but the other requests are not closed automatically.
+- IF the check-in is not answered: GAP: there is no reminder.
+- IF the puppy is returned: GAP: there is no return flow for community adoptions.
+
+
+------------------------------------------------------------
+MODULE 3: LOST AND FOUND PETS AND COLLAR TAGS
+Covers collar tag registration and scanning, lost and found reports, matching and reunions.
+
+MAIN SCENARIO
+SCENARIO 3.1: A LOST PET COMES HOME THROUGH ITS COLLAR TAG
+Ana registered her dog Bantay's resPAWnd collar tag. One afternoon Bantay goes missing.
+
+Owner (Ana)
+1. Ana opens Bantay's tag and marks it Lost. A lost report is opened automatically, and nearby users are alerted.
+
+Finder (Leo)
+1. Leo finds Bantay and scans the QR on the collar.
+2. Ana gets a push: "Bantay was just scanned!" The last-seen pin moves to where Leo scanned it.
+3. Ana turns on the chat, and Leo messages her.
+4. They agree where to meet.
+
+Reunion
+1. Ana gets Bantay back and taps "I got my pet back".
+2. The report becomes Reunited, the scan chats close, and the tag goes back to Active. Everyone who helped is notified.
+
+IF...
+- IF the tag is not marked Lost when scanned: The scanner only sees the pet ID card. No owner contact and no chat.
+- IF ana scans her own tag: She just sees Bantay's ID card.
+
+
+VARIATION
+SCENARIO 3.2: REUNITED WITHOUT A COLLAR TAG (MATCHING)
+Bantay has no tag. Ana files a Lost report; two days later Leo files a Found report.
+
+Steps
+1. The app compares Leo's report with open lost reports: same species, within 25 km, within 60 days, and the sex must not conflict.
+2. It scores each pair out of 100: distance (35), breed (20), color and markings (20), time (15) and sex (10). Pairs of 40 or more are saved as possible matches.
+3. This pair scores 82, so Ana gets a push about a strong match.
+4. Ana opens a private chat with Leo and taps Right match. Only now can she see Leo's contact number.
+5. They meet, and either one taps "I got my pet back" / "Returned to owner". The report becomes Reunited.
+
+IF...
+- IF ana marked Right match by mistake: She can undo it. The report stays open.
+- IF the score is between 40 and 69: The match is saved but the owner is not pushed.
+
+
+VARIATION
+SCENARIO 3.3: THE WRONG PERSON CLAIMS THE PET
+Leo found a dog and filed a Found report. Two people message him saying it is theirs.
+
+Steps
+1. Each claimant chats with Leo in a separate private chat.
+2. Leo asks each one for proof, such as photos of them with the dog, vet records, or a collar tag registration.
+3. One cannot give proof. Leo taps Not a match, and that person is notified.
+4. The other shows matching photos. Leo taps Right match, and they arrange the handover.
+
+IF...
+- IF can the app verify ownership itself?: GAP: there is no proof upload. The person who made the report decides. A registered collar tag is the strongest proof.
+
+
+VARIATION
+SCENARIO 3.4: THE FOUND PET NEEDS RESCUE, OR THE OWNER IS NEVER FOUND
+Leo finds an injured dog that looks like someone's pet.
+
+Steps
+1. When filing the Found report, Leo says the dog needs rescue. A linked rescue case (type Lost Pet) is opened.
+2. The case follows the normal rescue flow (Scenario 1.1). The organization records ownership as Unknown, Possible owner or Owner identified.
+3. If the owner appears, the case closes as reunited.
+
+IF...
+- IF no owner is ever found: GAP: lost and found reports stay open with no expiry. The rescued animal goes through intake and can later be adopted. Lost pets cannot go to community adoption.
+
+
+------------------------------------------------------------
+MODULE 4: DONATIONS AND FUNDRAISING
+Covers campaigns, online and offline donations, spending, refunds, sponsorships and in-kind donations. Only staff with the finance permission handle money; independent rescuers have no money features.
+
+MAIN SCENARIO
+SCENARIO 4.1: A COMPLETE FUNDRAISER FOR A RESCUE CASE
+Denise's aspin needs surgery, and the unpaid balance on the case is ₱11,200.
+
+Setting up (finance staff)
+1. Finance staff open the case's Case Costs and tap Create Fundraiser.
+2. The form fills in the goal (₱11,500, rounded up to the next ₱500), the medical category, Restricted (money can only be used for this case) and a 30-day deadline.
+3. They publish it. The campaign is Active.
+
+Donating (donors)
+1. Donors open Donations & Sponsorships and pick the campaign.
+2. They pay through PayMongo with card, GCash, Maya, GrabPay or QR Ph, from ₱20 to ₱100,000.
+3. The server confirms each payment with PayMongo (not the app), adds it to the total, and gives the donor a certificate.
+4. The payment that reaches ₱11,500 closes the campaign as Goal Met. That donor sees a thank-you page, and every donor gets "Goal Reached" in the app.
+
+Spending and closing (finance staff)
+1. Finance staff pay the vet bill from the campaign. Because it is above the organization's limit, a second finance admin approves it (the requester cannot approve their own).
+2. The spending line shows on the public Fund Tracking list with category, amount and date.
+3. With the balance at ₱0, staff close and archive the campaign. The history is kept in the audit log.
+
+
+VARIATION
+SCENARIO 4.2: THE GOAL IS NOT MET BY THE DEADLINE
+The deadline passes with ₱6,000 of ₱11,500 raised.
+
+Steps
+1. The hourly check marks the campaign Goal Not Met. Finance staff see "campaign ended below goal" on the dashboard.
+2. Finance staff choose one: Extend (new deadline; a public update is posted), Relaunch, Close, or Convert to General Fund.
+3. The ₱6,000 stays with the campaign and can still be spent on the case. There is no automatic refund.
+
+IF...
+- IF the campaign is restricted: Convert to General Fund is not allowed, so the money stays tied to the case.
+- IF a donor wants their money back: They can request a refund within 7 days with the reason "Campaign closed" (Scenario 4.4).
+- IF are donors told the campaign ended?: GAP: no notification. The status shows on the campaign page.
+
+
+VARIATION
+SCENARIO 4.3: THE GOAL IS EXCEEDED
+A donor gives ₱2,000 when only ₱500 was left, so the campaign ends ₱1,500 over.
+
+Steps
+1. The campaign closes as Goal Met.
+2. If the campaign is not restricted, finance staff move the extra ₱1,500 to another active campaign of the same organization with the same purpose tag. It is recorded as a transfer, not a new donation.
+3. If it is restricted, the extra is spent on the same case.
+4. The campaign cannot be archived until its balance is ₱0.
+
+IF...
+- IF a checkout was already open when the goal was reached: That payment is still accepted and counted as overflow.
+
+
+VARIATION
+SCENARIO 4.4: A DONOR ASKS FOR A REFUND
+A donor accidentally paid twice.
+
+Steps
+1. In History, the donor opens the donation, asks for a refund, picks "Duplicate" and accepts the refund terms.
+2. Finance staff see it in the Refunds tab and on the dashboard.
+3. They approve it. When possible the refund goes back through PayMongo; otherwise they refund by hand and enter a reference.
+4. The campaign total and donor count go down, the certificate is voided, and the donor is notified in the app.
+
+IF...
+- IF allowed reasons and time limit: Duplicate, wrong amount, unauthorized, campaign closed, or animal outcome. Within 7 days of paying (60 days for unauthorized), once per donation.
+- IF the money has already been spent: The refund is blocked.
+- IF finance staff decline: The donor is notified.
+- IF are staff pushed about a new request?: GAP: no push; they see it on the dashboard.
+
+
+VARIATION
+SCENARIO 4.5: CASH OR BANK DONATION, AND PAYMENT PROBLEMS
+A donor hands ₱3,000 cash to the shelter.
+
+Steps
+1. Finance staff add an Offline Donation, choose Cash, and enter a reference number and an optional receipt photo.
+2. The same reference cannot be entered twice for the same campaign.
+3. The donor gets an acknowledgment number they can print.
+
+IF...
+- IF the amount PayMongo received does not match: The donation is flagged Needs Review. Finance staff check it, then accept or void it.
+- IF a donor opens checkout but never pays: The checkout expires after 24 hours.
+
+
+VARIATION
+SCENARIO 4.6: SPONSORING AN ANIMAL
+A sponsor wants to support a shelter cat every month.
+
+Steps
+1. Staff create a sponsorship listing for the cat with a monthly amount and how the money will be used.
+2. The sponsor pays once; it covers 30 days. There is no automatic charge.
+3. 3 days before it ends, the sponsor gets a push and an in-app reminder to renew.
+4. If they do not renew, the sponsorship lapses and the sponsor is notified.
+
+IF...
+- IF the sponsor cancels: Coverage continues until the end of the paid period. They can resume later or change the next amount.
+- IF the cat is adopted or dies: GAP: the sponsorship is not closed automatically. Staff close the listing.
+
+
+VARIATION
+SCENARIO 4.7: DONATING ITEMS (IN-KIND)
+A campaign asks for 10 sacks of dog food and 5 transport crates.
+
+Steps
+1. A donor pledges 3 sacks of dog food while the campaign is active. They get a pledge reference.
+2. The donor delivers the food.
+3. Staff mark the pledge Received. The 3 sacks are added to the campaign and to the shelter stock, and the donor gets a certificate.
+
+IF...
+- IF the donor has not delivered: Staff send a follow-up notice, or cancel the pledge. The donor can also cancel their own pledge.
+- IF food stock runs low: Rescue Readiness shows "Food & medicine" as Constrained.
+
+
+------------------------------------------------------------
+MODULE 5: ORGANIZATIONS, RESCUERS AND ACCOUNTS
+Covers organization sign-up and approval, staff permissions, independent rescuers, transporter verification and account moderation.
+
+MAIN SCENARIO
+SCENARIO 5.1: A SHELTER JOINS AND SETS UP ITS TEAM
+A shelter in Quezon City wants to use resPAWnd.
+
+Steps
+1. The shelter signs up as an organization and uploads its registration, permits, shelter photos, valid ID, proof of address, rescue history and barangay clearance. Status: Pending.
+2. The platform admin reviews the documents and taps Approve. The owner is notified, and the decision is logged.
+3. The shelter admin sets the service area and shelter location, then invites staff.
+4. Each staff member gets only the permissions they need: rescue, animals, care, adoptions, campaigns, finance view or manage, volunteers, insights.
+5. The shelter starts receiving reports in its service area (Module 1).
+
+
+VARIATION
+SCENARIO 5.2: THE ORGANIZATION IS NOT APPROVED
+A group signs up but its barangay clearance is missing.
+
+Steps
+1. The platform admin chooses Requires Changes and writes a note. A note is required for anything other than Approve.
+2. The owner is notified, uploads the missing document and resubmits.
+
+IF...
+- IF the organization is not legitimate: The platform admin chooses Reject with a note.
+- IF can an unapproved organization act?: No. It has no permissions: it cannot accept cases or create campaigns.
+
+
+VARIATION
+SCENARIO 5.3: AN INDEPENDENT RESCUER
+Paolo rescues cats on his own and wants to help.
+
+Steps
+1. Paolo signs up as an Independent Rescuer and sets a home area of 1–5 km.
+2. He can have up to 5 team members, 3 active cases and 5 animals in care. He has no money features.
+3. He sees nearby non-critical cases after shelters have had 15 minutes, and Critical cases right away.
+4. He accepts a case and treats the cat himself; the case goes straight to In Treatment after the clinic.
+
+IF...
+- IF he reaches his limit: He cannot accept more cases or referrals. The platform can change his limits.
+- IF he is inactive for 30 days: His account is paused automatically (checked weekly).
+- IF he wants to raise funds: Not allowed. Money features are limited to organizations.
+
+
+VARIATION
+SCENARIO 5.4: A PET TRANSPORTER APPLIES
+Juan wants to transport animals.
+
+Steps
+1. Juan signs up as a pet transporter and submits his application. Status: Pending.
+2. Staff with the volunteers permission review it and approve. Juan is now verified.
+3. He goes online in the app (it checks in every 2 minutes) and starts receiving offers.
+
+IF...
+- IF the application is rejected: He cannot take trips or see full reports.
+- IF he goes offline or closes the app: After 5 minutes he no longer appears in the transporter list.
+
+
+VARIATION
+SCENARIO 5.5: A USER ABUSES THE PLATFORM
+A user keeps filing false reports.
+
+Steps
+1. Staff reject each one as "Invalid or false report". The reporter's track record shows a Concern.
+2. The system admin disables the account. The user is logged out and sees a disabled-account screen.
+
+IF...
+- IF staff or admin accounts: They are protected and cannot be disabled or deleted from the console.
+- IF can users report each other?: GAP: no report button. Staff rely on the track record.
+
+
+------------------------------------------------------------
+MODULE 6: EVENTS AND VOLUNTEERS
+Covers volunteer events, sign-ups, attendance and badges.
+
+MAIN SCENARIO
+SCENARIO 6.1: A COMPLETE VOLUNTEER EVENT
+The shelter holds a weekend cleanup with 20 slots.
+
+Steps
+1. Staff with the volunteers permission publish the event with a capacity of 20.
+2. Users open Events, sign up, and get an e-ticket.
+3. On the day, staff mark attendance.
+4. Volunteers earn badges based on the events they attended.
+
+
+VARIATION
+SCENARIO 6.2: THE EVENT IS FULL OR CANCELLED
+The cleanup fills up, then rain is forecast.
+
+Steps
+1. The 21st person tries to sign up and is refused because the event is full.
+2. Staff cancel the event. It is marked Cancelled and cannot be restored.
+
+IF...
+- IF sign-up after the event ended, or a second sign-up: Refused.
+- IF are registrants told about the cancellation?: GAP: no notification.
+- IF a volunteer cannot attend: GAP: there is no unregister button and no waitlist.
+
+
+------------------------------------------------------------
+PART 2. TOP 15 QUESTIONS TO KNOW WELL
+
+1. What if the transporter cancels?   [PARTIAL]
+- Before accepting: the transporter taps Decline and picks a reason (already assigned, too far, insufficient equipment, capacity full, schedule conflict, road closure or traffic, other). Staff get a push and can Retry or Choose Another.
+- If the transporter just ignores it: the offer expires on the server after 5 minutes for a Critical case or 20 minutes otherwise, and staff get a push.
+- At the pickup point: the transporter picks an End Reason. Vehicle breakdown sends the case back to Awaiting Assignment so staff can assign someone else.
+- Not built: a transporter cannot cancel after accepting but before leaving, or after pickup (on the way to the clinic or shelter). Staff handle it with Reassign Transporter or Close Case.
+SAY: Before acceptance it is a decline or an expired offer, both with a push to staff. After acceptance, the admin reassigns the case. A transporter-side cancel for the later legs is future work.
+
+2. What if no transporter accepts?   [BUILT]
+- After 3 declined or expired offers, or when no one is online within 20 km, the screen offers three choices: Refer Case (Organization / LGU), Organization Will Transport, or Keep Waiting for a Transporter.
+- With Organization Will Transport, the staff drive the animal themselves and tap "Arrived — Start Treatment" when they get to the clinic.
+- For a Critical case, every org admin also gets an urgent push: "No transporter for a Critical case".
+SAY: The system never leaves the case stuck. After three failed offers it asks the admin to refer, transport it themselves, or keep waiting.
+
+3. What if no organization accepts the report?   [BUILT]
+- The report is tagged to every approved organization whose service area covers the pin. If none covers it, or all of them are paused, the platform gets an "outside service area" or "no organization accepting" alert.
+- If no one responds within 15 minutes, nearby users get a reminder, repeated every 20 minutes.
+- A Critical report not reviewed after 30 minutes sends an urgent push to the org admins. Each org can change the 30 minutes.
+- Nearby independent rescuers can take non-critical cases after a 15-minute head start for shelters (Critical cases open to them right away). The first organization to accept wins.
+SAY: Unanswered reports escalate automatically: reminders at 15 minutes, an urgent push at 30 minutes for Critical cases, then independent rescuers can step in.
+
+4. Who pays for treatment when a case is referred?   [GAP]
+- What the app does now: costs are recorded on the case (consultation, medication, procedure, lab, vaccination, confinement, transport, food and supplies, other). Each cost has a funding source: Organization Budget, Donation Fund, Fundraiser, Other or Unfunded.
+- When another organization accepts the referral, the case and its cost records move to that organization, and the referring organization can no longer edit them.
+- A referral to the LGU only notifies them. No cost moves.
+- There is no written rule in the app about who pays.
+SAY: The organization holding the case when a cost is incurred pays for it. Costs before the referral stay with the referring organization; costs after acceptance are paid by the receiving one. Either can open a restricted medical fundraiser linked to the case, whose goal is filled in from the unpaid balance and which can only be spent on that case. If the reporter adopts the animal, they agree to pay vet fees from confirmation.
+
+5. What if several people apply to adopt the same animal?   [BUILT]
+- Applications run side by side. Each applicant books and attends an interview.
+- Staff compare the fit score with their own rating (Good candidate, Needs review, Not recommended), approve one applicant and reserve the animal for that application.
+- Reserving is done in one locked step, so only one application can hold the animal.
+- As soon as the animal is reserved or adopted, the server rejects every other open application with "Animal no longer available" and sends each applicant a push.
+- Unreserving the animal does not reopen those applications. The applicants can apply again.
+SAY: Many can apply, staff choose on fit, and the reservation locks the animal. Everyone else is closed and notified automatically.
+
+6. What if an adopted animal is returned?   [PARTIAL]
+- The adopter (or the organization) files a Return Request with a reason and urgency.
+- The request moves through Pending Review, then Approved or Declined, then Retrieval Scheduled, Retrieved and Intake.
+- At intake a new intake case opens and the animal goes back to Not Ready, linked to its previous adoption. It must pass the adoption readiness checklist again before it is listed.
+- The adoption agreement already says the organization takes the animal back. If an adopter withdraws after release, the app turns it into a return request.
+- Not built: a blacklist. Staff see the applicant's past applications and returns in Applicant History.
+SAY: Returns go back through intake and readiness. We do not ban adopters automatically; staff see their history the next time they apply.
+
+7. What happens if a campaign goal is not met by the deadline?   [PARTIAL]
+- Every hour the system checks deadlines. A campaign that ended below its goal becomes Goal Not Met and shows up as a decision on the finance staff dashboard.
+- Finance staff choose one: Extend (new deadline; a public update is posted), Relaunch, Close, or Convert to General Fund. Converting is not allowed for a restricted campaign.
+- Money already raised stays with the campaign and can still be spent on its stated purpose. There is no automatic refund.
+- Donors can ask for a refund within 7 days (reason: campaign closed). When possible the refund goes back through PayMongo.
+- Not built: donors are not notified when a campaign ends.
+SAY: Partial funds still help the animal, so we keep them and spend them on the stated purpose. Finance staff then extend, relaunch, close or move it to the general fund, and donors can still request a refund.
+
+8. What if a campaign gets more than its goal?   [BUILT]
+- The payment that reaches the goal closes the campaign as Goal Met, and past donors get a "Goal Reached" notice.
+- Extra money can be moved to another active campaign of the same organization with the same purpose tag. It is recorded as a transfer, and it is not allowed for restricted funds.
+- A campaign cannot be archived until its whole balance has been spent or moved.
+SAY: It closes itself at the goal, and any excess is moved transparently or spent before the campaign can be archived.
+
+9. What if the report is fake?   [PARTIAL]
+- The verification panel shows the evidence. Reporter's phone near the pin: within 300 m supports the report, more than 2 km is a concern. It also shows camera versus gallery photos, and flags gallery photos that are older than 48 hours or were taken more than 300 m from the pin.
+- It also shows the reporter's past false reports and other reports or sightings nearby.
+- Staff can tap Ask for live proof. The reporter can only answer with the camera, and the photo is stamped with time and place.
+- Staff reject a false report with the reason "Invalid or false report". It counts on the reporter's track record.
+- Not built: an automatic ban or rate limit. A system admin can disable the account.
+SAY: We check location, photo source and time, and the reporter's history, and can demand a live photo. Repeat false reporters are flagged to staff and can be disabled.
+
+10. What about duplicate reports of the same animal?   [BUILT]
+- Check for Duplicates lists open cases of the same species within 1 km. Compare shows two reports side by side.
+- Merge marks the duplicate as Merged and copies its reporter, photos and location into the main case. Nothing is deleted.
+- Keep Separate returns the report to Pending Review and stops suggesting that pair.
+SAY: Duplicates are merged, never deleted, so every reporter's evidence stays on the main case.
+
+11. What if the animal is not at the pin?   [PARTIAL]
+- The transporter must search for 10 minutes and tick a box confirming it, then picks the End Reason "Animal/Reporter not found". The case becomes Unable to Locate Animal.
+- If the reporter cannot be reached, the case becomes Pickup Attempt Unsuccessful.
+- The reporter is notified. If there is no response in 48 hours, the case is cancelled automatically.
+- Not built: a reply screen for the reporter. For now staff follow up through the case messages.
+SAY: The transporter must search first, the reporter is asked to respond, and the case closes itself after 48 hours with no answer.
+
+12. What if the animal dies in transit?   [BUILT]
+- At pickup, the End Reason "Animal deceased" sets the case to Transit Stopped — Needs Decision and alerts staff.
+- The reporter is not told until staff confirm the death with Close Case (reason: Died).
+- If the animal dies on the way to the clinic, the transporter records Treatment Rejected with the reason "Animal Deceased". If it dies during treatment, staff log a Death Report in the treatment log.
+SAY: Staff confirm a death before the reporter is told, so no one gets a wrong death notice.
+
+13. What if the clinic refuses the animal?   [BUILT]
+- The transporter records Treatment Rejected with a reason: full capacity, not enough supplies, needs specialist care, animal deceased, no vet available, or other.
+- The app looks for the next vet clinic at 5, 10, 20 and then 40 km. It skips clinics that already refused this animal and clinics that have refused twice for lack of equipment or specialists.
+- If no clinic is found, the trip goes to the organization's shelter.
+SAY: A refusal starts a widening search for the next clinic that skips clinics that already refused.
+
+14. What if someone falsely claims a lost pet?   [PARTIAL]
+- The matching only pairs reports of the same species, within 25 km and 60 days. It scores distance, time, breed, color and sex, and notifies the owner at a score of 70 or more.
+- A claimant can only chat privately with the person who made the report. Only that person can mark Right match or Not a match.
+- The contact number is shown only after a match is confirmed.
+- Not built: uploading proof of ownership.
+SAY: The finder decides inside a private chat and can ask for proof such as photos together, vet records or the collar tag. A registered collar tag is the strongest proof, because the owner registered it before the pet was lost.
+
+15. How is personal data protected?   [BUILT]
+- The public case feed removes the reporter's details. Only verified responders see full reports.
+- Each role and staff permission is enforced by the database rules. Money actions need the finance permission, and staff actions are written to the audit log.
+- Lost/found pet reports and community adoption listings are visible to every signed-in user on purpose, so the community can help find pets and give animals homes.
+SAY: Rescue and money records are restricted by role at the database level, and every staff action is logged. Lost/found reports and community adoption listings are public to app users on purpose, because the more people see them, the faster a pet is found or rehomed.
+
+
+PART 3. Q&A CHEAT SHEET
+
+RESCUE REPORTING AND VERIFICATION
+Q: How is urgency decided?
+A: By rescue type, not by the reporter. Injury, Illness, Neglect or Abuse and Aggressive Animal are Critical; Abandonment is Medium; Pet Surrender and Lost Pet are Low.   [BUILT]
+
+Q: Who gets notified of a new report?
+A: Staff of organizations covering the area, nearby responders (10 km), nearby users (5 km, adjustable), and independent rescuers after a 15-minute head start. Transporters are not alerted.   [BUILT]
+
+Q: What if no one responds?
+A: Nearby users get a reminder at 15 minutes and every 20 minutes after. A Critical case unreviewed for 30 minutes sends an urgent push to admins.   [BUILT]
+
+Q: How do you check a report is real?
+A: Phone location versus pin, camera versus gallery, photo time and place, reporter history, nearby reports. Staff can Ask for live proof or send a rider to check.   [BUILT]
+
+Q: What happens to someone who keeps sending false reports?
+A: Their track record shows staff a warning. A system admin can disable the account. There is no automatic ban.   [PARTIAL]
+
+Q: Is the reporter told when a report is rejected or merged?
+A: Only through the Track Case timeline. No push is sent.   [GAP]
+
+Q: Are duplicates detected automatically?
+A: Staff run Check for Duplicates (same species, 1 km). There is no automatic flag.   [PARTIAL]
+
+Q: Can two organizations accept the same case?
+A: No. Accepting is done in one locked step, and the first organization wins.   [BUILT]
+
+Q: What does Rescue Readiness do?
+A: It records Space, Transport, Care coverage, Vet access, Food & medicine, Funds and Continuing care with the case. It never blocks accepting.   [BUILT]
+
+Q: Why would a report be rejected?
+A: No riders, healthy and low urgency, no shelter space, false report, already rescued, duplicate, outside the service area, not enough information, other.   [BUILT]
+
+
+TRANSPORT
+Q: Who counts as available?
+A: Verified transporters seen in the last 5 minutes, searched within 3, 5, 10 and 20 km.   [BUILT]
+
+Q: How long does an offer wait?
+A: 5 minutes for Critical, 20 minutes otherwise. Expired offers are closed by the server every minute.   [BUILT]
+
+Q: Can two offers be out at once?
+A: No. A case has only one active offer at a time.   [BUILT]
+
+Q: How do you know the transporter really picked up the animal?
+A: Arrival is detected within 150 m, and the verification photos can only be taken within 150 m.   [BUILT]
+
+Q: Can the reporter track the transporter?
+A: Yes, on Transport Tracking. They get pushes at arrival, pickup, clinic, shelter and completion.   [BUILT]
+
+Q: Transporter cancels after pickup?
+A: There is no End Reason after pickup. Staff Reassign or Close.   [GAP]
+
+Q: Does the system re-offer automatically?
+A: No. Staff choose the next transporter.   [GAP]
+
+
+TREATMENT, REFERRAL AND EXPENSES
+Q: What is in the treatment log?
+A: Assessment, Medication, Procedure, Vaccination, Follow-up Check, Discharge, Death Report. Entries cannot be edited or deleted.   [BUILT]
+
+Q: What happens after discharge?
+A: Intake (optional quarantine), Transfer, Release to reporter, Adoption by reporter, or Return to owner.   [BUILT]
+
+Q: Is euthanasia recorded?
+A: As a Death Report with the cause written in. It is not a separate outcome.   [PARTIAL]
+
+Q: Unanswered referral?
+A: A reminder at 24 hours, then automatic return to the referring organization at 48 hours.   [BUILT]
+
+Q: Who pays after a referral?
+A: Use the policy answer in Part 2, question 4, or Scenario 1.8.   [GAP]
+
+Q: How are large expenses controlled?
+A: Above the organization's limit, a second finance admin must approve, and the requester cannot approve their own. Receipts are due within 7 days.   [BUILT]
+
+Q: Fostering or trap-neuter-return (TNR)?
+A: Not offered as an outcome.   [GAP]
+
+
+ADOPTION
+Q: Is there an adoption fee?
+A: No. Adoption is free, as stated in the agreement.   [BUILT]
+
+Q: When can an animal be listed?
+A: Only when the readiness checklist is met (not in treatment, vaccinated, dewormed, spay/neuter, vet check, temperament, photo). Staff can override an item with a written reason.   [BUILT]
+
+Q: Multiple applicants?
+A: They run in parallel. Reserving locks the animal, and the others are rejected and notified automatically.   [BUILT]
+
+Q: Applicant does not show up?
+A: The first no-show allows one rebooking. The second rejects the application.   [BUILT]
+
+Q: Applicant never books?
+A: A reminder at 3 days, then automatic withdrawal at 14 days.   [BUILT]
+
+Q: How do you follow up after adoption?
+A: Scheduled check-ins with reminders on the due day and 3 days later, and a staff alert at 7 days overdue. Staff can send warnings.   [BUILT]
+
+Q: Returned animal?
+A: Return request, review, retrieval, then back to intake and Not Ready.   [BUILT]
+
+Q: Are bad adopters blacklisted?
+A: No. Staff see Applicant History.   [GAP]
+
+Q: Is there a limit on applications per person?
+A: No. A person can apply for several animals.   [GAP]
+
+
+LOST AND FOUND AND COLLAR TAGS
+Q: How are lost and found reports matched?
+A: Same species, within 25 km and 60 days, scored out of 100 on distance, time, breed, color and sex. Matches of 40 or more are saved, and the owner is notified at 70 or more.   [BUILT]
+
+Q: What does scanning a tag do?
+A: If the pet is lost: the owner is notified, the location is updated, and a chat is set up. Otherwise the scanner only sees the ID card.   [BUILT]
+
+Q: Proof of ownership?
+A: The person who made the report decides in a private chat. No document upload.   [GAP]
+
+Q: Report never resolved?
+A: It stays open with no expiry.   [GAP]
+
+
+DONATIONS AND CAMPAIGNS
+Q: How do you know a payment is real?
+A: It is confirmed on the server with PayMongo (signed webhook). Mismatched amounts are flagged for finance review.   [BUILT]
+
+Q: Can donors see where money went?
+A: Yes. Fund Tracking lists each spending line with category, amount and date.   [BUILT]
+
+Q: Who can touch money?
+A: Only staff with the finance permission in an approved organization. Independent rescuers have no money features. Everything is in the audit log.   [BUILT]
+
+Q: Goal not met?
+A: Goal Not Met, then a finance decision: extend, relaunch, close, or convert to general fund. No automatic refund.   [PARTIAL]
+
+Q: Refunds?
+A: Requested within 7 days. Finance approves through PayMongo where possible. Blocked if the money is already spent.   [BUILT]
+
+Q: Are staff notified of a refund request?
+A: Only on the dashboard and the Refunds tab. No push.   [GAP]
+
+Q: How do you stop fake campaigns?
+A: Only approved organizations can create campaigns, and there is a full audit trail. There is no report button for campaigns.   [PARTIAL]
+
+Q: What if a sponsored animal is adopted or dies?
+A: The sponsorship is not closed automatically. Staff close it.   [GAP]
+
+
+PART 4. GAPS AND WHAT TO SAY
+Features the app does not have yet. Fix the quick ones before the defense if you can; otherwise use the line under each one.
+
+1. No payer rule for treatment costs after a referral.
+   Possible fix: Add "incurred by organization" to each expense.
+   What to say: The organization holding the case when a cost is incurred pays it; a restricted case fundraiser can cover the rest.
+
+2. The transporter cannot cancel after accepting, or after pickup.
+   Possible fix: Add End Reasons on the clinic and shelter legs.
+   What to say: The admin reassigns or closes the case; this is planned as future work.
+
+3. No push to the reporter on reject, merge or referral.
+   Possible fix: Quick: add to the existing case-status notification.
+   What to say: The reporter sees every change on the Track Case timeline.
+
+4. The reporter has no screen to reply when their case is Unable to Locate.
+   Possible fix: Add a reply action on Track Case.
+   What to say: Staff reach the reporter through case messages; the case auto-closes after 48 hours.
+
+5. Donors are not notified when a campaign misses its goal or closes.
+   Possible fix: Quick: notify donors from the hourly deadline check.
+   What to say: The status is shown on the campaign page, and donors may request a refund.
+
+6. Community adoption does not close the other requests, and has no return flow.
+   Possible fix: Close other requests when one is completed.
+   What to say: The reporter chooses and coordinates directly.
+
+7. No adopter blacklist, no limit on applications, no false-reporter ban.
+   Possible fix: Optional.
+   What to say: Staff review history; a system admin can disable abusive accounts.
+
+8. No proof-of-ownership upload for lost pets; lost reports never expire.
+   Possible fix: Optional.
+   What to say: Collar tag registration serves as proof; the finder decides in the private chat.
+
+9. No foster or TNR outcome; no vet or LGU accounts.
+   Possible fix: Out of scope.
+   What to say: Clinics are chosen from Google Places; LGUs get a referral link instead of an account.
+
+10. Events: no unregister, no waitlist, no cancellation notice.
+   Possible fix: Optional.
+   What to say: Volunteer events are a supporting module.
+
+11. Sponsorships are not closed automatically when the animal is adopted or dies.
+   Possible fix: Optional.
+   What to say: Staff close the listing, and sponsors can cancel at any time.
+
+
+APPENDIX. CHANGES FROM THE ORIGINAL SCENARIO #1
+What was changed from the original Scenario #1 (now Scenario 1.1, with the duplicate report moved to 1.3 and the expired offer to 1.5):
+- The offer waits 5 minutes for a Critical case (not 2–5 minutes) and 20 minutes otherwise.
+- The duplicate check looks for the same species within 1 km.
+- Merge needs the staff "rescue" permission. The button says "Admin only".
+- Merging does not send a push to either reporter. It only adds a line to each case timeline.
+- Rescue Readiness has 7 factors (Space, Transport, Care coverage, Vet access, Food & medicine, Funds, Continuing care). It is saved with the case but never blocks accepting.
+- "Online" transporters are verified transporters seen in the last 5 minutes. The search widens from 3 to 5, 10 and 20 km.
+- The steps at the pickup point were out of order. The arrival check (within 150 m) comes first, then the crate and photos.
+- Verification photos (at least 1, up to 2) can only be taken within 150 m of the spot.
+- The name of the second reporter was blank; "Carlo" is used in Scenario 1.3. Change it if you like.

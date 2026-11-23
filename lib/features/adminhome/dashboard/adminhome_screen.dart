@@ -1,6 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:respawnd1/core/constants/feature_flags.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/core/widgets/welcome_greeting.dart';
@@ -134,8 +135,9 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
                   ),
                 const SizedBox(height: 14),
                 // Independent rescuers: their area map, availability and
-                // capacity first (nothing for shelters).
-                if (_tab == _DashTab.today) const IndependentAreaCard(),
+                // capacity first (nothing for shelters). Off while rescue
+                // volunteers are (FeatureFlags.independentRescuersEnabled).
+                if (_tab == _DashTab.today && FeatureFlags.independentRescuersEnabled) const IndependentAreaCard(),
                 if (_tab == _DashTab.today) const TodayView() else const AnalyticsView(),
               ],
             ),

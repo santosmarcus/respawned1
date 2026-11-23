@@ -45,6 +45,11 @@ class LastSeenLocationPicker extends StatefulWidget {
   final String pinLabel;
   final String? confirmLabel;
 
+  /// Opens on this pin (e.g. one saved earlier) instead of the phone's
+  /// current location.
+  final double? initialLat;
+  final double? initialLng;
+
   const LastSeenLocationPicker({
     super.key,
     this.petName = 'your pet',
@@ -52,6 +57,8 @@ class LastSeenLocationPicker extends StatefulWidget {
     this.instructionText,
     this.pinLabel = 'Pinned location',
     this.confirmLabel,
+    this.initialLat,
+    this.initialLng,
   });
 
   @override
@@ -70,7 +77,16 @@ class _LastSeenLocationPickerState extends State<LastSeenLocationPicker> {
   @override
   void initState() {
     super.initState();
-    _fetchCurrentLocation();
+    final lat = widget.initialLat;
+    final lng = widget.initialLng;
+    if (lat != null && lng != null) {
+      _pinnedLocation = LatLng(lat, lng);
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _updatePin(LatLng(lat, lng));
+      });
+    } else {
+      _fetchCurrentLocation();
+    }
   }
 
   @override

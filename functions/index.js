@@ -5,14 +5,22 @@ const {defineSecret} = require('firebase-functions/params');
 const admin = require('firebase-admin');
 
 admin.initializeApp();
-const {orgMemberUids, requireOrgPermission} = require('./org_access');
+const {orgMemberUids, requireOrgPermission, isIndependent, effectiveAccess} = require('./org_access');
+const independentRules = require('./independent_rescuer_rules');
 const orgInvolvement = require('./org_involvement');
 const db = admin.firestore();
 
+// A finder scanning a lost pet's collar tag (in the app or on the web page
+// public/tag/index.html) gets their own private chat with the owner:
+// rescueSessions/{id} with tagId, ownerId and finderId (firestore.rules lets
+// only those two read it). Scanning again reuses the finder's open chat and
+// refreshes where the pet was seen. Every scan updates the tag's last-seen
+// pin and notifies the owner (notifyTagScan).
 exports.getOrCreateRescueSession = onCall(async (request) => {
   if (!request.auth) {
     throw new HttpsError('unauthenticated', 'Sign in required.');
   }
+  const finderId = request.auth.uid;
 
   const {tagId, location} = request.data || {};
   if (!tagId) {
@@ -25,129 +33,100 @@ exports.getOrCreateRescueSession = onCall(async (request) => {
     throw new HttpsError('not-found', 'This tag is not registered.');
   }
   const tagData = tagSnap.data();
+  const ownerId = tagData.ownerId || null;
 
-  // Only a pet its owner has marked lost gets a rescue session. Previously
-  // any scan created one AND flipped the tag to status 'lost' below, so
-  // scanning a pet that wasn't lost marked it lost and opened the lost-pet
-  // chat.
+  // Only a pet its owner has marked lost gets a scan chat.
   if (tagData.status !== 'lost') {
     throw new HttpsError('failed-precondition', 'This pet is not marked as lost.');
+  }
+  // The owner scanning their own tag doesn't chat with themselves.
+  if (ownerId && ownerId === finderId) {
+    throw new HttpsError('failed-precondition', 'This is your own pet\'s tag.');
   }
 
   const lat = location && typeof location.lat === 'number' ? location.lat : null;
   const lng = location && typeof location.lng === 'number' ? location.lng : null;
   const address = location && typeof location.address === 'string' ? location.address : null;
+  const hasLocation = lat !== null && lng !== null;
+  const now = admin.firestore.FieldValue.serverTimestamp();
 
-  // Reuse the existing session if this tag already has one that's still
-  // active, instead of spawning a new one on every re-scan of an
-  // already-lost pet.
-  const existingSessionId = tagData.activeRescueSessionId;
-  if (existingSessionId) {
-    const existingRef = db.collection('rescueSessions').doc(existingSessionId);
-    const existingSnap = await existingRef.get();
-    if (existingSnap.exists && existingSnap.data().status !== 'resolved') {
-      // Keep the location fresh on every re-scan — a later scan (better
-      // GPS fix, a successful reverse-geocode where an earlier one failed,
-      // or the animal having moved somewhere new) shouldn't be stuck
-      // showing whatever the very first scan happened to save.
-      if (lat !== null && lng !== null) {
-        await existingRef.set(
-          {
-            lat,
-            lng,
-            ...(address !== null ? {address} : {}),
-            lastScannedAt: admin.firestore.FieldValue.serverTimestamp(),
-          },
-          {merge: true},
-        );
-
-        const tagRescanUpdate = {
-          lastSeenLat: lat,
-          lastSeenLng: lng,
-          ...(address !== null ? {lastSeenAddress: address} : {}),
-        };
-        await tagRef.set(tagRescanUpdate, {merge: true});
-        const rescanOwnerId = tagData.ownerId;
-        if (rescanOwnerId) {
-          await db
-            .collection('users')
-            .doc(rescanOwnerId)
-            .collection('collarTags')
-            .doc(tagId)
-            .set(tagRescanUpdate, {merge: true});
-        }
-      }
-
-      try {
-        await notifyTagScan({
-          tagId,
-          tagData,
-          sessionId: existingSessionId,
-          scannerUid: request.auth.uid,
-          lat,
-          lng,
-          address,
-          isNewSession: false,
-        });
-      } catch (e) {
-        console.warn('notifyTagScan failed', e.message);
-      }
-
-      return {sessionId: existingSessionId};
+  // The pin follows the latest sighting.
+  if (hasLocation) {
+    const pin = {lastSeenLat: lat, lastSeenLng: lng, ...(address !== null ? {lastSeenAddress: address} : {})};
+    await tagRef.set(pin, {merge: true});
+    if (ownerId) {
+      await db.collection('users').doc(ownerId).collection('collarTags').doc(tagId).set(pin, {merge: true});
     }
   }
 
-  const sessionRef = db.collection('rescueSessions').doc();
-  await sessionRef.set({
-    tagId,
-    status: 'active',
-    chatEnabledByOwner: false,
-    // A shelter animal's tag (collarTags/animal-{id}) has no owner account:
-    // its organization's staff answer the finder (firestore.rules).
-    ...(tagData.organizationId ? {organizationId: tagData.organizationId} : {}),
-    createdAt: admin.firestore.FieldValue.serverTimestamp(),
-    ...(lat !== null ? {lat} : {}),
-    ...(lng !== null ? {lng} : {}),
-    ...(address !== null ? {address} : {}),
-  });
+  // This finder's open chat on this tag, if they scanned it before.
+  const mine = await db.collection('rescueSessions')
+    .where('tagId', '==', tagId)
+    .where('finderId', '==', finderId)
+    .get();
+  const open = mine.docs.find((d) => d.get('status') !== 'resolved');
 
-  const tagUpdate = {
-    status: 'lost',
-    activeRescueSessionId: sessionRef.id,
-    lostAt: admin.firestore.FieldValue.serverTimestamp(),
-    ...(lat !== null ? {lastSeenLat: lat} : {}),
-    ...(lng !== null ? {lastSeenLng: lng} : {}),
-    ...(address !== null ? {lastSeenAddress: address} : {}),
-  };
-
-  await tagRef.set(tagUpdate, {merge: true});
-
-  const ownerId = tagData.ownerId;
-  if (ownerId) {
-    await db
-      .collection('users')
-      .doc(ownerId)
-      .collection('collarTags')
-      .doc(tagId)
-      .set(tagUpdate, {merge: true});
+  let sessionId;
+  let isNewSession = false;
+  if (open) {
+    sessionId = open.id;
+    if (hasLocation) {
+      await open.ref.set(
+        {lat, lng, ...(address !== null ? {address} : {}), lastScannedAt: now},
+        {merge: true},
+      );
+    }
+  } else {
+    let finderName = '';
+    try {
+      const u = (await db.collection('users').doc(finderId).get()).data() || {};
+      finderName = (u.displayName || `${u.firstName || ''} ${u.lastName || ''}`.trim() || u.name || '').toString().trim();
+    } catch (e) {
+      // Anonymous web finders have no profile.
+    }
+    const sessionRef = db.collection('rescueSessions').doc();
+    await sessionRef.set({
+      tagId,
+      ownerId,
+      finderId,
+      finderName: finderName || null,
+      status: 'active',
+      chatEnabledByOwner: false,
+      // A shelter animal's tag (collarTags/animal-{id}) has no owner account:
+      // its organization's staff answer the finder (firestore.rules).
+      ...(tagData.organizationId ? {organizationId: tagData.organizationId} : {}),
+      createdAt: now,
+      lastScannedAt: now,
+      ...(lat !== null ? {lat} : {}),
+      ...(lng !== null ? {lng} : {}),
+      ...(address !== null ? {address} : {}),
+    });
+    sessionId = sessionRef.id;
+    isNewSession = true;
+    // The latest chat, for app versions that only read this one field.
+    const latest = {activeRescueSessionId: sessionId};
+    await tagRef.set(latest, {merge: true});
+    if (ownerId) {
+      await db.collection('users').doc(ownerId).collection('collarTags').doc(tagId).set(latest, {merge: true});
+    }
   }
 
   try {
     await notifyTagScan({
       tagId,
       tagData,
-      sessionId: sessionRef.id,
-      scannerUid: request.auth.uid,
+      sessionId,
+      scannerUid: finderId,
       lat,
       lng,
       address,
-      isNewSession: true,
+      isNewSession,
     });
   } catch (e) {
     console.warn('notifyTagScan failed', e.message);
   }
 
-  return {sessionId: sessionRef.id};
+  return {sessionId};
 });
 const UNCONFIRMED_THRESHOLD_MINUTES = 15;
 const NUDGE_COOLDOWN_MINUTES = 20;
@@ -200,6 +179,21 @@ function hasReceivedResponse(c, communityReportsCount) {
   return false;
 }
 
+// How every push is delivered: high priority on the app's notification
+// channel (NotificationService.channelId) with sound, so Android shows it
+// as a heads-up banner even when the app is closed or the phone is idle,
+// and iOS plays a sound.
+const PUSH_DELIVERY = {
+  android: {
+    priority: 'high',
+    notification: {channelId: 'respawnd_alerts', sound: 'default'},
+  },
+  apns: {
+    headers: {'apns-priority': '10'},
+    payload: {aps: {sound: 'default'}},
+  },
+};
+
 async function notifyUser({uid, title, body, data}) {
   if (!uid) return false;
   const userDoc = await db.collection('users').doc(uid).get();
@@ -211,6 +205,7 @@ async function notifyUser({uid, title, body, data}) {
     token,
     notification: {title, body},
     data,
+    ...PUSH_DELIVERY,
   });
   return true;
 }
@@ -285,6 +280,7 @@ async function notifyNearbyUsers({
   excludeUids = [],
   roles = null, // only these roles (null = any role)
   excludeRoles = null, // never these roles
+  excludeOrgIds = [], // never people whose users.organizationId is one of these
   radiusKm = RADIUS_KM,
   category = null, // one of NOTIFY_CATEGORY; users can mute categories
   title,
@@ -312,6 +308,7 @@ async function notifyNearbyUsers({
     if (role === TRANSPORTER_ROLE) return;
     if (roles && !roles.includes(role)) return;
     if (excludeRoles && excludeRoles.includes(role)) return;
+    if (u.organizationId && excludeOrgIds.includes(u.organizationId)) return;
     if (!userWantsCategory(u, category)) return;
     if (Math.abs(u.lastLng - lng) > lngDeltaDeg) return;
     if (haversineKm(lat, lng, u.lastLat, u.lastLng) <= userAlertRadiusKm(u, radiusKm)) {
@@ -327,6 +324,7 @@ async function notifyNearbyUsers({
       tokens: list.slice(i, i + FCM_MULTICAST_LIMIT),
       notification: {title, body},
       data: toFcmData(data),
+      ...PUSH_DELIVERY,
     });
   }
 
@@ -370,28 +368,56 @@ function serviceAreaMessage(c, isCritical) {
   }
 }
 
+// Returns the ids of every approved independent rescuer, so the nearby
+// responder push can leave their people out (they hear about the case when
+// it opens to them, see independent_rescuers.js).
 async function assignCaseToServiceAreas({caseRef, caseId, c, isCritical}) {
   const orgsSnap = await db
     .collection('organizations')
     .where('verificationStatus', '==', 'approved')
     .get();
 
-  const matched = orgsSnap.docs
-    .filter((d) => orgCoversPoint(d.data(), c.lat, c.lng))
+  // Independent rescuers aren't part of the shelters' coverage: a report
+  // opens to the ones covering it after the shelters' head start (none for
+  // Critical), and only while it's still unowned.
+  const independentIds = orgsSnap.docs.filter((d) => isIndependent(d.data())).map((d) => d.id);
+  const nearbyIndependentIds = independentRules
+      .nearbyIndependents(orgsSnap.docs.map((d) => ({id: d.id, data: d.data()})), c.lat, c.lng)
+      .map((x) => x.id);
+  const createdMs = c.createdAt && c.createdAt.toMillis ? c.createdAt.toMillis() : Date.now();
+
+  const shelters = orgsSnap.docs.filter((d) => !isIndependent(d.data()));
+  const covering = shelters.filter((d) => orgCoversPoint(d.data(), c.lat, c.lng));
+  // An org admin can pause new reports (Organization Profile → "Accepting
+  // new rescue reports"); a paused org isn't tagged or notified.
+  const matched = covering
+    .filter((d) => d.get('acceptingCases') !== false)
     .map((d) => d.id);
+  const allPaused = covering.length > 0 && matched.length === 0;
 
   await caseRef.update({
     areaOrgIds: matched,
-    outsideServiceArea: matched.length === 0,
+    outsideServiceArea: covering.length === 0,
+    ...(allPaused ? {noOrgAccepting: true} : {}),
+    nearbyIndependentIds,
+    ...(nearbyIndependentIds.length ? {
+      independentsOpenAt: admin.firestore.Timestamp.fromMillis(
+          independentRules.independentsOpenAtMs(createdMs, c.urgency)),
+      independentsNotified: false,
+    } : {}),
   });
 
   // Pet Surrender goes to Community Adoption, not to an organization: no
   // staff push and no outside-coverage alert (org_involvement.js).
-  if (orgInvolvement.involvementOf(c) === orgInvolvement.NOT_ORG_FACILITATED) return;
+  if (orgInvolvement.involvementOf(c) === orgInvolvement.NOT_ORG_FACILITATED) return independentIds;
+
+  // Covered by independents only: no admin alert, they'll be told when it
+  // opens to them.
+  if (matched.length === 0 && nearbyIndependentIds.length) return independentIds;
 
   if (matched.length === 0) {
     await db.collection('adminAlerts').add({
-      type: 'outside_service_area',
+      type: allPaused ? 'no_org_accepting' : 'outside_service_area',
       caseId,
       lat: c.lat,
       lng: c.lng,
@@ -399,7 +425,7 @@ async function assignCaseToServiceAreas({caseRef, caseId, c, isCritical}) {
       createdAt: admin.firestore.FieldValue.serverTimestamp(),
       resolved: false,
     });
-    return;
+    return independentIds;
   }
 
   // Staff of the matched organizations who handle rescues.
@@ -418,7 +444,7 @@ async function assignCaseToServiceAreas({caseRef, caseId, c, isCritical}) {
       tokens.add(d.fcmToken);
     });
   }
-  if (tokens.size === 0) return;
+  if (tokens.size === 0) return independentIds;
 
   const list = [...tokens];
   for (let i = 0; i < list.length; i += FCM_MULTICAST_LIMIT) {
@@ -426,8 +452,10 @@ async function assignCaseToServiceAreas({caseRef, caseId, c, isCritical}) {
       tokens: list.slice(i, i + FCM_MULTICAST_LIMIT),
       notification: serviceAreaMessage(c, isCritical),
       data: toFcmData({type: 'new_case_service_area', caseId}),
+      ...PUSH_DELIVERY,
     });
   }
+  return independentIds;
 }
 
 // 1. Immediate alert the moment a new case is reported.
@@ -447,17 +475,20 @@ exports.notifyNewCaseReported = onDocumentCreated(
     const isCritical = c.urgency === 'Critical';
 
     // Which organizations' coverage geofences contain this case?
-    await assignCaseToServiceAreas({caseRef: snap.ref, caseId, c, isCritical});
+    const independentIds = await assignCaseToServiceAreas({caseRef: snap.ref, caseId, c, isCritical});
 
     // Surrenders and reporter-led neglect/abuse reports are not calls for
     // help: no responder or public broadcast (org_involvement.js).
     if (!orgInvolvement.broadcastsForHelp(c)) return;
 
-    // Responders: wider geofence + "view and accept" wording.
+    // Responders: wider geofence + "view and accept" wording. Independent
+    // rescuers' people are left out: the case opens to them after the
+    // shelters' head start (openCasesToIndependents).
     await notifyNearbyUsers({
       lat: c.lat,
       lng: c.lng,
       excludeUid: c.reporterId,
+      excludeOrgIds: independentIds,
       roles: RESPONDER_ROLES,
       radiusKm: RESPONDER_RADIUS_KM,
       category: NOTIFY_CATEGORY.newCase,
@@ -764,13 +795,35 @@ exports.notifyPetAlertNearby = onDocumentCreated(
 // Collar tag scans: the owner hears about every scan of their lost pet;
 // people nearby are alerted only when a scan opens a new rescue session
 // (re-scans don't re-alert the neighbourhood).
+// A collar tag chat notice for the owner or the finder: an in-app item
+// (users/{uid}/notifications) plus a push, both carrying {type, tagId,
+// sessionId} so a tap opens the chat (NotificationService._pageFor).
+// Finders scanning on the web page (anonymous, no profile) have neither.
+async function notifyTagChatParty(uid, {title, body, data}) {
+  if (!uid) return;
+  const userSnap = await db.collection('users').doc(uid).get();
+  if (!userSnap.exists) return;
+  try {
+    await db.collection('users').doc(uid).collection('notifications').add({
+      title,
+      message: body,
+      timestamp: admin.firestore.FieldValue.serverTimestamp(),
+      isRead: false,
+      ...data,
+    });
+  } catch (e) {
+    console.warn('[collarTag] in-app notification failed', uid, e.message);
+  }
+  await safeNotifyUser({uid, title, body, data});
+}
+
 async function notifyTagScan({tagId, tagData, sessionId, scannerUid, lat, lng, address, isNewSession}) {
   const petName = tagData.name || 'Your pet';
   const ownerId = tagData.ownerId;
 
   if (ownerId && ownerId !== scannerUid) {
-    await safeNotifyUser({
-      uid: ownerId,
+    // In the owner's notifications list too, not only as a push.
+    await notifyTagChatParty(ownerId, {
       title: `${petName} was just scanned!`,
       body: address
         ? `Someone scanned ${petName}'s tag near ${address}. Tap to open the chat.`
@@ -809,6 +862,60 @@ async function notifyTagScan({tagId, tagData, sessionId, scannerUid, lat, lng, a
     });
   }
 }
+
+// The owner opened a scan chat (chatEnabledByOwner false -> true): the
+// finder who scanned the tag is told they can message the owner now.
+exports.notifyTagChatEnabled = onDocumentUpdated('rescueSessions/{sessionId}', async (event) => {
+  const before = event.data && event.data.before.data();
+  const after = event.data && event.data.after.data();
+  if (!before || !after) return;
+  if (before.chatEnabledByOwner === true || after.chatEnabledByOwner !== true) return;
+  if (!after.finderId || after.status === 'resolved') return;
+  const tagSnap = await db.collection('collarTags').doc(after.tagId).get();
+  const petName = (tagSnap.exists && tagSnap.get('name')) || 'the pet';
+  await notifyTagChatParty(after.finderId, {
+    title: `${petName}'s owner opened the chat`,
+    body: `You can now message ${petName}'s owner about where you found them.`,
+    data: {type: 'tag_chat_enabled', tagId: after.tagId, sessionId: event.params.sessionId},
+  });
+});
+
+// A message in a scan chat: the other person is told (the finder when the
+// owner writes, the owner when the finder writes).
+exports.notifyTagChatMessage = onDocumentCreated(
+  'rescueSessions/{sessionId}/messages/{messageId}',
+  async (event) => {
+    const msg = event.data && event.data.data();
+    if (!msg) return;
+    const {sessionId} = event.params;
+    const sessionSnap = await db.collection('rescueSessions').doc(sessionId).get();
+    if (!sessionSnap.exists) return;
+    const session = sessionSnap.data();
+    const tagSnap = await db.collection('collarTags').doc(session.tagId).get();
+    const tag = tagSnap.exists ? tagSnap.data() : {};
+    const ownerId = session.ownerId || tag.ownerId || null;
+    const petName = tag.name || 'your pet';
+    const text = (msg.text || '').toString().replace(/\s+/g, ' ').trim();
+    const preview = text.length > 120 ? `${text.slice(0, 119)}…` : text;
+
+    if (msg.sender === 'finder') {
+      if (!ownerId || ownerId === msg.senderId) return;
+      const who = (session.finderName || '').toString().trim() || 'The person who found ' + petName;
+      await notifyTagChatParty(ownerId, {
+        title: `${who} sent a message`,
+        body: preview || `New message about ${petName}.`,
+        data: {type: 'tag_chat_message', tagId: session.tagId, sessionId},
+      });
+    } else if (msg.sender === 'owner') {
+      if (!session.finderId || session.finderId === msg.senderId) return;
+      await notifyTagChatParty(session.finderId, {
+        title: `${tag.name || 'The pet'}'s owner replied`,
+        body: preview || 'New message from the owner.',
+        data: {type: 'tag_chat_message', tagId: session.tagId, sessionId},
+      });
+    }
+  },
+);
 
 // ---- Pet transporter notifications ----------------------------------------
 //
@@ -915,6 +1022,7 @@ async function notifyStaff(uids, {title, body, data}) {
         isRead: false,
         type: data.type,
         caseId: data.caseId || null,
+        adoptionId: data.adoptionId || null,
         ...(data.organizationId ? {organizationId: data.organizationId} : {}),
         ...(data.animalIds ? {animalIds: data.animalIds} : {}),
         ...(data.cashOutId ? {cashOutId: data.cashOutId} : {}),
@@ -1954,6 +2062,7 @@ exports.facebookConfirmPageSelection = facebook.facebookConfirmPageSelection;
 exports.facebookTestConnection = facebook.facebookTestConnection;
 exports.facebookDisconnectPage = facebook.facebookDisconnectPage;
 exports.facebookPublishAnimalRecords = facebook.facebookPublishAnimalRecords;
+exports.facebookPublishRecordPost = facebook.facebookPublishRecordPost;
 exports.facebookSetPublisher = facebook.facebookSetPublisher;
 // Cash-outs (functions/campaigns.js, functions/paymongo.js): money taken out
 // of PayMongo, the bank or the cash box. Everyone who can see the
@@ -1994,10 +2103,18 @@ Object.assign(exports, require('./adoptions'));
 Object.assign(exports, require('./audit_logs'));
 // Member access (Admin/Staff and permissions) — see functions/org_members.js.
 Object.assign(exports, require('./org_members'));
+// Delete my account, and system admins disabling/removing users — see functions/account_deletion.js.
+Object.assign(exports, require('./account_deletion'));
+// One mobile number, one account — see functions/phone_accounts.js.
+Object.assign(exports, require('./phone_accounts'));
 // Shareable referral links (public/referral/index.html) — see functions/referral_shares.js.
 Object.assign(exports, require('./referral_shares')({notifyStaff, orgStaffUids}));
+
+Object.assign(exports, require('./independent_rescuers')({notifyStaff, orgStaffUids}));
 // Public copy of each animal for non-staff readers — see functions/public_animals.js.
 exports.syncPublicAnimal = require('./public_animals').syncPublicAnimal;
+// Public web page for one animal (/animal/<id>), linked from Facebook posts — see functions/public_animal_page.js.
+exports.publicAnimalPage = require('./public_animal_page').publicAnimalPage;
 
 // Sponsorship listings: open / fully funded from their recorded money
 // (functions/sponsorship_funding.js).
@@ -2026,12 +2143,44 @@ const ORG_REVIEW_DECISIONS = {
   },
 };
 
+// The same decisions, worded for a rescue volunteer.
+const VOLUNTEER_REVIEW_DECISIONS = {
+  approved: {
+    title: 'Rescue volunteer approved',
+    body: () => 'You\'re approved as a rescue volunteer. You can now take nearby cases.',
+  },
+  rejected: {
+    title: 'Rescue volunteer application not approved',
+    body: () => 'Your rescue volunteer application was not approved. Open the app to see why.',
+  },
+  requiresChanges: {
+    title: 'Changes needed',
+    body: () => 'Your rescue volunteer application needs changes to its documents before it can be approved.',
+  },
+};
+
+/// The organization an account reviews rescue volunteers for: an approved
+/// shelter where it holds the Volunteers permission. Null otherwise.
+async function volunteerReviewerOrg(uid, userData) {
+  const orgId = typeof userData.organizationId === 'string' ? userData.organizationId : '';
+  if (!orgId) return null;
+  const orgRef = db.collection('organizations').doc(orgId);
+  const [org, member] = await Promise.all([orgRef.get(), orgRef.collection('members').doc(uid).get()]);
+  if (!org.exists || isIndependent(org.data())) return null;
+  const access = effectiveAccess({
+    uid, orgId, org: org.data(), member: member.exists ? member.data() : null, userOrgId: orgId,
+  });
+  return access.active && access.has('volunteers') ? {id: orgId, name: org.get('name') || ''} : null;
+}
+
 exports.reviewOrganization = onCall(async (request) => {
   const uid = request.auth && request.auth.uid;
   if (!uid) throw new HttpsError('unauthenticated', 'Sign in required.');
   const reviewer = await db.collection('users').doc(uid).get();
   const reviewerData = reviewer.exists ? reviewer.data() : {};
-  if (!['admin', 'ngo_staff', 'system_admin'].includes(reviewerData.role)) {
+  const platformReviewer = ['admin', 'ngo_staff', 'system_admin'].includes(reviewerData.role);
+  const reviewerOrg = platformReviewer ? null : await volunteerReviewerOrg(uid, reviewerData);
+  if (!platformReviewer && !reviewerOrg) {
     throw new HttpsError('permission-denied', 'Only platform staff can review organizations.');
   }
 
@@ -2050,12 +2199,16 @@ exports.reviewOrganization = onCall(async (request) => {
   }
   if (note.length > 1000) throw new HttpsError('invalid-argument', 'Keep the note under 1,000 characters.');
 
-  const reviewerName = reviewerData.name || reviewerData.fullName || reviewerData.email || 'Platform staff';
+  const personName = reviewerData.name || reviewerData.fullName || reviewerData.email || 'Platform staff';
+  const reviewerName = reviewerOrg && reviewerOrg.name ? `${personName} (${reviewerOrg.name})` : personName;
   const orgRef = db.collection('organizations').doc(organizationId);
   const org = await db.runTransaction(async (tx) => {
     const snap = await tx.get(orgRef);
     if (!snap.exists) throw new HttpsError('not-found', 'Organization not found.');
     const data = snap.data();
+    if (!platformReviewer && !isIndependent(data)) {
+      throw new HttpsError('permission-denied', 'Only platform staff can review organizations.');
+    }
     if (data.verificationStatus !== 'pending') {
       throw new HttpsError('failed-precondition', 'This organization is not waiting for review.');
     }
@@ -2078,6 +2231,7 @@ exports.reviewOrganization = onCall(async (request) => {
       actorId: uid,
       actorName: reviewerName,
       organizationId,
+      ...(reviewerOrg ? {reviewerOrganizationId: reviewerOrg.id} : {}),
       targetType: 'Organization',
       targetId: organizationId,
       previousValues: {verificationStatus: 'pending'},
@@ -2090,7 +2244,7 @@ exports.reviewOrganization = onCall(async (request) => {
 
   const ownerId = org.ownerId;
   if (ownerId) {
-    const copy = ORG_REVIEW_DECISIONS[decision];
+    const copy = (isIndependent(org) ? VOLUNTEER_REVIEW_DECISIONS : ORG_REVIEW_DECISIONS)[decision];
     const body = copy.body(name);
     try {
       await db.collection('users').doc(ownerId).collection('notifications').add({
@@ -2576,6 +2730,7 @@ exports.sendCommunityAdoptionCheckIns = onSchedule({schedule: '30 9 * * *', time
         isRead: false,
         type: 'community_adoption_checkin',
         caseId: c.caseId || null,
+        checkInId: doc.id,
       });
       await safeNotifyUser({
         uid: c.adopterId,
@@ -2597,3 +2752,80 @@ Object.assign(exports, require('./dashboard_ops')({
   notifyStaff,
   openFollowUpStatuses: OPEN_FOLLOW_UP_STATUSES,
 }));
+
+// ---- Lost/found pet matching ---------------------------------------------
+// Scores new lost/found reports against open ones and saves possibleMatches.
+// See functions/pet_matching.js and functions/pet_match_rules.js.
+Object.assign(exports, require('./pet_matching')({db, safeNotifyUser}));
+
+// ---- Lost/found pet messages and reunions --------------------------------
+// Notifies the report owner and thread participants of new messages, and
+// resolves matches when a report is marked reunited. See functions/pet_alerts.js.
+Object.assign(exports, require('./pet_alerts')({db, safeNotifyUser}));
+
+// ---- Community Adoption post-adoption updates ----------------------------
+// Tell the reporter who rehomed the animal (communityAdoptions/{id}
+// .rehomedById) when the adopter sends a post-adoption update in the first
+// two weeks (communityAdoptionCheckIns/{id}/updates, from
+// CommunityPostAdoptionUpdateForm in post_adoption_page.dart) or answers the
+// 2-week check-in. In-app + push, {type: 'community_post_adoption_update',
+// communityAdoptionId}, which open the post-adoption page.
+
+const COMMUNITY_NOTE_PREVIEW_CHARS = 120;
+
+function communityNotePreview(text) {
+  const t = (text || '').toString().replace(/\s+/g, ' ').trim();
+  return t.length > COMMUNITY_NOTE_PREVIEW_CHARS ? `${t.slice(0, COMMUNITY_NOTE_PREVIEW_CHARS - 1)}…` : t;
+}
+
+async function notifyCommunityRehomer(adoptionId, {title, body}) {
+  const snap = await db.collection('communityAdoptions').doc(adoptionId).get();
+  if (!snap.exists) return;
+  const a = snap.data();
+  const to = a.rehomedById;
+  if (!to || to === a.adopterId) return;
+  const data = {type: 'community_post_adoption_update', communityAdoptionId: adoptionId};
+  try {
+    await db.collection('users').doc(to).collection('notifications').add({
+      title,
+      message: body,
+      timestamp: admin.firestore.FieldValue.serverTimestamp(),
+      isRead: false,
+      ...data,
+      caseId: a.sourceCaseId || null,
+    });
+  } catch (e) {
+    console.warn('[communityPostAdoption] in-app notification failed', to, e.message);
+  }
+  await safeNotifyUser({uid: to, title, body, data});
+}
+
+exports.notifyCommunityPostAdoptionUpdate = onDocumentCreated(
+  'communityAdoptionCheckIns/{adoptionId}/updates/{updateId}',
+  async (event) => {
+    const u = event.data && event.data.data();
+    if (!u || u.kind === 'checkin') return; // the check-in is announced below
+    const {adoptionId} = event.params;
+    const a = (await db.collection('communityAdoptions').doc(adoptionId).get()).data();
+    const name = (a && (a.name || a.species)) || 'the animal you rehomed';
+    await notifyCommunityRehomer(adoptionId, {
+      title: `New update on ${name}`,
+      body: communityNotePreview(u.notes || u.note) ||
+        (u.howIsPetDoing ? `Doing: ${u.howIsPetDoing}` : 'The adopter sent an update.'),
+    });
+  },
+);
+
+exports.notifyCommunityCheckInSubmitted = onDocumentUpdated(
+  'communityAdoptionCheckIns/{adoptionId}',
+  async (event) => {
+    const before = event.data && event.data.before.data();
+    const after = event.data && event.data.after.data();
+    if (!before || !after) return;
+    if (before.status === 'submitted' || after.status !== 'submitted') return;
+    await notifyCommunityRehomer(event.params.adoptionId, {
+      title: `2-week check-in: ${after.animalName || 'your rehomed animal'}`,
+      body: communityNotePreview(after.note) || 'The adopter sent their check-in.',
+    });
+  },
+);

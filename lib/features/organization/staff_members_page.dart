@@ -1,6 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:respawnd1/core/constants/feature_flags.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 import 'package:respawnd1/main.dart' show AuthWrapper, appNavigatorKey;
@@ -699,7 +700,11 @@ class _MemberRow extends StatelessWidget {
                             spacing: 4,
                             runSpacing: 4,
                             children: [
-                              for (final p in OrgPermission.values.where(membership.permissions.contains))
+                              // Daily care is hidden with care tasks
+                              // (FeatureFlags.careTasksEnabled).
+                              for (final p in OrgPermission.values.where((p) =>
+                                  membership.permissions.contains(p) &&
+                                  (FeatureFlags.careTasksEnabled || p != OrgPermission.care)))
                                 Container(
                                   padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                                   decoration: BoxDecoration(

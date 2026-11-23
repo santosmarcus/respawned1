@@ -89,6 +89,23 @@ function recordPostBlockedReason(kind, record) {
   return null;
 }
 
+/// Whether `organizationId` (the caller's organization, already checked as
+/// one they may post for) may post `record`. Returns {linkedBySharer} when
+/// it may, or {error} when it may not.
+/// A referral that no organization owns yet (an unowned report referred
+/// from the review pool) is posted by the organization sharing it: it is
+/// linked to that organization rather than refused.
+function recordPostOrganization(kind, record, organizationId) {
+  const owner = typeof record.organizationId === 'string' ? record.organizationId : '';
+  if (owner === organizationId) return {linkedBySharer: false};
+  if (owner === '' && kind === 'referral') return {linkedBySharer: true};
+  return {
+    error: owner ?
+      `This ${kind} belongs to another organization.` :
+      `This ${kind} is not linked to an organization yet. Ask an admin to run the organization backfill.`,
+  };
+}
+
 /// The photo a record post may carry, always read from the record itself:
 /// a campaign or event's cover, or a referred case's first report photo.
 function recordPhotoUrl(kind, record) {
@@ -107,5 +124,6 @@ module.exports = {
   normalizePublishItems,
   normalizeRecordPost,
   recordPostBlockedReason,
+  recordPostOrganization,
   recordPhotoUrl,
 };

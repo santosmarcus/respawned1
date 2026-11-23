@@ -19,11 +19,16 @@ class FeatureFlags {
   /// The code, data and rules stay; set to true to bring them back.
   static const bool multiOrganizationEnabled = false;
 
-  /// Independent rescuers (organizations with kind 'independent'). On shows
-  /// Refer → Rescue Volunteer to shelters, and lets an independent rescuer
-  /// refer a case on to a shelter or rescue group (their way to hand over a
-  /// case they can't finish), even while [multiOrganizationEnabled] is off.
-  static const bool independentRescuersEnabled = true;
+  /// Rescue volunteers (independent rescuers, organizations with kind
+  /// 'independent'). Off for now: their entry points stay on screen but
+  /// grayed out and not tappable (the Rescue Volunteer sign-up card, Refer →
+  /// Rescue Volunteer, transferring a record to a volunteer, the Rescue
+  /// Volunteers menu items), and their dashboard cards are hidden. The
+  /// screens, data, functions and rules stay; set to true to turn them on.
+  static const bool independentRescuersEnabled = false;
+
+  /// Shown under a grayed-out rescue volunteer entry point.
+  static const String rescueVolunteersOffNote = 'Not available yet';
 
   /// Care tasks (care rounds, roster, the Daily care permission box) are
   /// hidden from the admin side menu, the dashboard and the Staff access

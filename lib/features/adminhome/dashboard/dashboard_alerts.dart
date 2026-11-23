@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:respawnd1/core/constants/feature_flags.dart';
 
 import 'package:respawnd1/core/models/adoption/adoption_application.dart';
 import 'package:respawnd1/core/models/adoption/return_request.dart';
@@ -482,8 +483,9 @@ final dashboardAlertsProvider = Provider.autoDispose<DashAlertsState>((ref) {
     );
   }
 
+  // Rescue volunteers are off for now (FeatureFlags.independentRescuersEnabled).
   final helpers = volunteerApps.asData?.value ?? const [];
-  if (helpers.isNotEmpty) {
+  if (FeatureFlags.independentRescuersEnabled && helpers.isNotEmpty) {
     final oldest = oldestOf(helpers.map((a) => a.submittedAt));
     alerts.add(
       DashAlert(

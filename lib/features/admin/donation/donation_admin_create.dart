@@ -114,6 +114,10 @@ class _DonationAdminCreatePageState extends ConsumerState<DonationAdminCreatePag
   bool _speciesCat = true;
   bool _acceptInKind = false;
   bool _restricted = false;
+  // Sponsorships: monthly auto-renewal (functions/sponsorship_renewal_rules.js).
+  bool _autoRenew = true;
+  int _renewalNoticeDays = kDefaultRenewalNoticeDays;
+  int _renewalGraceDays = kDefaultRenewalGraceDays;
   DateTime? _deadline;
   XFile? _image;
   String? _imageUrl;
@@ -146,6 +150,9 @@ class _DonationAdminCreatePageState extends ConsumerState<DonationAdminCreatePag
       _animalId = e.animalId;
       _acceptInKind = e.acceptInKind;
       _restricted = e.restricted;
+      _autoRenew = e.autoRenew;
+      _renewalNoticeDays = e.renewalNoticeDays;
+      _renewalGraceDays = e.autoRenew ? e.renewalGraceDays : kDefaultRenewalGraceDays;
       _deadline = e.endDate;
       _imageUrl = e.imageUrl;
       for (final it in e.inKindItems) {
@@ -282,6 +289,9 @@ class _DonationAdminCreatePageState extends ConsumerState<DonationAdminCreatePag
         if (_isSponsorship) ...{
           'monthlyAmount': amount,
           'intendedUse': _intendedUse.text.trim(),
+          'autoRenew': _autoRenew,
+          'renewalNoticeDays': _renewalNoticeDays,
+          'renewalGraceDays': _autoRenew ? _renewalGraceDays : 0,
         } else ...{
           'targetAmount': amount,
           'acceptInKind': _acceptInKind,
@@ -443,6 +453,8 @@ class _DonationAdminCreatePageState extends ConsumerState<DonationAdminCreatePag
                   ),
                 const SizedBox(height: 18),
 
+                if (_isSponsorship) ..._renewalFields(),
+
                 if (!_isSponsorship) ...[
                   CheckRow(
                     label: 'Accept In-Kind donations',
@@ -515,6 +527,49 @@ class _DonationAdminCreatePageState extends ConsumerState<DonationAdminCreatePag
       border: const UnderlineInputBorder(),
     ),
   );
+
+  /// Monthly auto-renewal (functions/sponsorship_renewal_rules.js). Shown to
+  /// sponsors on the listing, the payment sheet and their sponsorship.
+  List<Widget> _renewalFields() {
+    String days(int n) => n == 0 ? 'None' : '$n day${n == 1 ? '' : 's'}';
+    Widget dropdown(int value, List<int> choices, ValueChanged<int> onChanged) => DropdownButtonFormField<int>(
+          initialValue: value,
+          decoration: const InputDecoration(border: UnderlineInputBorder(), isDense: true),
+          items: [for (final d in choices) DropdownMenuItem(value: d, child: Text(days(d), style: _dropdownStyle))],
+          onChanged: (v) => setState(() => onChanged(v ?? value)),
+        );
+    final preview = DonationListing(
+      id: '', title: '', target: 0, collected: 0, organizer: '', time: '', description: '', numdonated: 0,
+      address: '', type: 'sponsorship',
+      autoRenew: _autoRenew,
+      renewalNoticeDays: _renewalNoticeDays,
+      renewalGraceDays: _autoRenew ? _renewalGraceDays : 0,
+    );
+    return [
+      CheckRow(
+        label: 'Renew automatically every month',
+        bold: true,
+        value: _autoRenew,
+        onChanged: (v) => setState(() => _autoRenew = v),
+      ),
+      const SizedBox(height: 6),
+      FieldLabel(_autoRenew ? 'Send the next month\'s payment' : 'Ask sponsors to continue'),
+      dropdown(_renewalNoticeDays, kRenewalNoticeDayChoices, (v) => _renewalNoticeDays = v),
+      Padding(
+        padding: const EdgeInsets.only(top: 2),
+        child: Text('before each month ends', style: GoogleFonts.zain(fontSize: 13, color: AppColors.textSecondary)),
+      ),
+      if (_autoRenew) ...[
+        const SizedBox(height: 12),
+        const FieldLabel('Days to pay after the month ends'),
+        dropdown(_renewalGraceDays, kRenewalGraceDayChoices, (v) => _renewalGraceDays = v),
+      ],
+      const SizedBox(height: 10),
+      Text('Sponsors see: ${sponsorshipRenewalText(preview)}',
+          style: GoogleFonts.zain(fontSize: 13, color: AppColors.textSecondary)),
+      const SizedBox(height: 18),
+    ];
+  }
 
   Widget _animalDropdown(List<AnimalRecord> all, Map<String, DonationListing> openSponsorships) {
     final list = all.where((a) {

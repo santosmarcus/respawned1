@@ -23,7 +23,9 @@ const admin = require('firebase-admin');
 const {SecretManagerServiceClient} = require('@google-cloud/secret-manager');
 const {loadOrgAccess, memberPermissions, presetFor} = require('./org_access');
 const {photosOf} = require('./public_animals');
-const {normalizePublishItems, normalizeRecordPost, recordPostBlockedReason, recordPhotoUrl} = require('./facebook_share_rules');
+const {
+  normalizePublishItems, normalizeRecordPost, recordPostBlockedReason, recordPostOrganization, recordPhotoUrl,
+} = require('./facebook_share_rules');
 
 const fbAppId = defineSecret('FB_APP_ID');
 const fbAppSecret = defineSecret('FB_APP_SECRET');
@@ -680,13 +682,15 @@ exports.facebookPublishRecordPost = onCall(async (request) => {
   const recordSnap = await db().collection(post.collection).doc(post.recordId).get();
   if (!recordSnap.exists) throw new HttpsError('not-found', `This ${post.kind} no longer exists.`);
   const record = recordSnap.data();
-  if (record.organizationId !== organizationId) {
-    throw new HttpsError(
-        'permission-denied',
-        record.organizationId ?
-          `This ${post.kind} belongs to another organization.` :
-          `This ${post.kind} is not linked to an organization yet. Ask an admin to run the organization backfill.`,
-    );
+  const ownership = recordPostOrganization(post.kind, record, organizationId);
+  if (ownership.error) throw new HttpsError('permission-denied', ownership.error);
+  // An unowned referral is linked to the organization sharing it: only its
+  // rescue staff, who can see the review pool, may do that.
+  if (ownership.linkedBySharer) {
+    const access = await loadOrgAccess(db(), uid, organizationId);
+    if (!access.active || !access.has('rescue')) {
+      throw new HttpsError('permission-denied', 'Only rescue staff can share a referral no organization owns yet.');
+    }
   }
   const blocked = recordPostBlockedReason(post.kind, record);
   if (blocked) throw new HttpsError('failed-precondition', blocked);
@@ -727,6 +731,8 @@ exports.facebookPublishRecordPost = onCall(async (request) => {
     postId,
     postUrl,
     photoCount: withPhoto ? 1 : 0,
+    // The record had no organization; this one shared it and is linked to it.
+    ...(ownership.linkedBySharer ? {linkedBySharer: true} : {}),
     publishedBy: uid,
     publishedByEmail: request.auth.token.email || null,
     createdAt: admin.firestore.FieldValue.serverTimestamp(),

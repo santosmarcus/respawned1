@@ -53,9 +53,11 @@ async function loadCaseStaff(request, caseOrgId) {
   const uid = request.auth.uid;
   const userSnap = await db.collection('users').doc(uid).get();
   const u = userSnap.exists ? userSnap.data() : {};
-  const actor = {uid, name: displayName(u)};
-  if (PLATFORM_ROLES.includes(u.role)) return actor;
   const orgId = typeof u.organizationId === 'string' ? u.organizationId : '';
+  // orgId: the caller's own organization, linked to a share of a case no
+  // organization owns yet.
+  const actor = {uid, name: displayName(u), orgId};
+  if (PLATFORM_ROLES.includes(u.role)) return actor;
   const denied = () => new HttpsError('permission-denied', 'Only staff of the organization handling this case can share it.');
   if (!orgId || (caseOrgId && caseOrgId !== orgId)) throw denied();
   // Staff who handle rescues there (functions/org_access.js).
@@ -115,7 +117,11 @@ module.exports = ({notifyStaff, orgStaffUids}) => {
       }
     }
 
-    const orgId = c.organizationId || '';
+    // A case no organization owns yet is shared under the organization
+    // sharing it: its contact details go on the page and it is linked to
+    // the link (and to a Facebook post of it).
+    const caseOrgId = c.organizationId || '';
+    const orgId = caseOrgId || actor.orgId || '';
     const org = orgId ? await db.collection('organizations').doc(orgId).get() : null;
     const snapshot = buildReferralSnapshot({
       caseId, c, referral, org: org && org.exists ? org.data() : {}, includeReporter,
@@ -131,6 +137,7 @@ module.exports = ({notifyStaff, orgStaffUids}) => {
         caseId,
         referralId,
         organizationId: orgId,
+        ...(caseOrgId ? {} : {linkedBySharer: orgId !== ''}),
         snapshot,
         includeReporter,
         revoked: false,

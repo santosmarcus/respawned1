@@ -9,6 +9,7 @@ import 'package:respawnd1/features/adoption/adoption_form_controller.dart';
 import 'package:respawnd1/features/adoption/widgets/adoption_buttons.dart';
 import 'package:respawnd1/features/adoption/widgets/adoption_form_widgets.dart';
 import 'package:respawnd1/features/adoption/widgets/adoption_upload_widgets.dart';
+import 'package:respawnd1/features/collartag/lost_pet_location_picker.dart';
 
 /// Step 1 — fill out the adoption form, uploads and agreements.
 class AdoptionIntroStep extends StatelessWidget {
@@ -124,6 +125,16 @@ class AdoptionIntroStep extends StatelessWidget {
                 label: 'Home Address',
                 hint: 'Enter your complete home address',
                 maxLines: 3,
+              ),
+              const SizedBox(height: 8),
+              _HomePinRow(
+                form: form,
+                readOnly: readOnly,
+                onPinned: (picked) => _set(() {
+                  form.homeLat = picked.lat;
+                  form.homeLng = picked.lng;
+                  if (form.homeAddressCtrl.text.trim().isEmpty) form.homeAddressCtrl.text = picked.address;
+                }),
               ),
 
               const SizedBox(height: 22),
@@ -494,6 +505,59 @@ class AdoptionIntroStep extends StatelessWidget {
         ],
 
         const SizedBox(height: 24),
+      ],
+    );
+  }
+}
+
+/// The home's map pin, required with the address. A returned animal is
+/// picked up from here and its intake case starts here.
+class _HomePinRow extends StatelessWidget {
+  const _HomePinRow({required this.form, required this.readOnly, required this.onPinned});
+
+  final AdoptionFormController form;
+  final bool readOnly;
+  final ValueChanged<PickedLostLocation> onPinned;
+
+  Future<void> _pick(BuildContext context) async {
+    final picked = await Navigator.push<PickedLostLocation>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => LastSeenLocationPicker(
+          title: 'Pin your home address',
+          instructionText: 'Tap the map where you live, or search your address. The shelter uses this pin '
+              'for home visits and if the animal ever needs to be returned.',
+          pinLabel: 'Home location',
+          confirmLabel: 'Use This Location',
+          initialLat: form.homeLat,
+          initialLng: form.homeLng,
+        ),
+      ),
+    );
+    if (picked != null) onPinned(picked);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final pinned = form.hasHomePin;
+    return Row(
+      children: [
+        Icon(pinned ? Icons.location_on : Icons.location_off_outlined,
+            size: 18, color: pinned ? AppColors.greenrspwn : AppColors.error),
+        const SizedBox(width: 6),
+        Expanded(
+          child: Text(
+            pinned ? 'Home pinned on the map' : 'Pin your home on the map *',
+            style: GoogleFonts.zain(fontSize: 13, color: pinned ? AppColors.textPrimary : AppColors.error),
+          ),
+        ),
+        if (!readOnly)
+          TextButton.icon(
+            onPressed: () => _pick(context),
+            icon: const Icon(Icons.map_outlined, size: 18, color: AppColors.textPrimary),
+            label: Text(pinned ? 'Change Pin' : 'Pin on Map',
+                style: GoogleFonts.zain(fontSize: 14, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
+          ),
       ],
     );
   }

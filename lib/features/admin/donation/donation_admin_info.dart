@@ -120,6 +120,17 @@ class _InfoBodyState extends ConsumerState<_InfoBody> {
               c.isFullyFunded ? AppColors.lavenderrspwn : AppColors.greenrspwn,
             ),
           ),
+        if (isSponsorship)
+          Padding(
+            padding: const EdgeInsets.only(top: 6),
+            child: _tag(
+              c.autoRenew
+                  ? 'Renews monthly · payment sent ${c.renewalNoticeDays}d before · '
+                      '${c.renewalGraceDays}d to pay after'
+                  : 'Does not auto-renew · sponsors asked ${c.renewalNoticeDays}d before',
+              AppColors.tearspwn,
+            ),
+          ),
         if (c.purposeTags.isNotEmpty || c.restricted)
           Padding(
             padding: const EdgeInsets.only(top: 6),

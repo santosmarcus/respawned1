@@ -208,7 +208,13 @@ class _FacebookRecordPostPageState extends ConsumerState<FacebookRecordPostPage>
   @override
   Widget build(BuildContext context) {
     final currentOrgId = ref.watch(currentOrganizationIdProvider).asData?.value;
-    final orgId = widget.recordOrganizationId?.isNotEmpty == true ? widget.recordOrganizationId : null;
+    final recordOrgId = widget.recordOrganizationId?.isNotEmpty == true ? widget.recordOrganizationId : null;
+    // A referral no organization owns yet is posted by, and linked to, the
+    // organization sharing it (functions/facebook_share_rules.js
+    // recordPostOrganization).
+    final linkedBySharer =
+        recordOrgId == null && widget.kind == FacebookRecordKind.referral && (currentOrgId ?? '').isNotEmpty;
+    final orgId = linkedBySharer ? currentOrgId : recordOrgId;
     final canPublish = ref.watch(currentOrganizationCapabilitiesProvider).asData?.value.canPublishToFacebook ?? false;
     final page = orgId == null ? null : ref.watch(organizationFacebookIntegrationProvider(orgId)).asData?.value;
     final pageConnected = page?.isConnected ?? false;
@@ -296,6 +302,13 @@ class _FacebookRecordPostPageState extends ConsumerState<FacebookRecordPostPage>
                 border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
               ),
             ),
+            if (linkedBySharer) ...[
+              Text(
+                'No organization owns this case yet, so it is shared under your organization and linked to it.',
+                style: _hint,
+              ),
+              const SizedBox(height: 4),
+            ],
             Text(
                 widget.kind == FacebookRecordKind.referral
                     ? 'Whoever opens the link can see the report and answer it. Reporter details are never included. '

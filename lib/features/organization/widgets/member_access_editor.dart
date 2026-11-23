@@ -135,9 +135,12 @@ class _MemberAccessEditorState extends State<MemberAccessEditor> {
           Text(
             limited
                 ? 'Your team has only the modules turned on for rescue volunteers. A system admin can turn on more.'
-                : 'Every Staff member starts with rescue, animal records, daily care (the care-tasks screen), adoptions, '
-                    'events and volunteers, and analytics. Tick Money permissions or Facebook posting by hand for the '
-                    'people who handle them.',
+                : FeatureFlags.careTasksEnabled
+                    ? 'Every Staff member starts with rescue, animal records, daily care (the care-tasks screen), adoptions, '
+                        'events and volunteers, and analytics. Tick Money permissions or Facebook posting by hand for the '
+                        'people who handle them.'
+                    : 'Every Staff member starts with rescue, animal records, adoptions, events and volunteers, and '
+                        'analytics. Tick Money permissions or Facebook posting by hand for the people who handle them.',
             style: GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary),
           ),
           const SizedBox(height: 4),

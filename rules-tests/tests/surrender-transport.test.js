@@ -119,6 +119,17 @@ describe('transport offers and vehicle capacity', () => {
     await animals(5);
     await assertSucceeds(offer({ isDemo: true }));
   });
+
+  test('Confirm Intake keeps the transporter already on the case, vehicle or not', async () => {
+    // Took the case from the job board without registered vehicle details.
+    await admin((db) => db.doc('cases/trip').set({
+      reporterId: 'reporter', organizationId: 'orgA', status: 'treatment',
+      assignedVolunteerId: 'rider', animals: [{ species: 'Dog' }, { species: 'Cat' }],
+    }));
+    await assertSucceeds(offer({ status: 'accepted' }));
+    // Someone else without a vehicle still can't be handed the trip.
+    await assertFails(offer({ riderId: 'stranger', status: 'accepted' }));
+  });
 });
 
 describe('transporter vehicle details', () => {

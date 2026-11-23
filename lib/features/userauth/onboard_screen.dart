@@ -10,6 +10,7 @@ import 'package:respawnd1/features/organization/signup/organization_about_screen
 import 'package:respawnd1/features/pettransporter/transporter_verification_screen.dart';
 import 'package:respawnd1/core/widgets/app_messages.dart';
 import 'package:respawnd1/core/models/organization/org_permission.dart';
+import 'package:respawnd1/core/constants/feature_flags.dart';
 
 class OnboardingRoleScreen extends StatefulWidget {
   final String firstName;
@@ -59,6 +60,7 @@ class _OnboardingRoleScreenState extends State<OnboardingRoleScreen> {
       'Rescue on your own or with a small team: take nearby cases and referrals, keep animal records, '
           'transport rescues yourself and rehome them. Reviewed before you start.',
       color: AppColors.greenrspwn,
+      enabled: FeatureFlags.independentRescuersEnabled,
     ),
     _UserTypeOption(
       role: 'organization',
@@ -198,9 +200,12 @@ class _OnboardingRoleScreenState extends State<OnboardingRoleScreen> {
                     final option = _options[index];
                     final isSelected = _selectedRole == option.role;
 
-                    return GestureDetector(
-                      onTap: () =>
-                          setState(() => _selectedRole = option.role),
+                    return Opacity(
+                      opacity: option.enabled ? 1 : 0.45,
+                      child: GestureDetector(
+                      onTap: option.enabled
+                          ? () => setState(() => _selectedRole = option.role)
+                          : null,
                       child: AnimatedContainer(
                         duration: const Duration(milliseconds: 180),
                         // Grows with the text (a fixed 140 overflowed the
@@ -237,6 +242,15 @@ class _OnboardingRoleScreenState extends State<OnboardingRoleScreen> {
                                         color: AppColors.textPrimary
                                             .withValues(alpha: 0.75),
                                       )),
+                                  if (!option.enabled) ...[
+                                    const SizedBox(height: 6),
+                                    Text(FeatureFlags.rescueVolunteersOffNote,
+                                        style: GoogleFonts.zain(
+                                          fontSize: 13,
+                                          fontWeight: FontWeight.w700,
+                                          color: AppColors.textPrimary,
+                                        )),
+                                  ],
                                 ],
                               ),
                             ),
@@ -247,9 +261,17 @@ class _OnboardingRoleScreenState extends State<OnboardingRoleScreen> {
                                     color: AppColors.textPrimary,
                                     size: 22),
                               ),
+                            if (!option.enabled)
+                              const Padding(
+                                padding: EdgeInsets.only(left: 8),
+                                child: Icon(Icons.lock_outline,
+                                    color: AppColors.textPrimary,
+                                    size: 20),
+                              ),
                           ],
                         ),
                       ),
+                    ),
                     );
                   },
                 ),
@@ -289,11 +311,14 @@ class _UserTypeOption {
   final String title;
   final String description;
   final Color color;
+  /// False shows the card grayed out and not selectable.
+  final bool enabled;
 
   const _UserTypeOption({
     required this.role,
     required this.title,
     required this.description,
     required this.color,
+    this.enabled = true,
   });
 }

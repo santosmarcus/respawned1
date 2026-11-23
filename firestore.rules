@@ -1353,7 +1353,21 @@ service cloud.firestore {
           );
         }
 
-        allow create: if canStaffCase(get(casePath(caseId)).data) && vehicleCarriesCase();
+        // Confirm Intake (CaseIntakeRepository.confirmIntake) hands the
+        // clinic-to-shelter leg to the transporter already holding the case
+        // (assignedVolunteerId / riderId). They are already carrying these
+        // animals, and may have taken the case from the job board or
+        // registered before vehicle details were asked, so the vehicle
+        // check is not repeated for them.
+        function continuesOwnTrip() {
+          let data = get(casePath(caseId)).data;
+          let rider = request.resource.data.get('riderId', '');
+          return rider is string && rider != '' &&
+            (data.get('assignedVolunteerId', '') == rider || data.get('riderId', '') == rider);
+        }
+
+        allow create: if canStaffCase(get(casePath(caseId)).data) &&
+          (vehicleCarriesCase() || continuesOwnTrip());
         allow update: if canStaffCase(get(casePath(caseId)).data) || (
                     resource.data.get('riderId', '') == request.auth.uid &&
                     changedOnly(['status', 'respondedAt', 'acceptedAt', 'rejectedAt', 'rejectionReason', 'vehicle', 'plate', 'completedAt']) &&

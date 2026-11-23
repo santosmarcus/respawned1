@@ -359,10 +359,13 @@ class _AdminDrawerState extends ConsumerState<AdminDrawer> {
                     selected: widget.active == AdminModule.transporters,
                     onTap: () => _openModule(context, (_) => const VolunteersPage(transporters: true)),
                   ),
+                  // Grayed out while rescue volunteers are off
+                  // (FeatureFlags.independentRescuersEnabled).
                   _DrawerItem(
                     label: 'Rescue Volunteers',
-                    viewOnly: !can(caps.canManageVolunteers),
+                    viewOnly: FeatureFlags.independentRescuersEnabled && !can(caps.canManageVolunteers),
                     selected: widget.active == AdminModule.volunteers,
+                    disabledNote: FeatureFlags.independentRescuersEnabled ? null : FeatureFlags.rescueVolunteersOffNote,
                     onTap: () => _openModule(context, (_) => const VolunteersPage()),
                   ),
                 ],
@@ -420,11 +423,43 @@ class _DrawerItem extends StatelessWidget {
   final int? count;
   // The member can look but not change anything in this module.
   final bool viewOnly;
+  // Set when the module is turned off for now: the item is grayed out, can't
+  // be opened, and shows this note.
+  final String? disabledNote;
 
-  const _DrawerItem({required this.label, required this.onTap, this.selected = false, this.count, this.viewOnly = false});
+  const _DrawerItem({
+    required this.label,
+    required this.onTap,
+    this.selected = false,
+    this.count,
+    this.viewOnly = false,
+    this.disabledNote,
+  });
 
   @override
   Widget build(BuildContext context) {
+    final disabled = disabledNote != null;
+    if (disabled) {
+      return Opacity(
+        opacity: 0.4,
+        child: ListTile(
+          enabled: false,
+          leading: const SizedBox(width: 8),
+          title: Text(label,
+              style: GoogleFonts.zain(fontSize: 15, color: AppColors.background, fontWeight: FontWeight.w500)),
+          trailing: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(disabledNote!,
+                  style: GoogleFonts.zain(fontSize: 11, color: AppColors.background.withValues(alpha: 0.8))),
+              const SizedBox(width: 6),
+              const Icon(Icons.lock_outline, color: Colors.white70, size: 16),
+            ],
+          ),
+          dense: true,
+        ),
+      );
+    }
     return Container(
       color: selected ? AppColors.background.withValues(alpha: 0.12) : null,
       child: ListTile(
