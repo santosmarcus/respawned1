@@ -408,6 +408,81 @@ class AuthService {
     }
   }
 
+  /// The account can sign in with an email and password.
+  static bool hasPasswordSignIn(User user) => _hasPassword(user);
+
+  /// Adds a password to a Google or phone account, so it can also sign in
+  /// on the login screen with [email] (the address already saved on the
+  /// account) and this password. A Google session too old to link is
+  /// refreshed through Google's chooser and retried. Failures:
+  /// [EmailTakenException] (another account uses the email) or
+  /// FirebaseAuthException (weak-password, requires-recent-login, ...).
+  Future<void> setPassword({required String email, required String password}) async {
+    final user = firebaseAuth.currentUser;
+    if (user == null) throw StateError('Not signed in.');
+    if (_hasPassword(user)) throw StateError('This account already has a password.');
+    final credential = EmailAuthProvider.credential(email: email, password: password);
+    Future<void> link() async {
+      try {
+        await user.linkWithCredential(credential);
+      } on FirebaseAuthException catch (e) {
+        if (const {'email-already-in-use', 'credential-already-in-use', 'account-exists-with-different-credential'}
+            .contains(e.code)) {
+          throw EmailTakenException.instance;
+        }
+        rethrow;
+      }
+    }
+
+    try {
+      await link();
+    } on FirebaseAuthException catch (e) {
+      final isGoogle = user.providerData.any((p) => p.providerId == 'google.com');
+      if (e.code != 'requires-recent-login' || !isGoogle) rethrow;
+      final googleUser = await GoogleSignIn().signIn();
+      if (googleUser == null) rethrow; // cancelled
+      final googleAuth = await googleUser.authentication;
+      await user.reauthenticateWithCredential(GoogleAuthProvider.credential(
+        accessToken: googleAuth.accessToken,
+        idToken: googleAuth.idToken,
+      ));
+      await link();
+    }
+    await user.reload();
+    final fresh = firebaseAuth.currentUser;
+    await _firestore.collection('users').doc(user.uid).set({'email': email}, SetOptions(merge: true));
+    if (fresh != null && !fresh.emailVerified) {
+      try {
+        await fresh.sendEmailVerification();
+      } catch (e) {
+        debugPrint('sendEmailVerification failed (non-fatal): $e');
+      }
+    }
+  }
+
+  /// Changes the password of an account that already has one, after
+  /// confirming [currentPassword]. Failures are FirebaseAuthException
+  /// (wrong-password / invalid-credential, weak-password, ...).
+  Future<void> changePassword({required String currentPassword, required String newPassword}) async {
+    await reauthenticateWithPassword(currentPassword);
+    await firebaseAuth.currentUser!.updatePassword(newPassword);
+  }
+
+  static String passwordErrorMessage(Object e) {
+    if (e is EmailTakenException) return e.message;
+    if (e is FirebaseAuthException) {
+      return switch (e.code) {
+        'wrong-password' || 'invalid-credential' => 'Your current password is incorrect.',
+        'weak-password' => 'Please choose a stronger password.',
+        'invalid-email' => 'The email on this account isn\'t valid. Update it in your profile first.',
+        'requires-recent-login' => 'Please log out and sign in again, then retry.',
+        'too-many-requests' => 'Too many tries. Please wait a while and try again.',
+        _ => e.message ?? 'Could not save your password. Please try again.',
+      };
+    }
+    return 'Could not save your password. Please try again.';
+  }
+
   static String emailErrorMessage(Object e) {
     if (e is EmailTakenException) return e.message;
     if (e is FirebaseAuthException) {

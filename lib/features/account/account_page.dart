@@ -12,6 +12,7 @@ import 'package:respawnd1/core/services/known_accounts.dart';
 import 'package:respawnd1/core/utils/app_date_format.dart';
 import 'package:respawnd1/core/widgets/app_messages.dart';
 import 'package:respawnd1/core/widgets/delete_account.dart';
+import 'package:respawnd1/core/widgets/password_dialog.dart';
 import 'package:respawnd1/features/admin/rescue/state/rescue_reports_providers.dart';
 
 /// Signs out and returns to the app's root, which shows the login screen.
@@ -159,6 +160,8 @@ class _AccountPageState extends ConsumerState<AccountPage> {
                       ],
                     ),
                     const SizedBox(height: 14),
+                    _passwordCard(user, data),
+                    const SizedBox(height: 14),
                     _Card(
                       title: 'Switch account',
                       children: [
@@ -235,12 +238,51 @@ class _AccountPageState extends ConsumerState<AccountPage> {
     );
   }
 
+  /// Google and phone accounts can add a password (signing in on the login
+  /// screen with their saved email); accounts with one can change it.
+  Widget _passwordCard(User user, Map<String, dynamic> data) {
+    final hasPassword = AuthService.hasPasswordSignIn(user);
+    final authEmail = user.email ?? '';
+    final email = authEmail.isNotEmpty ? authEmail : ((data['email'] as String?) ?? '').trim();
+    return _Card(
+      title: 'Password',
+      children: [
+        Text(
+          hasPassword
+              ? 'You can log in with $email and your password.'
+              : email.isEmpty
+                  ? 'Add an email to your profile first, then you can add a password and log in with them.'
+                  : 'Add a password to also log in with $email and a password.',
+          style: GoogleFonts.zain(fontSize: 13, color: AppColors.textSecondary),
+        ),
+        const SizedBox(height: 8),
+        Align(
+          alignment: Alignment.centerLeft,
+          child: OutlinedButton.icon(
+            onPressed: _busy || email.isEmpty
+                ? null
+                : () => _run(() async {
+                      final saved = await showPasswordDialog(context, hasPassword: hasPassword, email: email);
+                      if (saved && mounted) setState(() {});
+                    }),
+            icon: Icon(hasPassword ? Icons.lock_reset : Icons.lock_outline, color: AppColors.textPrimary),
+            label: Text(hasPassword ? 'Change password' : 'Add password',
+                style: GoogleFonts.zain(fontSize: 15, fontWeight: FontWeight.w700, color: AppColors.textPrimary)),
+          ),
+        ),
+        const SizedBox(height: 4),
+      ],
+    );
+  }
+
   static String _methodLabel(User user) {
     final providers = user.providerData.map((p) => p.providerId).toSet();
-    if (providers.contains('password')) return 'Email and password';
-    if (providers.contains('google.com')) return 'Google';
-    if (providers.contains('phone')) return 'Mobile number (SMS code)';
-    return 'Other';
+    final methods = [
+      if (providers.contains('password')) 'Email and password',
+      if (providers.contains('google.com')) 'Google',
+      if (providers.contains('phone')) 'Mobile number (SMS code)',
+    ];
+    return methods.isEmpty ? 'Other' : methods.join(', ');
   }
 }
 
