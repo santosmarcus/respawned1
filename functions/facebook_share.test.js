@@ -143,3 +143,13 @@ test('a referral no organization owns is linked to the organization sharing it',
   assert.match(recordPostOrganization('campaign', {organizationId: ''}, 'orgA').error, /not linked/);
   assert.match(recordPostOrganization('event', {organizationId: 'orgB'}, 'orgA').error, /another organization/);
 });
+
+test('a referral of an unowned report can go on the poster\'s Page; other records must be the Page\'s own', () => {
+  const {recordPostOrgProblem} = require('./facebook_share_rules');
+  assert.equal(recordPostOrgProblem('referral', {organizationId: ''}, 'orgA'), null);
+  assert.equal(recordPostOrgProblem('referral', {}, 'orgA'), null);
+  assert.equal(recordPostOrgProblem('referral', {organizationId: 'orgA'}, 'orgA'), null);
+  assert.match(recordPostOrgProblem('referral', {organizationId: 'orgB'}, 'orgA'), /another organization/);
+  assert.match(recordPostOrgProblem('campaign', {organizationId: ''}, 'orgA'), /not linked/);
+  assert.match(recordPostOrgProblem('event', {organizationId: 'orgB'}, 'orgA'), /another organization/);
+});

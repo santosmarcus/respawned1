@@ -10,7 +10,6 @@ import 'package:respawnd1/core/models/adoption/adoption_application.dart';
 import 'package:respawnd1/core/models/rescue/animal_record.dart';
 import 'package:respawnd1/core/models/rescue/care_record.dart';
 import 'package:respawnd1/core/models/rescue/rescue_case.dart';
-import 'package:respawnd1/core/models/rescue/rescue_status.dart';
 import 'package:respawnd1/core/models/rescue/vaccination_record.dart';
 import 'package:respawnd1/features/admin/adoption/state/adoption_providers.dart';
 import 'package:respawnd1/features/admin/animals/state/animal_records_providers.dart';
@@ -26,18 +25,17 @@ import 'package:respawnd1/features/adminhome/dashboard/dashboard_data.dart';
 import 'package:respawnd1/core/models/dashboard/dashboard_model.dart';
 import 'package:respawnd1/features/adminhome/dashboard/dashboard_nav.dart';
 import 'package:respawnd1/features/adminhome/dashboard/dashboard_ui.dart';
-import 'package:respawnd1/features/adminhome/dashboard/module_analytics.dart';
 import 'package:respawnd1/features/adminhome/dashboard/shelter_settings.dart';
 
-/// The "Analytics" tab. Its sections answer plain questions, and together
-/// they cover the 12 Lifesaving Ingredients (American Pets Alive!
-/// Lifesaving Workbook) without naming them:
+/// The "Analytics" tab: Reports by area (area_reports.dart, the
+/// organization's KPIs per area) first, then sections that answer plain
+/// questions drawn from the Lifesaving Ingredients (American Pets Alive!
+/// Lifesaving Workbook):
 ///
 ///  Are we saving more lives? ............ 1 Lifesaving Vision
 ///  Where did animals go? ................ 5 Transfer, 8 Adoption, 11 Return-to-Owner
 ///  How fast do animals find homes? ...... 3 Immediate Make Ready, 8 Adoption Policies
 ///  Who waits longest? ................... 6 Large Adult Dogs, 7 Foster
-///  Could animals stay home or outside? .. 2 Safety Net, 4 Community Cats, 9 Intake Diversion
 ///  Are animals protected from illness? .. 10 Disease Prevention
 ///  End-of-care decisions (restricted) ... 12 Euthanasia List Scrutiny
 ///  What we're improving ................. the workbook's Results/Resources/Responsibility
@@ -163,6 +161,11 @@ OutcomeCounts computeOutcomes({
   return o;
 }
 
+// Closure reasons were consolidated (closure_reason.dart): "reunited with
+// owner" and "owner found" became `reunited`. Cases closed before that still
+// hold the old names, so analytics match them as strings.
+const _reunitedReasons = {'reunited', 'reunitedWithOwner'};
+
 final analyticsCasesProvider = Provider.autoDispose<AsyncValue<List<RescueCase>>>((ref) {
   final snap = ref.watch(dashboardRescueSnapshotProvider);
   final closed = ref.watch(closedCasesProvider);
@@ -201,6 +204,9 @@ class AnalyticsView extends ConsumerWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
+        // The organization's KPIs by area come first.
+        const AreaReportsCard(),
+        const SizedBox(height: 14),
         _LivesCard(cur: cur, prev: prev, records: records),
         const SizedBox(height: 14),
         const _ConstraintCallout(),
@@ -211,8 +217,6 @@ class AnalyticsView extends ConsumerWidget {
         const SizedBox(height: 14),
         _WaitsCard(records: records),
         const SizedBox(height: 14),
-        _DiversionCard(period: period, cases: cases),
-        const SizedBox(height: 14),
         _PreventionCard(records: records, period: period),
         const SizedBox(height: 14),
         _EndOfCareCard(cur: cur),
@@ -220,12 +224,6 @@ class AnalyticsView extends ConsumerWidget {
         const _FocusAreasCard(),
         const SizedBox(height: 14),
         _MonthlyTrendCard(records: records, cases: cases),
-        const SizedBox(height: 14),
-        // Module analytics (module_analytics.dart), in the same column.
-        RescueModuleCards(period: period, cases: cases),
-        AdoptionModuleCards(period: period, adopted: cur.adopted, intake: cur.intake),
-        FundsModuleCards(period: period, cases: cases),
-        const AreaReportsCard(),
       ],
     );
   }
@@ -274,6 +272,10 @@ class AnalyticsPeriodButton extends ConsumerWidget {
           tooltip: 'Reporting period',
           onSelected: pick,
           itemBuilder: (_) => [
+            PopupMenuItem(value: AnalyticsRange.day(now), child: const Text('Today')),
+            PopupMenuItem(value: AnalyticsRange.week(now), child: const Text('This week')),
+            PopupMenuItem(value: AnalyticsRange.week(now.subtract(const Duration(days: 7))), child: const Text('Last week')),
+            const PopupMenuItem(value: AnalyticsRange.lastDays(7), child: Text('Last 7 days')),
             const PopupMenuItem(value: AnalyticsRange.lastDays(30), child: Text('Last 30 days')),
             const PopupMenuItem(value: AnalyticsRange.lastDays(90), child: Text('Last 90 days')),
             const PopupMenuItem(value: AnalyticsRange.lastDays(365), child: Text('Last 12 months')),
@@ -283,6 +285,8 @@ class AnalyticsPeriodButton extends ConsumerWidget {
             const PopupMenuItem(value: 'month', child: Text('Another month…')),
             PopupMenuItem(value: thisQuarter, child: Text('This quarter (${thisQuarter.label})')),
             PopupMenuItem(value: lastQuarter, child: Text('Last quarter (${lastQuarter.label})')),
+            PopupMenuItem(value: AnalyticsRange.year(now.year), child: Text('This year (${now.year})')),
+            PopupMenuItem(value: AnalyticsRange.year(now.year - 1), child: Text('Last year (${now.year - 1})')),
             const PopupMenuDivider(),
             const PopupMenuItem(value: 'custom', child: Text('Custom range…')),
           ],
@@ -769,10 +773,6 @@ class _SpeedCard extends ConsumerWidget {
           if (readyForAdoptionAtOf(a.raw) case final ready? when !a.adoptedAt!.isBefore(ready))
             a.adoptedAt!.difference(ready).inDays,
     ]);
-    final overall = median([
-      for (final a in records)
-        if (a.createdAt != null && period.has(a.adoptedAt)) a.adoptedAt!.difference(a.createdAt!).inDays,
-    ]);
     List<int> reviewDays(Period p) => [
       for (final a in apps)
         if (a.createdAt != null)
@@ -817,13 +817,6 @@ class _SpeedCard extends ConsumerWidget {
             d(readyToAdopted),
             readyToAdopted == null ? null : (readyToAdopted / 90).clamp(0.05, 1.0),
           ),
-          _StepRow(
-            Icons.timer_outlined,
-            'Intake to adopted, overall',
-            d(overall),
-            overall == null ? null : (overall / 120).clamp(0.05, 1.0),
-            strong: true,
-          ),
           const SizedBox(height: 8),
           Row(
             children: [
@@ -863,8 +856,7 @@ class _StepRow extends StatelessWidget {
   final String label;
   final String value;
   final double? fraction;
-  final bool strong;
-  const _StepRow(this.icon, this.label, this.value, this.fraction, {this.strong = false});
+  const _StepRow(this.icon, this.label, this.value, this.fraction);
 
   @override
   Widget build(BuildContext context) {
@@ -874,8 +866,8 @@ class _StepRow extends StatelessWidget {
       decoration: BoxDecoration(
         border: Border(
           top: BorderSide(
-            color: strong ? AppColors.textPrimary : AppColors.textPrimary.withValues(alpha: .14),
-            width: strong ? 1.3 : 1,
+            color: AppColors.textPrimary.withValues(alpha: .14),
+            width: 1,
           ),
         ),
       ),
@@ -898,7 +890,7 @@ class _StepRow extends StatelessWidget {
                     ? const _DashedTrack()
                     : DashProgress(
                   fraction: fraction!,
-                  color: strong ? AppColors.greenrspwn : AppColors.textPrimary,
+                  color: AppColors.textPrimary,
                   semanticsLabel: '$label $value',
                 ),
               ],
@@ -1049,131 +1041,6 @@ class _WaitsCard extends StatelessWidget {
       ),
     ),
   );
-}
-
-// ─── 5. Could animals stay home or outside? ──────────────────────────────
-
-// Stored `closureReason` values. ClosureReason was reduced to five reasons
-// (closure_reason.dart): "reunited with owner" and "owner found" became
-// `reunited`. Cases closed before that still hold the old names, so
-// analytics match them as strings rather than enum values.
-const _reunitedReasons = {'reunited', 'reunitedWithOwner'};
-const _legacyUnconfirmedReasons = {'hasOwner', 'resolvedWithoutTransport'};
-
-class _DiversionCard extends ConsumerWidget {
-  final Period period;
-  final List<RescueCase> cases;
-  const _DiversionCard({required this.period, required this.cases});
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final reports = cases.where((c) => period.has(c.createdAt)).length;
-    final closedHere = cases.where((c) => period.has(tsOf(c.raw['closedAt']))).toList();
-    String? reason(RescueCase c) => c.raw['closureReason'] as String?;
-    final confirmed = closedHere.where((c) => _reunitedReasons.contains(reason(c))).length;
-    // Only older cases carry these; today's picker records a found owner
-    // as `reunited`.
-    final unknown = closedHere.where((c) => _legacyUnconfirmedReasons.contains(reason(c))).length;
-    // Any closure where the animal turned out to have an owner: reunited
-    // (current and legacy) plus the old "has an owner" reason.
-    final ownerKnown = confirmed + closedHere.where((c) => reason(c) == 'hasOwner').length;
-    final diverted = confirmed + unknown;
-    final referred = cases.where((c) => c.status == RescueStatus.referred && period.has(lastUpdateOf(c))).length;
-    final catCases =
-        cases.where((c) => period.has(c.createdAt) && c.allSpecies.any((s) => s.toLowerCase() == 'cat')).toList();
-    final catReports = catCases.length;
-    final communityCats = catCases.where((c) => c.raw['communityCat'] == true).length;
-
-    return SectionCard(
-      icon: Icons.groups,
-      title: 'Could animals stay home or outside?',
-      // Closed cases are stored as cancelled; reuse Rescue Reports' own
-      // status filter to list them.
-      onOpen: () {
-        ref.read(rescueFilterProvider.notifier).setStatusOverride(RescueStatus.cancelled);
-        openRescueTab(context, ref, RescuePipelineTab.review);
-      },
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Text('Reports closed without bringing the animal in', style: dashMuted()),
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: [
-              Text('$diverted', style: GoogleFonts.tiltWarp(fontSize: 34, color: AppColors.textPrimary)),
-              const SizedBox(width: 8),
-              Padding(
-                padding: const EdgeInsets.only(bottom: 6),
-                child: Text('of $reports reports', style: dashMuted(13)),
-              ),
-            ],
-          ),
-          if (diverted > 0) ...[
-            ClipRRect(
-              borderRadius: BorderRadius.circular(7),
-              child: SizedBox(
-                height: 14,
-                child: Row(
-                  children: [
-                    if (confirmed > 0)
-                      Expanded(
-                        flex: confirmed,
-                        child: Container(color: DashSeverity.ok.color),
-                      ),
-                    if (confirmed > 0 && unknown > 0) const SizedBox(width: 2),
-                    if (unknown > 0)
-                      Expanded(
-                        flex: unknown,
-                        child: Container(color: const Color(0xFFD7D4CB)),
-                      ),
-                  ],
-                ),
-              ),
-            ),
-            const SizedBox(height: 6),
-            Wrap(
-              spacing: 10,
-              runSpacing: 4,
-              children: [
-                LegendText(
-                  DashSeverity.ok.color,
-                  '$confirmed reunited (confirmed safe)',
-                  style: dashBody(size: 12.5, weight: FontWeight.w700, color: DashSeverity.ok.color),
-                ),
-                LegendText(
-                  const Color(0xFFD7D4CB),
-                  '$unknown outcome unknown, not counted as success',
-                  style: dashMuted(12.5),
-                ),
-              ],
-            ),
-          ],
-          const SizedBox(height: 10),
-          Row(
-            children: [
-              Expanded(child: _MiniStat('$ownerKnown', 'Closed: animal has an owner')),
-              const SizedBox(width: 8),
-              Expanded(child: _MiniStat('$referred', 'Referred to another org, LGU or volunteer')),
-            ],
-          ),
-          const SizedBox(height: 8),
-          Row(
-            children: [
-              const Expanded(child: _MiniStat('—', 'Help requests (food, vet costs) · not tracked', dashed: true)),
-              const SizedBox(width: 8),
-              // Analytics gap 5: tagged on the report form or by staff.
-              Expanded(
-                child: _MiniStat(
-                  '$communityCats',
-                  'Community cats reported · of $catReports cat reports',
-                ),
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
 }
 
 // ─── 6. Are animals protected from illness? ──────────────────────────────

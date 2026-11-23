@@ -9,6 +9,7 @@ import 'donation_review.dart';
 import 'donation_review_inkind.dart';
 import 'fund_tracking_section.dart';
 import 'models.dart';
+import 'package:respawnd1/features/donation/campaign_needs_view.dart';
 import 'package:respawnd1/core/utils/app_date_format.dart';
 
 //Donation Detail Page
@@ -108,6 +109,10 @@ class _DonationDetailPageState extends State<DonationDetail> {
             Text('About the Donation', style: GoogleFonts.tiltWarp(fontSize: 16, color: AppColors.textPrimary)),
             const SizedBox(height: 6),
             Text(donation.description, style: GoogleFonts.zain(fontSize: 16, color: AppColors.textPrimary)),
+
+            // An animal in treatment: rescue reason, condition, treatment log
+            // and the expenses the target pays for.
+            if (donation.animalNeeds != null) CampaignNeedsView(needs: donation.animalNeeds!),
 
             const SizedBox(height: 20),
 

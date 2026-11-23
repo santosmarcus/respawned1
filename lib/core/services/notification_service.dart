@@ -276,6 +276,10 @@ class NotificationService {
 
       case 'transporter_location_updated':
       case 'transporter_clinic_changed':
+      // A new message on the case thread, or a location shared there
+      // (notifyTransporterCaseMessage): open the trip, where the thread is.
+      case 'transporter_message':
+      case 'transporter_location_shared':
       // The organization closed the case mid-transit: confirm and stop.
       case 'transporter_case_closed':
         final caseId = data['caseId'] as String?;

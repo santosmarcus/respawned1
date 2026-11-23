@@ -385,13 +385,6 @@ service cloud.firestore {
       allow write: if false;
     }
 
-    // Daily counts for the treatment-load and occupancy trends, written only
-    // by snapshotDailyAnalytics (dashboard_ops.js). Staff only, never public.
-    match /organizations/{orgId}/analyticsSnapshots/{day} {
-      allow read: if isPlatformStaff() || staffWith(orgId, readKeys());
-      allow write: if false;
-    }
-
     // organizations/{orgId}/members/{uid}
     //   - Only the owner or an active admin adds, edits, or removes members.
     //   - An invited person may create only their own doc, with the role,
@@ -509,7 +502,7 @@ service cloud.firestore {
     // activityLogs, ...) keeps its current open access.
     match /organizations/{orgId}/{sub}/{document=**} {
       allow read, write: if signedIn() && !(sub in ['members', 'integrations', 'settings', 'stock', 'stockMovements', 'cashOuts',
-        'careRounds', 'alertClaims', 'analyticsSummaries', 'analyticsSnapshots']);
+        'careRounds', 'alertClaims', 'analyticsSummaries']);
     }
 
     // ---- Organization invitations ------------------------------------------
@@ -1353,12 +1346,12 @@ service cloud.firestore {
           );
         }
 
-        // Confirm Intake (CaseIntakeRepository.confirmIntake) hands the
-        // clinic-to-shelter leg to the transporter already holding the case
-        // (assignedVolunteerId / riderId). They are already carrying these
-        // animals, and may have taken the case from the job board or
-        // registered before vehicle details were asked, so the vehicle
-        // check is not repeated for them.
+        // Only new offers (Assign Transporter, status 'pending') are checked
+        // for the vehicle: the intake leg (CaseIntakeRepository.confirmIntake,
+        // created 'accepted') keeps the transporter already carrying the
+        // animals, and checking it there also pushed Confirm Intake past
+        // the 1,000-expression limit. That leg may only go to the
+        // transporter already on the case (assignedVolunteerId / riderId).
         function continuesOwnTrip() {
           let data = get(casePath(caseId)).data;
           let rider = request.resource.data.get('riderId', '');
@@ -1367,7 +1360,7 @@ service cloud.firestore {
         }
 
         allow create: if canStaffCase(get(casePath(caseId)).data) &&
-          (vehicleCarriesCase() || continuesOwnTrip());
+          (request.resource.data.get('status', '') == 'pending' ? vehicleCarriesCase() : continuesOwnTrip());
         allow update: if canStaffCase(get(casePath(caseId)).data) || (
                     resource.data.get('riderId', '') == request.auth.uid &&
                     changedOnly(['status', 'respondedAt', 'acceptedAt', 'rejectedAt', 'rejectionReason', 'vehicle', 'plate', 'completedAt']) &&
@@ -1555,9 +1548,32 @@ service cloud.firestore {
       // Every subcollection (medical records and the managementLogs audit
       // trail) is for the owning organization's staff, its carers and
       // platform staff. The public reads publicAnimals.
+      // Adoption listing engagement (AnimalEngagementRepository): per Manila
+      // day, unique profile viewers and savers. Anyone signed in adds
+      // exactly 1 to one counter per write, stamped with the animal's own
+      // organization; staff read them (the catch-all below and the
+      // collection-group rule). Nothing else may be written here.
+      match /engagement/{day} {
+        function oneStep(before) {
+          let after = request.resource.data;
+          let dv = after.get('views', 0) - before.get('views', 0);
+          let ds = after.get('saves', 0) - before.get('saves', 0);
+          return after.get('views', 0) is int && after.get('saves', 0) is int &&
+            ((dv == 1 && ds == 0) || (dv == 0 && ds == 1));
+        }
+        allow create: if signedIn() && day.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$') &&
+          request.resource.data.keys().hasOnly(['organizationId', 'day', 'views', 'saves']) &&
+          request.resource.data.get('day', '') == day &&
+          request.resource.data.get('organizationId', '') == get(animalPath(animalId)).data.get('organizationId', '') &&
+          oneStep({});
+        allow update: if signedIn() &&
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['views', 'saves']) &&
+          oneStep(resource.data);
+      }
+
       match /{sub}/{docId=**} {
         allow read: if canReadAnimalMedical(animalId);
-        allow write: if sub != 'careUpdates' && canStaffAnimal(get(animalPath(animalId)).data);
+        allow write: if sub != 'careUpdates' && sub != 'engagement' && canStaffAnimal(get(animalPath(animalId)).data);
       }
     }
 
@@ -1842,6 +1858,11 @@ service cloud.firestore {
     // Staff: their own organization's follow-ups (stamped from the
     // adoption by functions/audit_logs.js). The adopter reads through the
     // per-adoption rule.
+    // Adoption listing engagement, counted on Analytics (Reports by area).
+    match /{path=**}/engagement/{docId} {
+      allow read: if canReadOrgRecord(readKeys());
+    }
+
     match /{path=**}/followUps/{docId} {
       allow read: if canReadOrgRecord(readKeys());
     }

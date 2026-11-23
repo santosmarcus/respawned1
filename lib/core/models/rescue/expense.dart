@@ -159,10 +159,6 @@ class ExpenseFunding {
 };
 }
 
-/// `paymentStatus` values: [kExpenseUnpaid] is a running bill.
-const String kExpensePaid = 'paid';
-const String kExpenseUnpaid = 'unpaid';
-
 /// A single doc under `cases/{caseId}/expenses/{expenseId}` — the ledger
 /// entry cost tracking is built on. Totals (Total Expenses / Funded Amount
 /// / Outstanding Balance) are always computed by summing these records,
@@ -208,14 +204,6 @@ class Expense {
   /// Donation gap 7: when a missing receipt becomes overdue.
   final DateTime? receiptDueAt;
 
-  /// A running bill: the cost is owed but not paid yet (e.g. a clinic tab
-  /// settled later). Not counted as spent until paid. Expenses saved before
-  /// this field existed were recorded as paid.
-  final bool isRunningBill;
-
-  /// When a running bill was marked paid.
-  final DateTime? paidAt;
-
   const Expense({
     required this.id,
     required this.caseId,
@@ -237,8 +225,6 @@ class Expense {
     this.approvedAt,
     this.approvedAmount,
     this.receiptDueAt,
-    this.isRunningBill = false,
-    this.paidAt,
   });
 
   bool get isAwaitingApproval => approvalStatus == 'pending';
@@ -310,8 +296,6 @@ class Expense {
       approvedAt: ts('approvedAt'),
       approvedAmount: (data['approvedAmount'] as num?)?.toDouble(),
       receiptDueAt: ts('receiptDueAt'),
-      isRunningBill: data['paymentStatus'] == kExpenseUnpaid,
-      paidAt: ts('paidAt'),
     );
   }
 
@@ -347,7 +331,5 @@ class Expense {
     'approvedAt': approvedAt != null ? Timestamp.fromDate(approvedAt!) : null,
     'approvedAmount': approvedAmount,
     'receiptDueAt': hasReceipt || receiptDueAt == null ? null : Timestamp.fromDate(receiptDueAt!),
-    'paymentStatus': isRunningBill ? kExpenseUnpaid : kExpensePaid,
-    'paidAt': paidAt != null ? Timestamp.fromDate(paidAt!) : null,
   };
 }

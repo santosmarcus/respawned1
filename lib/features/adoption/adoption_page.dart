@@ -3,6 +3,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:respawnd1/core/repos/animal_engagement_repository.dart';
 import 'package:respawnd1/core/models/rescue/animal_characteristics.dart';
 import 'package:respawnd1/core/models/rescue/animal_record.dart';
 import 'package:respawnd1/core/widgets/animal_record_card.dart';
@@ -49,6 +50,10 @@ class Animal {
   /// their name, shown as "Independent rescuer · name".
   final String? independentRescuerName;
 
+  /// The caring organization (analytics: profile views and saves are
+  /// counted for it, animal_engagement_repository.dart).
+  final String organizationId;
+
   Animal({
     required this.id,
     this.animalRecordId = '',
@@ -73,6 +78,7 @@ class Animal {
     this.photoUrl,
     this.photoUrls = const [],
     this.photoCaptions = const {},
+    this.organizationId = '',
     this.independentRescuerName,
   });
 }
@@ -156,6 +162,7 @@ Animal animalRecordToCard(AnimalRecord r, int index) {
     photoUrls: r.photoUrls,
     photoCaptions: r.photoCaptions,
     independentRescuerName: r.raw['ownerKind'] == 'independent' ? (r.raw['ownerName'] as String? ?? '') : null,
+    organizationId: r.raw['organizationId'] as String? ?? '',
   );
 }
 
@@ -354,6 +361,8 @@ class _AdoptionPageState extends ConsumerState<AdoptionPage> {
         'category': animal.species,
         'timestamp': FieldValue.serverTimestamp(),
       });
+      // Analytics: a save is an expression of interest in this animal.
+      AnimalEngagementRepository().recordSave(animalId: animal.id, organizationId: animal.raw['organizationId'] as String? ?? '');
     } else {
       await favRef.delete();
     }

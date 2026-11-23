@@ -220,7 +220,9 @@ class _FacebookRecordPostPageState extends ConsumerState<FacebookRecordPostPage>
     final pageConnected = page?.isConnected ?? false;
 
     final String? postBlockedReason = orgId == null
-        ? 'This $_kindLabel is not linked to an organization, so it can only be shared through the share sheet.'
+        ? (widget.kind == FacebookRecordKind.referral
+              ? 'Your account isn\'t linked to an organization, so there is no Page to post on. Share it through the share sheet.'
+              : 'This $_kindLabel is not linked to an organization, so it can only be shared through the share sheet.')
         : currentOrgId != null && currentOrgId != orgId
         ? 'This $_kindLabel belongs to another organization.'
         : !pageConnected

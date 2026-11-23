@@ -28,6 +28,11 @@ import 'package:respawnd1/core/utils/app_date_format.dart';
 class ShelterSettings {
   final int? capacity;
   final int? isolationCapacity;
+
+  /// Animals the organization can have in veterinary treatment at once
+  /// (its clinic partners' room), separate from shelter spaces. Analytics
+  /// treatment capacity utilization uses it; null = not set.
+  final int? treatmentCapacity;
   final double? monthlyBudget;
   final double? foodPerDayKg;
   final int? ridersNeeded;
@@ -46,6 +51,7 @@ class ShelterSettings {
   const ShelterSettings({
     this.capacity,
     this.isolationCapacity,
+    this.treatmentCapacity,
     this.monthlyBudget,
     this.foodPerDayKg,
     this.ridersNeeded,
@@ -71,6 +77,7 @@ class ShelterSettings {
     return ShelterSettings(
       capacity: (m['maxCapacity'] as num?)?.toInt(),
       isolationCapacity: (m['isolationCapacity'] as num?)?.toInt(),
+      treatmentCapacity: (m['treatmentCapacity'] as num?)?.toInt(),
       monthlyBudget: (m['monthlyBudget'] as num?)?.toDouble(),
       foodPerDayKg: (m['foodPerDayKg'] as num?)?.toDouble(),
       ridersNeeded: (m['ridersNeeded'] as num?)?.toInt(),
@@ -144,6 +151,7 @@ Future<void> saveShelterSettings({
   required String? organizationId,
   required int capacity,
   required int isolationCapacity,
+  int? treatmentCapacity,
   double? monthlyBudget,
   double? foodPerDayKg,
   int? ridersNeeded,
@@ -157,6 +165,7 @@ Future<void> saveShelterSettings({
   return shelterSettingsDoc(organizationId).set({
     'maxCapacity': capacity,
     'isolationCapacity': isolationCapacity,
+    'treatmentCapacity': treatmentCapacity,
     'monthlyBudget': monthlyBudget,
     'foodPerDayKg': foodPerDayKg,
     'ridersNeeded': ridersNeeded,
@@ -190,6 +199,7 @@ class _ShelterSetupSheet extends ConsumerStatefulWidget {
 class _ShelterSetupSheetState extends ConsumerState<_ShelterSetupSheet> {
   int _capacity = 20;
   int _isolation = 2;
+  int _treatment = 0; // 0 = not set
   int _riders = 2;
   double _foodKg = 3;
   final _budget = TextEditingController();
@@ -211,6 +221,7 @@ class _ShelterSetupSheetState extends ConsumerState<_ShelterSetupSheet> {
     _seeded = true;
     _capacity = s.capacity ?? _capacity;
     _isolation = s.isolationCapacity ?? _isolation;
+    _treatment = s.treatmentCapacity ?? _treatment;
     _riders = s.ridersNeeded ?? _riders;
     _foodKg = s.foodPerDayKg ?? _foodKg;
     if (s.monthlyBudget != null) _budget.text = s.monthlyBudget!.round().toString();
@@ -228,6 +239,7 @@ class _ShelterSetupSheetState extends ConsumerState<_ShelterSetupSheet> {
         organizationId: await ref.read(dashboardOrgIdProvider.future),
         capacity: _capacity,
         isolationCapacity: _isolation,
+        treatmentCapacity: _treatment == 0 ? null : _treatment,
         monthlyBudget: double.tryParse(_budget.text.replaceAll(',', '')),
         foodPerDayKg: _foodKg,
         ridersNeeded: _riders,
@@ -296,6 +308,14 @@ class _ShelterSetupSheetState extends ConsumerState<_ShelterSetupSheet> {
                 value: '$_isolation',
                 onMinus: () => setState(() => _isolation = (_isolation - 1).clamp(0, 99)),
                 onPlus: () => setState(() => _isolation = (_isolation + 1).clamp(0, 99)),
+              ),
+              _StepField(
+                icon: Icons.local_hospital,
+                title: 'Treatment spots',
+                hint: 'Animals in vet care at once',
+                value: _treatment == 0 ? 'Not set' : '$_treatment',
+                onMinus: () => setState(() => _treatment = (_treatment - 1).clamp(0, 999)),
+                onPlus: () => setState(() => _treatment = (_treatment + 1).clamp(0, 999)),
               ),
               _FieldShell(
                 icon: Icons.account_balance_wallet,

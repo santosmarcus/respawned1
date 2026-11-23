@@ -213,6 +213,14 @@ class DonationListing {
   final bool autoRenew;
   final int renewalNoticeDays;
   final int renewalGraceDays;
+
+  /// Donation campaigns for an animal in treatment: which animal of which
+  /// rescue case, and the public summary of its rescue, condition,
+  /// treatment and expenses (written by functions/campaigns.js; the target
+  /// is the expenses' total). Null for other listings.
+  final String? treatmentCaseId;
+  final int? treatmentAnimalIndex;
+  final CampaignAnimalNeeds? animalNeeds;
   bool favorited;
   bool donated;
 
@@ -256,6 +264,9 @@ class DonationListing {
     this.autoRenew = true,
     this.renewalNoticeDays = kDefaultRenewalNoticeDays,
     this.renewalGraceDays = kDefaultRenewalGraceDays,
+    this.treatmentCaseId,
+    this.treatmentAnimalIndex,
+    this.animalNeeds,
     this.favorited = false,
     this.donated = false,
   });
@@ -402,6 +413,11 @@ class DonationListing {
           : kRenewalGraceDayChoices.contains(data['renewalGraceDays'])
           ? data['renewalGraceDays'] as int
           : kDefaultRenewalGraceDays,
+      treatmentCaseId: data['treatmentCaseId'] as String?,
+      treatmentAnimalIndex: (data['treatmentAnimalIndex'] as num?)?.toInt(),
+      animalNeeds: data['animalNeeds'] is Map
+          ? CampaignAnimalNeeds.fromMap(Map<String, dynamic>.from(data['animalNeeds'] as Map))
+          : null,
     );
   }
 
@@ -446,6 +462,110 @@ class DonationListing {
       'startDate': startDate != null ? Timestamp.fromDate(startDate!) : null,
     };
   }
+}
+
+/// What donors see about an animal in treatment (campaigns/{id}.animalNeeds,
+/// built by functions/campaign_needs_rules.js from the rescue case).
+class CampaignAnimalNeeds {
+  final String? animalName;
+  final String? species;
+  final String? rescueType;
+  final String? reportedCondition;
+  final String? currentCondition;
+  final List<NeedsLogEntry> treatmentLog;
+  final List<NeedsExpense> expenses;
+  final double expenseTotal;
+  final bool intakeComplete;
+
+  const CampaignAnimalNeeds({
+    this.animalName,
+    this.species,
+    this.rescueType,
+    this.reportedCondition,
+    this.currentCondition,
+    this.treatmentLog = const [],
+    this.expenses = const [],
+    this.expenseTotal = 0,
+    this.intakeComplete = false,
+  });
+
+  factory CampaignAnimalNeeds.fromMap(Map<String, dynamic> m) => CampaignAnimalNeeds(
+        animalName: m['animalName'] as String?,
+        species: m['species'] as String?,
+        rescueType: m['rescueType'] as String?,
+        reportedCondition: m['reportedCondition'] as String?,
+        currentCondition: m['currentCondition'] as String?,
+        treatmentLog: [
+          for (final e in (m['treatmentLog'] as List? ?? const []))
+            if (e is Map) NeedsLogEntry.fromMap(Map<String, dynamic>.from(e)),
+        ],
+        expenses: [
+          for (final e in (m['expenses'] as List? ?? const []))
+            if (e is Map) NeedsExpense.fromMap(Map<String, dynamic>.from(e)),
+        ],
+        expenseTotal: (m['expenseTotal'] as num?)?.toDouble() ?? 0,
+        intakeComplete: m['intakeComplete'] == true,
+      );
+}
+
+class NeedsLogEntry {
+  final DateTime? date;
+  final String type;
+  final String? condition;
+  final String? procedure;
+  final String? medication;
+  final String? vaccine;
+  final String? notes;
+
+  const NeedsLogEntry({this.date, required this.type, this.condition, this.procedure, this.medication, this.vaccine, this.notes});
+
+  factory NeedsLogEntry.fromMap(Map<String, dynamic> m) => NeedsLogEntry(
+        date: m['dateMs'] is num ? DateTime.fromMillisecondsSinceEpoch((m['dateMs'] as num).toInt()) : null,
+        type: m['type'] as String? ?? 'Update',
+        condition: m['condition'] as String?,
+        procedure: m['procedure'] as String?,
+        medication: m['medication'] as String?,
+        vaccine: m['vaccine'] as String?,
+        notes: m['notes'] as String?,
+      );
+
+  /// "Procedure: femur pinning · Medication: amoxicillin", what was done.
+  String get details => [
+        if ((procedure ?? '').isNotEmpty) 'Procedure: $procedure',
+        if ((medication ?? '').isNotEmpty) 'Medication: $medication',
+        if ((vaccine ?? '').isNotEmpty) 'Vaccine: $vaccine',
+        if ((condition ?? '').isNotEmpty) 'Condition: $condition',
+      ].join(' · ');
+}
+
+class NeedsExpense {
+  final String title;
+  final String category;
+  final double amount;
+
+  /// A cost shared by several animals of the case; [amount] is this
+  /// animal's share of [fullAmount].
+  final bool shared;
+  final double fullAmount;
+  final DateTime? date;
+
+  const NeedsExpense({
+    required this.title,
+    required this.category,
+    required this.amount,
+    this.shared = false,
+    double? fullAmount,
+    this.date,
+  }) : fullAmount = fullAmount ?? amount;
+
+  factory NeedsExpense.fromMap(Map<String, dynamic> m) => NeedsExpense(
+        title: m['title'] as String? ?? 'Expense',
+        category: m['category'] as String? ?? 'Other',
+        amount: (m['amount'] as num?)?.toDouble() ?? 0,
+        shared: m['shared'] == true,
+        fullAmount: (m['fullAmount'] as num?)?.toDouble(),
+        date: m['dateMs'] is num ? DateTime.fromMillisecondsSinceEpoch((m['dateMs'] as num).toInt()) : null,
+      );
 }
 
 class InKindItem {

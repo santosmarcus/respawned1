@@ -121,12 +121,15 @@ void main() {
       final form = AdoptionFormController();
       addTearDown(form.dispose);
       // No current pets: the two current-pet questions aren't asked.
-      expect(form.missingRequiredAnswers(), hasLength(5));
+      // The home map pin is required too.
+      expect(form.missingRequiredAnswers(), hasLength(6));
       form.setHasCurrentPets(true);
-      expect(form.missingRequiredAnswers(), hasLength(8));
+      expect(form.missingRequiredAnswers(), hasLength(9));
       expect(form.allAgreementsAccepted, isFalse);
 
       form
+        ..homeLat = 14.6
+        ..homeLng = 121.0
         ..residenceType = 'House'
         ..ownershipStatus = 'Owned'
         ..currentDogs = 1

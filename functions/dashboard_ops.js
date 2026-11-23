@@ -24,7 +24,6 @@ const admin = require('firebase-admin');
 
 const digest = require('./dashboard_digest_rules');
 const summaries = require('./analytics_summary_rules');
-const snapshots = require('./analytics_snapshot_rules');
 const {requireOrgPermission} = require('./org_access');
 
 const SUMMARY_BACKFILL_MONTHS = 12;
@@ -157,46 +156,6 @@ module.exports = function dashboardOps({db, orgStaffUids, notifyStaff, openFollo
     },
   );
 
-  /// One snapshot per organization per Manila day of what is true right
-  /// now (animals in treatment and in the shelter, capacity, overdue
-  /// check-ins): the Analytics trends need it because it can't be rebuilt
-  /// later. The document id is the day, so a rerun overwrites, never adds.
-  async function writeDailySnapshot(orgId, nowMs) {
-    const orgRef = db.collection('organizations').doc(orgId);
-    const [cases, animals, followUps, shelter] = await Promise.all([
-      db.collection('cases').where('organizationId', '==', orgId).get(),
-      db.collection('animals').where('organizationId', '==', orgId).get(),
-      db.collectionGroup('followUps').where('organizationId', '==', orgId).where('status', 'in', openFollowUpStatuses).get(),
-      orgRef.collection('settings').doc('shelter').get(),
-    ]);
-    const snap = snapshots.dailySnapshot({
-      cases: cases.docs.map((d) => d.data()),
-      animals: animals.docs.map((d) => d.data()),
-      followUps: followUps.docs.map((d) => d.data()),
-      maxCapacity: shelter.exists ? shelter.get('maxCapacity') : null,
-      nowMs,
-    });
-    await orgRef.collection('analyticsSnapshots').doc(snap.day).set({
-      ...snap,
-      organizationId: orgId,
-      computedAt: admin.firestore.FieldValue.serverTimestamp(),
-    });
-  }
-
-  const snapshotDailyAnalytics = onSchedule(
-    {schedule: '5 0 * * *', timeZone: 'Asia/Manila', timeoutSeconds: 540},
-    async () => {
-      const nowMs = Date.now();
-      for (const orgId of await approvedOrgIds()) {
-        try {
-          await writeDailySnapshot(orgId, nowMs);
-        } catch (e) {
-          console.error('[snapshotDailyAnalytics] failed for org', orgId, e);
-        }
-      }
-    },
-  );
-
   const rebuildAnalyticsSummaries = onCall({timeoutSeconds: 300}, async (request) => {
     // Admins of the organization only (functions/org_access.js).
     const actor = await requireOrgPermission(db, request, {
@@ -215,6 +174,5 @@ module.exports = function dashboardOps({db, orgStaffUids, notifyStaff, openFollo
     notifyStaffOfSpecializedAssistance,
     writeAnalyticsSummaries,
     rebuildAnalyticsSummaries,
-    snapshotDailyAnalytics,
   };
 };

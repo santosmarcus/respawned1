@@ -13,6 +13,12 @@ import 'donation_admin_service.dart';
 import 'sponsorable_animals.dart';
 import 'package:respawnd1/features/admin/widgets/donation_admin.dart';
 import 'package:respawnd1/features/admin/stock/stock_service.dart' show stockUnits;
+import 'package:respawnd1/core/models/dashboard/dashboard_model.dart' show RescueStage;
+import 'package:respawnd1/features/admin/rescue/state/rescue_reports_providers.dart'
+    show caseDetailProvider, expensesProvider, treatmentLogsProvider;
+import 'package:respawnd1/features/adminhome/dashboard/dashboard_data.dart' show dashboardRescueSnapshotProvider;
+import 'package:respawnd1/features/donation/campaign_needs_view.dart';
+import 'campaign_animal_needs.dart';
 
 /// Starting values for a new campaign opened from somewhere else in the app
 /// (e.g. a rescue case's outstanding treatment balance). Everything stays
@@ -130,8 +136,20 @@ class _DonationAdminCreatePageState extends ConsumerState<DonationAdminCreatePag
   final Map<String, String?> _autoFilled = {};
   Set<String>? _autoTags;
 
+  /// Donation campaigns: the animal in treatment it raises funds for. Its
+  /// treatment expenses set the target; it launches once intake is done.
+  TreatmentAnimalOption? _treatment;
+  bool _expensesConfirmed = false;
+  /// The latest preview of what donors will see (the server rebuilds it).
+  CampaignAnimalNeeds? _preview;
+
   bool get _isEdit => widget.existing != null;
   bool get _isSponsorship => _type == 'sponsorship';
+
+  /// Launched with an animal in treatment: the animal, its expenses and the
+  /// target are fixed (functions/campaigns.js).
+  bool get _needsLocked =>
+      _isEdit && widget.existing!.status != 'draft' && widget.existing!.animalNeeds != null;
 
   @override
   void initState() {
@@ -155,6 +173,16 @@ class _DonationAdminCreatePageState extends ConsumerState<DonationAdminCreatePag
       _renewalGraceDays = e.autoRenew ? e.renewalGraceDays : kDefaultRenewalGraceDays;
       _deadline = e.endDate;
       _imageUrl = e.imageUrl;
+      if (e.treatmentCaseId != null) {
+        _treatment = TreatmentAnimalOption(
+          caseId: e.treatmentCaseId!,
+          index: e.treatmentAnimalIndex ?? 0,
+          name: e.animalNeeds?.animalName ?? e.animalName ?? 'Animal',
+          recordId: e.animalId,
+          intakeComplete: e.animalNeeds?.intakeComplete ?? false,
+        );
+        _expensesConfirmed = true;
+      }
       for (final it in e.inKindItems) {
         _inKind.add(_InKindRow(
           category: kInKindCategories.contains(it.category) ? it.category : 'Others',
@@ -244,7 +272,13 @@ class _DonationAdminCreatePageState extends ConsumerState<DonationAdminCreatePag
     if (!_isSponsorship && _title.text.trim().isEmpty) return 'Enter a title.';
     if (_isSponsorship && _animalId == null) return 'Select the animal to sponsor.';
     if (_tags.isEmpty) return 'Select at least one tag.';
-    if (parsePesoInput(_amount.text) == null) {
+    final byTreatment = !_isSponsorship && _treatment != null;
+    if (byTreatment && !_needsLocked) {
+      if (_preview == null) return 'The animal\'s treatment record is still loading.';
+      if (_preview!.expenseTotal <= 0) return 'No treatment expenses are recorded for this animal yet.';
+      if (!_expensesConfirmed) return 'Confirm that every treatment expense for this animal is recorded.';
+    }
+    if (!byTreatment && parsePesoInput(_amount.text) == null) {
       return _isSponsorship ? 'Enter a valid monthly amount.' : 'Enter a valid target amount.';
     }
     if (_isSponsorship && _intendedUse.text.trim().isEmpty) return 'Describe how sponsorship funds will be used.';
@@ -265,7 +299,10 @@ class _DonationAdminCreatePageState extends ConsumerState<DonationAdminCreatePag
   }
 
   Future<void> _save({required bool publish}) async {
-    final problem = _validate();
+    final problem = _validate() ??
+        (publish && !_isEdit && !_isSponsorship && _treatment != null && !_treatment!.intakeComplete
+            ? 'This animal\'s campaign can be launched once intake is complete. Save it as a draft for now.'
+            : null);
     if (problem != null) {
       showAdminSnack(context, problem, error: true);
       return;
@@ -275,13 +312,23 @@ class _DonationAdminCreatePageState extends ConsumerState<DonationAdminCreatePag
       String? imageUrl = _imageUrl;
       if (_image != null) imageUrl = await DonationAdminService.uploadImage(_image!, 'campaigns');
 
-      final amount = parsePesoInput(_amount.text)!;
+      final byTreatment = !_isSponsorship && _treatment != null;
+      // An animal-in-treatment campaign's target is its expenses' total (the
+      // server recomputes it from the case).
+      final amount = byTreatment
+          ? (_needsLocked ? widget.existing!.target : _preview!.expenseTotal)
+          : parsePesoInput(_amount.text)!;
       final data = <String, dynamic>{
         'type': _type,
         'title': _title.text.trim(),
         'description': _description.text.trim(),
         'imageUrl': imageUrl,
-        'animalId': _animalId,
+        'animalId': (!_isSponsorship && _treatment != null) ? null : _animalId,
+        if (!_isSponsorship && _treatment != null) ...{
+          'treatmentCaseId': _treatment!.caseId,
+          'treatmentAnimalIndex': _treatment!.index,
+          'expensesConfirmed': _expensesConfirmed,
+        },
         'fundKind': _fundKind,
         'purposeTags': _tags.toList(),
         'restricted': _restricted,
@@ -369,13 +416,16 @@ class _DonationAdminCreatePageState extends ConsumerState<DonationAdminCreatePag
                   ),
                   const SizedBox(height: 14),
                 ],
-                FieldLabel('Name of Animal', required: _isSponsorship),
-                animals.when(
-                  loading: () => const LinearProgressIndicator(color: AppColors.textPrimary),
-                  error: (e, _) => Text('Could not load animals: $e', style: GoogleFonts.zain(color: Colors.redAccent)),
-                  data: (list) => _animalDropdown(list, openSponsorships),
-                ),
-                if (_isSponsorship) ..._animalSummary(animals.asData?.value),
+                if (_isSponsorship) ...[
+                  FieldLabel('Name of Animal', required: _isSponsorship),
+                  animals.when(
+                    loading: () => const LinearProgressIndicator(color: AppColors.textPrimary),
+                    error: (e, _) => Text('Could not load animals: $e', style: GoogleFonts.zain(color: Colors.redAccent)),
+                    data: (list) => _animalDropdown(list, openSponsorships),
+                  ),
+                  ..._animalSummary(animals.asData?.value),
+                ] else
+                  ..._treatmentSection(animals.asData?.value),
                 const SizedBox(height: 18),
 
                 const FieldLabel('Donation Category'),
@@ -392,6 +442,7 @@ class _DonationAdminCreatePageState extends ConsumerState<DonationAdminCreatePag
                       : (v) => setState(() {
                     _type = v ?? 'donation';
                     _fundKind = _type == 'sponsorship' ? 'animal' : 'campaign';
+                    if (_isSponsorship) _treatment = null;
                   }),
                 ),
                 const SizedBox(height: 18),
@@ -427,8 +478,25 @@ class _DonationAdminCreatePageState extends ConsumerState<DonationAdminCreatePag
                   const SizedBox(height: 18),
                 ],
 
-                FieldLabel(_isSponsorship ? 'Monthly Amount' : 'Enter Amount', required: true),
+                FieldLabel(_isSponsorship ? 'Monthly Amount' : (_treatment != null ? 'Target Funds' : 'Enter Amount'),
+                    required: true),
                 const SizedBox(height: 8),
+                if (!_isSponsorship && _treatment != null)
+                  Center(
+                    child: Column(
+                      children: [
+                        Text(
+                          _needsLocked
+                              ? formatPesoExact(widget.existing!.target)
+                              : (_preview == null ? '—' : formatPesoExact(_preview!.expenseTotal)),
+                          style: GoogleFonts.tiltWarp(fontSize: 18, color: AppColors.textPrimary),
+                        ),
+                        Text('The total of the animal\'s treatment expenses',
+                            style: GoogleFonts.zain(fontSize: 13, color: AppColors.textSecondary)),
+                      ],
+                    ),
+                  )
+                else
                 Center(
                   child: SizedBox(
                     width: 180,
@@ -616,6 +684,114 @@ class _DonationAdminCreatePageState extends ConsumerState<DonationAdminCreatePag
       }),
     );
   }
+
+  /// Donation campaigns: pick the animal in treatment, see what donors will
+  /// see (rescue reason, condition, treatment log, expenses), confirm every
+  /// expense is recorded. Fixed once launched.
+  List<Widget> _treatmentSection(List<AnimalRecord>? records) {
+    final note = GoogleFonts.zain(fontSize: 12, color: AppColors.textSecondary);
+    if (_needsLocked) {
+      _preview = widget.existing!.animalNeeds;
+      return [
+        const FieldLabel('Animal in treatment'),
+        Text(_treatment?.name ?? widget.existing!.animalName ?? 'Animal',
+            style: GoogleFonts.zain(fontSize: 15, color: AppColors.textPrimary)),
+        Text('Launched: the animal, its expenses and the target are fixed.', style: note),
+        _needsCard(CampaignNeedsView(needs: widget.existing!.animalNeeds!)),
+      ];
+    }
+    final snapshot = ref.watch(dashboardRescueSnapshotProvider).asData?.value;
+    final options = treatmentAnimalOptions(
+      records: records ?? const [],
+      inTreatmentOrIntake: [...?snapshot?.of(RescueStage.treatment), ...?snapshot?.of(RescueStage.intake)],
+    );
+    final current = _treatment;
+    if (current != null && !options.any((o) => o.key == current.key)) options.insert(0, current);
+
+    final widgets = <Widget>[
+      const FieldLabel('Animal in treatment'),
+      DropdownButtonFormField<String?>(
+        initialValue: current?.key,
+        isExpanded: true,
+        decoration: const InputDecoration(border: UnderlineInputBorder()),
+        hint: Text('Select', style: GoogleFonts.zain(fontSize: 15, color: AppColors.textSecondary)),
+        items: [
+          DropdownMenuItem<String?>(value: null, child: Text('None (not for one animal)', style: _dropdownStyle)),
+          for (final o in options)
+            DropdownMenuItem<String?>(
+              value: o.key,
+              child: Text('${o.name} — ${o.intakeComplete ? 'intake complete' : 'in treatment'}',
+                  overflow: TextOverflow.ellipsis, style: _dropdownStyle),
+            ),
+        ],
+        onChanged: (v) => setState(() {
+          _treatment = options.where((o) => o.key == v).firstOrNull;
+          _expensesConfirmed = false;
+          _preview = null;
+        }),
+      ),
+    ];
+    if (current == null) {
+      _preview = null;
+      return widgets;
+    }
+
+    final caseA = ref.watch(caseDetailProvider(current.caseId));
+    final expensesA = ref.watch(expensesProvider(current.caseId));
+    final logsA = ref.watch(treatmentLogsProvider(current.caseId));
+    final err = caseA.error ?? expensesA.error ?? logsA.error;
+    if (err != null) {
+      _preview = null;
+      return [...widgets, Text('Could not load the treatment record: $err', style: GoogleFonts.zain(color: Colors.redAccent))];
+    }
+    final rescueCase = caseA.asData?.value;
+    if (rescueCase == null || !expensesA.hasValue || !logsA.hasValue) {
+      _preview = null;
+      return [...widgets, const LinearProgressIndicator(color: AppColors.textPrimary)];
+    }
+    final preview = previewAnimalNeeds(
+      rescueCase: rescueCase,
+      index: current.index,
+      expenses: expensesA.requireValue,
+      logs: logsA.requireValue,
+      intakeComplete: current.intakeComplete,
+    );
+    _preview = preview;
+    return [
+      ...widgets,
+      const SizedBox(height: 6),
+      Text(
+        current.intakeComplete
+            ? 'Intake complete: this campaign can be launched.'
+            : 'Still in treatment: save it as a draft now and launch it once intake is complete.',
+        style: GoogleFonts.zain(fontSize: 13, fontWeight: FontWeight.w700, color: AppColors.textPrimary),
+      ),
+      _needsCard(CampaignNeedsView(needs: preview)),
+      const SizedBox(height: 8),
+      CheckRow(
+        label: 'All treatment expenses for this animal are recorded',
+        bold: true,
+        value: _expensesConfirmed,
+        onChanged: (v) => setState(() => _expensesConfirmed = v),
+      ),
+      Text(
+        'Expenses can\'t be added to the campaign after it is launched. Launching takes every expense recorded '
+        'on the case by then; record any missing ones on the case first.',
+        style: note,
+      ),
+    ];
+  }
+
+  Widget _needsCard(Widget child) => Container(
+        margin: const EdgeInsets.only(top: 10),
+        padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+        decoration: BoxDecoration(
+          color: AppColors.surface,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: AppColors.textPrimary.withValues(alpha: 0.15)),
+        ),
+        child: child,
+      );
 
   /// What the animal record already says, so admins don't re-type it.
   List<Widget> _animalSummary(List<AnimalRecord>? all) {

@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:respawnd1/core/repos/animal_engagement_repository.dart';
 import 'package:respawnd1/app_theme.dart';
 import 'package:respawnd1/core/models/rescue/animal_characteristics.dart';
 import 'package:respawnd1/core/widgets/animal_basic_info_row.dart';
@@ -81,6 +82,11 @@ class _AnimalPageState extends ConsumerState<AnimalPage> {
   void initState() {
     super.initState();
     _favorited = widget.animal.favorited;
+    // Analytics: one profile view per person, animal and day.
+    AnimalEngagementRepository().recordView(
+      animalId: widget.animal.animalRecordId,
+      organizationId: widget.animal.organizationId,
+    );
   }
 
   void _showUnavailableDialog({required String title, required String message}) {
